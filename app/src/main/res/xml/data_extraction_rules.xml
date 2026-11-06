@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 骨架阶段不做备份排除，接入账号体系后再按安全要求收口 -->
+    </cloud-backup>
+</data-extraction-rules>

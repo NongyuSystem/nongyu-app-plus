@@ -1,0 +1,63 @@
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### IntelliJ IDEA ###
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### Android ###
+# 本地 SDK 路径与签名密钥，禁止入库
+local.properties
+*.jks
+*.keystore
+captures/
+# 构建产物
+app/build/
+*/build/
+.navigation/
+release/
+
+### 本机构建辅助 ###
+# 沙箱/本机自签调试证书（如需入库请改为纳入密钥管理，勿提交明文口令）
+!debug.keystore.template
+### IDE 本地配置 ###
+.idea/

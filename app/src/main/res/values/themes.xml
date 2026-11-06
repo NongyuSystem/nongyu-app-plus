@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用根主题：Compose 由代码决定外观，此处仅声明无 ActionBar 的宿主主题 -->
+    <style name="Theme.NongyuAppPlus" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

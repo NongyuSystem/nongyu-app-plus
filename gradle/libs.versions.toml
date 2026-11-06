@@ -1,0 +1,33 @@
+[versions]
+# 构建工具链：AGP 9.x 要求 Gradle 9.1+，本机 SDK 最高 android-36，故锁定 AGP 9.2.1 + Gradle 9.4.1
+agp = "9.2.1"
+kotlin = "2.3.0"
+
+# Compose BOM 选择说明：2026.09.00 的 runtime-saveable 要求 compileSdk 37，
+# 本机 Android SDK 仅有 android-36，实测构建失败，故锁定支持 compileSdk 36 的 2025.12.00。
+composeBom = "2025.12.00"
+coreKtx = "1.17.0"
+activityCompose = "1.11.0"
+lifecycle = "2.10.0"
+
+junit = "4.13.2"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+
+# Compose 依赖统一由 BOM 约束版本，下方条目不再单独指定版本
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+# AGP 9 起内置 Kotlin 支持，无需再应用 org.jetbrains.kotlin.android，仅需 Compose 编译器插件
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
