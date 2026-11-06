@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<!--
+  农小屿 · 静态帧 / 三态概念原型 v2（零依赖、仅用于讨论，不是实现代码）
+  状态：静态球 / 长按（加速 + 全屏 dim）/ 点按（扩开覆盖导航栏 → 输入框）
+  依据：GitHub issue #10 维护者 2026-11-06 定义；色值参考 design-system/web-site/MASTER.md
+
+  v2 按维护者 5 条反馈迭代：
+  1 删掉左上白色高光椭圆 → 体积感改由「球面明暗渐变（左上柔光 + 边缘暗角）」承担
+  2 外发光改为紧贴球缘的绿→透明径向渐变，去掉「先一圈白间隔再变绿」的逻辑错误
+  3 去掉球体边缘那圈白色圆环描边
+  4 绿/黄不再用规则椭圆描边，改用 fBm 分形噪声 + 域扭曲（feTurbulence +
+    feDisplacementMap）把同心色带打成星云丝缕：基础仍是环形/绕心（有序），
+    边缘被噪声扰动（乱）→「宇宙星云，乱而有序」。到 Kotlin 阶段对应
+    AGSL fragment shader 里的 fbm(uv) + domain warping，与 #3 调研 R2 同源。
+  5 删掉输入框左侧圆点；输入框展开动画仅作概念示意（加位移+文字淡入），
+    真正的形变动画留到 Compose 实现阶段。
+
+  注：本文件的「高级算法」是浏览器 SVG 滤镜实现，仅用于视觉对齐；
+  Android 侧真实渲染方案见 docs/research/compose-ai-orb-button.md（R1/R2）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>农小屿 · 概念原型 v2</title>
+<style>
+  :root{
+    --brand:#0A7C59; --brand-soft:#7FBF95; --yellow:#E9C46A;
+    --bg:#F7FAF8; --surface:#FFFFFF; --text:#0F1A14; --text2:#4A564F;
+    --outline:#CFE3DA;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9efeb;font-family:"Noto Sans SC","PingFang SC",system-ui,sans-serif;
+       display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px;color:var(--text)}
+  h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.5px}
+  .hint{font-size:12px;color:#5c6b62;margin:0}
+  .controls{display:flex;gap:8px}
+  .controls button{border:1px solid var(--outline);background:#fff;color:var(--text);
+      padding:7px 16px;border-radius:999px;font-size:13px;cursor:pointer;transition:.2s}
+  .controls button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+  /* 手机屏幕 */
+  .phone{width:360px;height:720px;background:var(--bg);border-radius:36px;position:relative;
+         overflow:hidden;box-shadow:0 18px 50px rgba(15,26,20,.18);border:1px solid #dfe9e3}
+  .screen-label{position:absolute;top:28px;left:0;right:0;text-align:center;font-size:12px;color:#8a9a90}
+
+  /* 全屏 dim（第 2、3 激活态） */
+  .dim{position:absolute;inset:0;background:rgba(10,20,15,.55);opacity:0;
+       transition:opacity .35s ease;pointer-events:none;z-index:5}
+  .phone.longpress .dim,.phone.tap .dim{opacity:1}
+
+  /* 底栏：贴底、2+2、中间留空给圆 */
+  .navbar{position:absolute;left:12px;right:12px;bottom:18px;height:64px;background:var(--surface);
+      border:1px solid var(--outline);border-radius:22px;display:flex;align-items:center;
+      padding:0 6px;box-shadow:0 6px 18px rgba(15,26,20,.07);z-index:2;
+      transition:opacity .3s ease,transform .3s ease}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+      font-size:10px;color:var(--text2);transition:opacity .3s ease}
+  .nav-item i{width:20px;height:20px;border:2px solid currentColor;border-radius:6px;display:block;opacity:.75}
+  .nav-item:nth-child(2) i{border-radius:50%}
+  .nav-item:nth-child(4) i{border-radius:4px 4px 10px 10px}
+  .nav-gap{width:96px;flex:none}
+  .phone.tap .navbar{opacity:0;transform:translateY(12px);pointer-events:none}
+
+  /* 正中凸起的水晶球（外发光已移入 SVG，紧贴球缘） */
+  .orb-wrap{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);
+      width:140px;height:140px;z-index:6;transition:all .45s cubic-bezier(.22,1,.36,1)}
+  .phone.longpress .orb-wrap{transform:translateX(-50%) scale(1.08)}
+  .orb{width:100%;height:100%;border-radius:50%;position:relative;overflow:hidden;
+       box-shadow:0 6px 22px rgba(10,124,89,.14)}
+  .orb svg{width:100%;height:100%;display:block}
+  .swirl{transform-origin:160px 160px;animation:spin 26s linear infinite}
+  .phone.longpress .swirl{animation-duration:3s}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 点按态：圆球扩开为输入框，覆盖原导航栏（无左侧圆点） */
+  .input-bar{position:absolute;left:12px;right:12px;bottom:18px;height:64px;z-index:7;
+      background:var(--surface);border:1px solid var(--outline);border-radius:22px;
+      display:flex;align-items:center;padding:0 20px;
+      opacity:0;transform:translateY(56px) scale(.35);border-radius:66px;pointer-events:none;
+      transition:opacity .3s ease,transform .45s cubic-bezier(.22,1,.36,1),border-radius .45s ease}
+  .phone.tap .input-bar{opacity:1;transform:translateY(0) scale(1);border-radius:22px;pointer-events:auto}
+  .input-bar span{color:#93a39a;font-size:13px;opacity:0;transition:opacity .25s ease .2s}
+  .phone.tap .input-bar span{opacity:1}
+  .phone.tap .orb-wrap{opacity:0;transform:translateX(-50%) scale(.4)}
+
+  .legend{font-size:11px;color:#6b7b72;max-width:360px;line-height:1.7}
+  .legend b{color:var(--text)}
+</style>
+</head>
+<body>
+  <h1>农小屿 · 概念原型 v2（静态帧 / 三态）</h1>
+  <p class="hint">零依赖讨论用稿 · 不修改工程源码 · 点下方按钮切换状态</p>
+
+  <div class="controls">
+    <button id="b0" class="on" onclick="setState('')">静态</button>
+    <button id="b1" onclick="setState('longpress')">长按</button>
+    <button id="b2" onclick="setState('tap')">点按</button>
+  </div>
+
+  <div class="phone" id="phone">
+    <div class="screen-label">白绿主色 · 四页留空</div>
+    <div class="dim"></div>
+
+    <div class="navbar">
+      <div class="nav-item"><i></i>全部</div>
+      <div class="nav-item"><i></i>课表</div>
+      <div class="nav-gap"></div>
+      <div class="nav-item"><i></i>探索</div>
+      <div class="nav-item"><i></i>个人</div>
+    </div>
+
+    <div class="input-bar">
+      <span>输入想问农小屿的问题…</span>
+    </div>
+
+    <div class="orb-wrap">
+      <div class="orb">
+        <svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- 外发光：从球体边缘(r=120)直接开始绿→透明，无白色间隔、无白环 -->
+            <radialGradient id="glow">
+              <stop offset="0.78" stop-color="#0A7C59" stop-opacity="0"/>
+              <stop offset="0.805" stop-color="#0A7C59" stop-opacity=".42"/>
+              <stop offset="0.88" stop-color="#4CA37A" stop-opacity=".18"/>
+              <stop offset="1" stop-color="#0A7C59" stop-opacity="0"/>
+            </radialGradient>
+            <!-- 白球底：左上偏亮、右下边缘偏暗，柔和高光不再画成椭圆 -->
+            <radialGradient id="sphere" cx="35%" cy="29%" r="80%">
+              <stop offset="0%" stop-color="#FFFFFF"/>
+              <stop offset="62%" stop-color="#FDFEFD"/>
+              <stop offset="88%" stop-color="#EAF4EE"/>
+              <stop offset="100%" stop-color="#CFE3D7"/>
+            </radialGradient>
+            <!-- 星云母版：同心环（有序）→ 交给噪声域扭曲打散（乱） -->
+            <radialGradient id="greenCloud">
+              <stop offset="0%" stop-color="#0A7C59" stop-opacity="0"/>
+              <stop offset="24%" stop-color="#0A7C59" stop-opacity="0"/>
+              <stop offset="44%" stop-color="#0F8C64" stop-opacity=".66"/>
+              <stop offset="60%" stop-color="#0A7C59" stop-opacity=".28"/>
+              <stop offset="76%" stop-color="#3E9C74" stop-opacity=".58"/>
+              <stop offset="100%" stop-color="#0A7C59" stop-opacity=".10"/>
+            </radialGradient>
+            <!-- 黄色：更靠外、面积更小、透明度更低 → 绿多黄少 -->
+            <radialGradient id="yellowCloud">
+              <stop offset="0%" stop-color="#E9C46A" stop-opacity="0"/>
+              <stop offset="56%" stop-color="#E9C46A" stop-opacity="0"/>
+              <stop offset="70%" stop-color="#F0D089" stop-opacity=".46"/>
+              <stop offset="84%" stop-color="#E9C46A" stop-opacity=".20"/>
+              <stop offset="100%" stop-color="#E9C46A" stop-opacity="0"/>
+            </radialGradient>
+            <!-- 中心柔白：保证主体白色，彩色从白中透出 -->
+            <radialGradient id="coreWhite">
+              <stop offset="0%" stop-color="#FFFFFF" stop-opacity=".94"/>
+              <stop offset="34%" stop-color="#FFFFFF" stop-opacity=".82"/>
+              <stop offset="64%" stop-color="#FFFFFF" stop-opacity=".42"/>
+              <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+            </radialGradient>
+            <!-- 球面体积：左上柔光 + 边缘暗角，替代白色高光椭圆 -->
+            <radialGradient id="volume" cx="35%" cy="28%" r="82%">
+              <stop offset="0%" stop-color="#FFFFFF" stop-opacity=".50"/>
+              <stop offset="44%" stop-color="#FFFFFF" stop-opacity="0"/>
+              <stop offset="80%" stop-color="#0A7C59" stop-opacity="0"/>
+              <stop offset="100%" stop-color="#255A43" stop-opacity=".22"/>
+            </radialGradient>
+
+            <!-- 高级算法：fBm 分形噪声 + 域扭曲（domain warping） -->
+            <filter id="nebula" x="-40%" y="-40%" width="180%" height="180%"
+                    color-interpolation-filters="sRGB">
+              <feTurbulence type="fractalNoise" baseFrequency="0.005 0.008"
+                            numOctaves="5" seed="11" result="n"/>
+              <feDisplacementMap in="SourceGraphic" in2="n" scale="96"
+                                 xChannelSelector="R" yChannelSelector="G"/>
+              <feGaussianBlur stdDeviation="5"/>
+            </filter>
+            <filter id="nebulaY" x="-40%" y="-40%" width="180%" height="180%"
+                    color-interpolation-filters="sRGB">
+              <feTurbulence type="fractalNoise" baseFrequency="0.007 0.011"
+                            numOctaves="4" seed="29" result="n"/>
+              <feDisplacementMap in="SourceGraphic" in2="n" scale="72"
+                                 xChannelSelector="R" yChannelSelector="G"/>
+              <feGaussianBlur stdDeviation="6"/>
+            </filter>
+
+            <clipPath id="clip"><circle cx="160" cy="160" r="120"/></clipPath>
+          </defs>
+
+          <!-- 紧贴球缘的绿→透明外发光（球体下方，球内部分被白球盖住） -->
+          <circle cx="160" cy="160" r="150" fill="url(#glow)"/>
+          <!-- 白球 -->
+          <circle cx="160" cy="160" r="120" fill="url(#sphere)"/>
+
+          <g clip-path="url(#clip)">
+            <!-- 绿/黄星云：绕心缓慢旋转；噪声让色带呈丝缕状而非规则椭圆 -->
+            <g class="swirl">
+              <rect x="0" y="0" width="320" height="320"
+                    fill="url(#greenCloud)" filter="url(#nebula)" opacity=".92"/>
+              <rect x="0" y="0" width="320" height="320"
+                    fill="url(#yellowCloud)" filter="url(#nebulaY)" opacity=".78"/>
+            </g>
+            <!-- 中心留白 + 球面体积 -->
+            <circle cx="160" cy="160" r="120" fill="url(#coreWhite)"/>
+            <circle cx="160" cy="160" r="120" fill="url(#volume)"/>
+          </g>
+          <!-- 不再画白色描边圆环、不再画左上白色高光椭圆 -->
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>静态</b>：白主体水晶球，绿多黄少，星云丝缕沿圆周成环（乱而有序）、绕心缓慢旋转。<br>
+    <b>长按</b>：黄绿流动瞬间加速（26s→3s）、球体微放大、后景<b>全屏 dim</b>、激活态最高层。<br>
+    <b>点按</b>：圆球扩开覆盖原导航栏 → 四个按钮淡出 → 变形为输入框（原导航栏暂时隐藏）；左侧圆点已删。<br>
+    <b>待办</b>：输入框形变动画按维护者意见留到 Compose 实现阶段；语音转文字 / 后端 agent 不在本原型范围内。<br>
+    <b>算法</b>：fBm 分形噪声 + 域扭曲（SVG feTurbulence + feDisplacementMap）；Kotlin 阶段对应 AGSL shader 的 fbm(uv) + domain warping。
+  </div>
+
+<script>
+  function setState(s){
+    var p=document.getElementById('phone');
+    p.className='phone'+(s?' '+s:'');
+    ['b0','b1','b2'].forEach(function(id){document.getElementById(id).className='';});
+    document.getElementById(s===''?'b0':(s==='longpress'?'b1':'b2')).className='on';
+  }
+</script>
+</body>
+</html>

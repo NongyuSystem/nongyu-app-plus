@@ -11,8 +11,10 @@ android {
         applicationId = "com.nongyu.appplus"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
+        // v3：修复 AGSL 黑底合成、长按不加速 / 松手不恢复、球体过大。
+        versionCode = 3
+        versionName = "0.0.2test"
     }
 
     buildTypes {
