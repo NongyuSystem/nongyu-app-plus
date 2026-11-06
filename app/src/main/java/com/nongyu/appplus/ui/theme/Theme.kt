@@ -1,43 +1,153 @@
 package com.nongyu.appplus.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+
+/**
+ * 农屿主题层（ADR-0002）。
+ *
+ * `MaterialTheme.colorScheme` 固定 48 个槽位、装不下品牌浅色 / 玻璃 / AI 圆专色，
+ * 因此自建 [NongyuColors] 经 [LocalNongyuColors] 下发，作为配色的唯一真源；
+ * `MaterialTheme` 只保留一层投影，供 Material3 组件取色。
+ *
+ * 本期只提供白绿一套、固定浅色；切换能力靠「换一份 [NongyuColors] 对象」实现，
+ * 数据源接口先用 mock（[NongyuColors.Green]），后期数据库层就绪后替换实现即可，
+ * Composable 层零改动。
+ */
+
+/** 分组色板：按用途命名，不按色值命名。 */
+@Immutable
+data class NongyuColors(
+    /** 品牌色族 */
+    val brand: BrandColors,
+    /** 表面与文字 */
+    val surface: SurfaceColors,
+    /** 农小屿星云球专用色 */
+    val aiOrb: AiOrbColors,
+    /** 底栏 */
+    val navBar: NavBarColors,
+) {
+    @Immutable
+    data class BrandColors(
+        val colorBrand: Color,
+        val colorBrandMuted: Color,
+        val colorOnBrand: Color,
+    )
+
+    @Immutable
+    data class SurfaceColors(
+        val colorBackground: Color,
+        val colorCard: Color,
+        val colorText: Color,
+        val colorTextSecondary: Color,
+        val colorOutline: Color,
+    )
+
+    @Immutable
+    data class AiOrbColors(
+        /** 球体底色（主体白） */
+        val colorCore: Color,
+        /** 绿色（较多） */
+        val colorNebulaGreen: Color,
+        /** 黄色（少量） */
+        val colorNebulaYellow: Color,
+        /** 球面边缘暗角，用于表达体积感 */
+        val colorRimShade: Color,
+        /** 紧贴球缘的绿→透明外发光 */
+        val colorGlow: Color,
+    )
+
+    @Immutable
+    data class NavBarColors(
+        val colorContainer: Color,
+        val colorItem: Color,
+        val colorIndicator: Color,
+    )
+
+    companion object {
+        /** 白绿一套，色值取自 design-system/web-site/MASTER.md。 */
+        val Green = NongyuColors(
+            brand = BrandColors(
+                colorBrand = Color(0xFF0A7C59),
+                colorBrandMuted = Color(0xFFD4E9DF),
+                colorOnBrand = Color(0xFFFFFFFF),
+            ),
+            surface = SurfaceColors(
+                colorBackground = Color(0xFFF7FAF8),
+                colorCard = Color(0xFFFFFFFF),
+                colorText = Color(0xFF0F1A14),
+                colorTextSecondary = Color(0xFF4A564F),
+                colorOutline = Color(0xFFCFE3DA),
+            ),
+            aiOrb = AiOrbColors(
+                colorCore = Color(0xFFFFFFFF),
+                colorNebulaGreen = Color(0xFF0A7C59),
+                colorNebulaYellow = Color(0xFFE9C46A),
+                colorRimShade = Color(0xFF255A43),
+                colorGlow = Color(0xFF0A7C59),
+            ),
+            navBar = NavBarColors(
+                colorContainer = Color(0xFFFFFFFF),
+                colorItem = Color(0xFF4A564F),
+                colorIndicator = Color(0xFF0A7C59),
+            ),
+        )
+    }
+}
+
+/**
+ * 当前色板。只失效读取它的节点（[compositionLocalOf]），
+ * 有安全默认值 [NongyuColors.Green]，@Preview 不 Provide 也能渲染。
+ */
+val LocalNongyuColors = compositionLocalOf { NongyuColors.Green }
+
+/** 组件侧统一从这里取色，组件代码不直接写十六进制。 */
+object NongyuTheme {
+    val colors: NongyuColors
+        @Composable get() = LocalNongyuColors.current
+}
+
+/**
+ * 由色板派生出 Material3 的 ColorScheme —— 只是**投影**，不是真源。
+ * M3 组件默认只读它，自定义色（星云、玻璃等）必须手动传给组件参数。
+ */
+private fun NongyuColors.toColorScheme() = lightColorScheme(
+    primary = brand.colorBrand,
+    onPrimary = brand.colorOnBrand,
+    primaryContainer = brand.colorBrandMuted,
+    background = surface.colorBackground,
+    onBackground = surface.colorText,
+    surface = surface.colorCard,
+    onSurface = surface.colorText,
+    surfaceVariant = brand.colorBrandMuted,
+    onSurfaceVariant = surface.colorTextSecondary,
+    outline = surface.colorOutline,
+)
 
 /**
  * 应用主题。
  *
- * 当前使用 Material 3 默认配色，仅作为骨架占位：
- * 设计稿确定后，此处替换为农屿自有色板与字体体系（颜色、字号、圆角等 token）。
+ * 本期固定浅色：移除 `darkTheme` 参数并关闭动态取色，
+ * 避免系统暗色 / Android 12+ 动态色把白绿品牌色冲掉（ADR-0002）。
+ * 暗色以后作为另一份 [NongyuColors] 加入即可。
  */
-private val LightColors = lightColorScheme()
-private val DarkColors = darkColorScheme()
-
 @Composable
 fun NongyuAppPlusTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Android 12+ 支持动态取色，骨架阶段默认关闭，避免与未来农屿品牌色冲突
-    dynamicColor: Boolean = false,
+    colors: NongyuColors = NongyuColors.Green,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColors
-        else -> LightColors
+    val colorScheme = remember(colors) { colors.toColorScheme() }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalNongyuColors provides colors,
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            content = content,
+        )
     }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
 }
