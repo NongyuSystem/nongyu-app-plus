@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
@@ -174,7 +173,8 @@ fun MainShell() {
                 .size(120.dp)
                 .scale(orbScale)
                 .alpha(orbAlpha)
-                .clip(CircleShape)
+                // 不 clip(CircleShape)：星云球边缘在渲染层已羽化到透明，
+                // 硬裁剪会把软边切成 3D 球的硬圆轮廓。
                 .pointerInput(Unit) {
                     // longPressed 记录本轮手势是否已判为长按，避免长按后又误触发 onTap。
                     var longPressed = false

@@ -148,17 +148,20 @@ fun NongyuOrb(
         val radius = min(size.width, size.height) / 2f
         val center = Offset(size.width / 2f, size.height / 2f)
 
-        // 白球底：主体白，左上柔光 + 右下边缘暗角表达体积感
+        // 白球底：光从**中心**打（不再是左上高光），无暗角、无阴影。
+        // 边缘 alpha 渐隐到全透明 → 「逐渐淡化」的羽化边界，不是硬边 3D 球。
+        // 参考：Operit SiriBall 的「中心明亮核心 + 整体柔和外边界」、
+        // Mirage 的 softness/falloff 思路；本实现仍是零依赖 Canvas。
         drawCircle(
             brush = Brush.radialGradient(
                 colorStops = arrayOf(
-                    0.0f to Color.White,
-                    0.62f to colors.colorCore,
-                    0.88f to Color(0xFFF2F8F4),
-                    1.0f to Color(0xFFDCEDE3),
+                    0.00f to Color.White,
+                    0.55f to colors.colorCore,
+                    0.80f to Color.White.copy(alpha = 0.55f),
+                    1.00f to Color.Transparent,
                 ),
-                center = Offset(center.x - radius * 0.3f, center.y - radius * 0.42f),
-                radius = radius * 1.05f,
+                center = center,
+                radius = radius,
             ),
             radius = radius,
             center = center,
@@ -255,18 +258,24 @@ private fun DrawScope.drawNebulaFallback(
     drawSphereFinish(radius, center, colors)
 }
 
-/** 中心留白（减弱，避免把星云全洗白）+ 球面体积暗角。 */
+/**
+ * 收尾层：光从**中心**打，边缘逐渐羽化到透明。
+ * 不画左上高光、不画边缘暗角、不画任何阴影 —— 避免 3D 球感。
+ * 参考同类实现：Operit SiriBall「中心明亮核心 + 整体柔和外边界」、
+ * Mirage 的 softness/falloff 参数。
+ */
 private fun DrawScope.drawSphereFinish(
     radius: Float,
     center: Offset,
     colors: com.nongyu.appplus.ui.theme.NongyuColors.AiOrbColors,
 ) {
+    // 中心柔和亮核（不偏移、不模拟光源方向）
     drawCircle(
         brush = Brush.radialGradient(
             colorStops = arrayOf(
-                0.00f to Color.White.copy(alpha = 0.72f),
-                0.34f to Color.White.copy(alpha = 0.48f),
-                0.64f to Color.White.copy(alpha = 0.16f),
+                0.00f to Color.White.copy(alpha = 0.60f),
+                0.38f to Color.White.copy(alpha = 0.24f),
+                0.72f to Color.Transparent,
                 1.00f to Color.Transparent,
             ),
             center = center,
@@ -275,16 +284,18 @@ private fun DrawScope.drawSphereFinish(
         radius = radius,
         center = center,
     )
+    // 边缘羽化：0.72→1.0 的环带由「极淡的绿」渐隐到全透明，
+    // 形成「逐渐淡化」的软边，而不是一圈清晰硬边圆。
     drawCircle(
         brush = Brush.radialGradient(
             colorStops = arrayOf(
-                0.00f to Color.White.copy(alpha = 0.40f),
-                0.44f to Color.Transparent,
-                0.80f to Color.Transparent,
-                1.00f to colors.colorRimShade.copy(alpha = 0.15f),
+                0.00f to Color.Transparent,
+                0.72f to Color.Transparent,
+                0.86f to colors.colorGlow.copy(alpha = 0.10f),
+                1.00f to Color.Transparent,
             ),
-            center = Offset(center.x - radius * 0.3f, center.y - radius * 0.42f),
-            radius = radius * 1.05f,
+            center = center,
+            radius = radius,
         ),
         radius = radius,
         center = center,

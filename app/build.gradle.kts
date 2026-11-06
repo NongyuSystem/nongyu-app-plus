@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v3：修复 AGSL 黑底合成、长按不加速 / 松手不恢复、球体过大。
-        versionCode = 3
-        versionName = "0.0.2test"
+        // v4：光从中心打、去掉暗角/阴影/左上高光、边缘羽化渐隐、去掉 clip(CircleShape)。
+        versionCode = 4
+        versionName = "0.0.3test"
     }
 
     buildTypes {
