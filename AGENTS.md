@@ -16,6 +16,20 @@
 
 Windows 下用 `gradlew.bat`。详细版本约束与踩坑见 `README.md`（尤其 Compose BOM 版本锁定的原因）。
 
+### 打包发布流程（强制）
+
+**每次打包都必须同时做三件事，缺一不可**：
+
+1. **递增版本号**：`app/build.gradle.kts` 的 `versionCode` 与 `versionName` 都要更新（`versionCode` 必须严格递增才能覆盖安装）。
+2. **提交到 GitHub**：按全局 AGENTS.md 的提交规范 `git add .` + `git commit`，然后推送。
+   - 本机 `git push` 可能被重置（`Recv failure: Connection was reset`）。此时用 `gh api` 走 GitHub Git Data API：
+     建 blob → create tree（`base_tree` = 远端 HEAD 的 tree sha）→ create commit（`parents` = 远端 HEAD）→ PATCH `git/refs/heads/master`。
+     文件用 `content=base64` + `encoding=base64`，必须经 `--input JSON 文件` 提交（`-f` 会把内容当字面量）。
+   - 可复现命令见 `docs/research/build-0.0.1test.md`。
+3. **建 GitHub Release 并上传 APK**：`gh release create v<versionName> app/build/outputs/apk/debug/app-debug.apk --target master`，tag 用 `v<versionName>`。
+
+版本号、Release tag、APK 三者必须一一对应。
+
 ## Agent skills
 
 ### Issue tracker
