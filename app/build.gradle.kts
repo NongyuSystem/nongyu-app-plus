@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v6：否决 Mirage 移植版（太丑），回退到自研 AGSL 星云球，继续在自研版上优化。
-        versionCode = 6
-        versionName = "0.0.5test"
+        // v9：绿色面积收窄、黄色保底可见、双层噪声锐化增强晕染丝缕（本次优化收口版）。
+        versionCode = 9
+        versionName = "0.0.8test"
     }
 
     buildTypes {
