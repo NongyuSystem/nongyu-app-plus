@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v4：光从中心打、去掉暗角/阴影/左上高光、边缘羽化渐隐、去掉 clip(CircleShape)。
-        versionCode = 4
-        versionName = "0.0.3test"
+        // v5：新增「Mirage 移植版」星云渲染对比（顶部按钮切换自研/移植版），保留 Apache-2.0 署名。
+        versionCode = 5
+        versionName = "0.0.4test"
     }
 
     buildTypes {
