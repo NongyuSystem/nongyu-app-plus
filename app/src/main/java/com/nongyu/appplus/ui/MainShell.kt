@@ -45,11 +45,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nongyu.appplus.ui.ai.MirageOrb
 import com.nongyu.appplus.ui.ai.NongyuOrb
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 import com.nongyu.appplus.ui.theme.NongyuTheme
-import androidx.compose.material3.TextButton
 
 /**
  * 主框架与导航壳（概念验证版 0.0.1test）。
@@ -75,8 +73,6 @@ fun MainShell() {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
-    // 0.0.4test：对比两种星云渲染（自研 AGSL vs 移植自 Mirage 的 MeshGradient）
-    var useMirage by rememberSaveable { mutableStateOf(true) }
 
     val active = mode != OrbMode.Idle
 
@@ -134,18 +130,6 @@ fun MainShell() {
         // 四个页面：全白留空
         Box(modifier = Modifier.fillMaxSize()) {
             // 仅作占位，无任何业务内容
-        }
-
-        // 0.0.4test 对比开关：同一台设备上切换「自研」与「Mirage 移植」两种星云渲染
-        TextButton(
-            onClick = { useMirage = !useMirage },
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 40.dp),
-        ) {
-            Text(
-                text = if (useMirage) "星云：Mirage 移植版（点我切自研）" else "星云：自研版（点我切 Mirage）",
-                fontSize = 11.sp,
-                color = colors.surface.colorTextSecondary,
-            )
         }
 
         // 全屏 dim：激活态时压暗后景
@@ -215,17 +199,10 @@ fun MainShell() {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (useMirage) {
-                MirageOrb(
-                    diameter = 120.dp,
-                    speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
-                )
-            } else {
-                NongyuOrb(
-                    diameter = 120.dp,
-                    speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
-                )
-            }
+            NongyuOrb(
+                diameter = 120.dp,
+                speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
+            )
         }
 
         // 点按态输入框：圆球扩开覆盖原导航栏后变形而来；无左侧圆点

@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v5：新增「Mirage 移植版」星云渲染对比（顶部按钮切换自研/移植版），保留 Apache-2.0 署名。
-        versionCode = 5
-        versionName = "0.0.4test"
+        // v6：否决 Mirage 移植版（太丑），回退到自研 AGSL 星云球，继续在自研版上优化。
+        versionCode = 6
+        versionName = "0.0.5test"
     }
 
     buildTypes {

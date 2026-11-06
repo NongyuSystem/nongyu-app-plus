@@ -57,9 +57,12 @@ OrbMotion / SiriBall 都把球的状态显式建模（`Idle / Pressing / Loading
 | 维护 | 自己维护 shader 字符串（无编译期校验） | 上游维护，Apache-2.0 |
 | 与本仓约束 | 符合 | **与「零新依赖」冲突，需维护者拍板** |
 
-**待决策（不代拍板）**：是否把 Mirage 的 `MeshGradient` / `Swirl` / `GrainGradient` shader 源码
-（Apache-2.0，保留 NOTICE）移植进 `ui/ai/shaders/`，替代当前手写 AGSL？
-好处是参数化与上游维护；代价是要处理 API 33 gate、保留许可声明，且可能偏离「零依赖」原则。
+**决策结果（2026-11-06，维护者拍板）**：**否决引入/移植 Mirage**。
+0.0.4test 曾移植其 `MeshGradient` 算法主体（流动色斑 + 域扭曲 + swirl）做了一版对比，
+真机/蓝叠观感「太丑」——绿白糊成一团、无明显黄色、无星云丝缕。
+0.0.5test 已回退到自研 AGSL 星云球，继续在自研版上优化。
+结论：第三方 shader 库可作**思路参考**（尤其 softness/falloff 的边缘羽化、状态机写法），
+但不直接替换本仓渲染实现；`零新依赖` 约束继续成立。
 
 ## 5. 参考资料
 
