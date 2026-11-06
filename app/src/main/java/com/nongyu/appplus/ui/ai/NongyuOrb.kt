@@ -75,28 +75,38 @@ half4 main(float2 fragCoord) {
     float c = cos(t), s = sin(t);
     float2 ruv = float2(uv.x*c - uv.y*s, uv.x*s + uv.y*c);
 
-    // 域扭曲：把同心色带打散成星云丝缕（乱）
-    float2 q = float2(fbm(ruv*3.0 + t*0.3),
-                      fbm(ruv*3.0 + float2(5.2, 1.3) + t*0.3));
-    float2 w = ruv + 0.45*(q - 0.5);
-    float n = fbm(w*4.0 + t*0.2);
+    // 域扭曲：把同心色带打散成星云丝缕（乱）。加大扰动幅度，制造明显晕染。
+    float2 q = float2(fbm(ruv*2.6 + t*0.3),
+                      fbm(ruv*2.6 + float2(5.2, 1.3) + t*0.3));
+    float2 w = ruv + 0.75*(q - 0.5);
+    float n  = fbm(w*3.2 + t*0.2);
+    float n2 = fbm(w*6.5 - t*0.15 + float2(2.7, 8.1));  // 第二层更细的丝缕
 
-    // 环带：以半径为主，颜色方向为圆，不是散点
-    float ring  = exp(-pow((r - 0.55)*3.2, 2.0));
-    float ring2 = exp(-pow((r - 0.78)*4.5, 2.0));
-    float density = ring*(0.55 + 0.75*n) + ring2*0.35*n;
+    // 角向周期：让颜色沿圆周分段（方向为圆），段间留白 → 绿色面积大幅缩小
+    float ang = atan(ruv.y, ruv.x);
+    float bands = 0.5 + 0.5*sin(ang*3.0 + n*4.0 + t*0.6);
+    bands = smoothstep(0.42, 0.78, bands);          // 只保留约三分之一的圆周有绿色
+    // 晕染丝缕：用两层噪声相乘并做锐化，制造「细丝 + 大片留白」的强对比
+    float fil = smoothstep(0.34, 0.66, n) * smoothstep(0.30, 0.62, n2);
+    float filaments = pow(fil, 1.6) * (0.65 + 0.7*n2);
 
     half3 green  = half3(0.039, 0.486, 0.349);   // #0A7C59
     half3 yellow = half3(0.914, 0.769, 0.416);   // #E9C46A
-    // 少量黄色：只出现在噪声高值 + 偏外的窄带
-    float yAmt = smoothstep(0.62, 0.90, n) * ring2 * 0.55;
+
+    // 黄色：独立角向相位 + **保底可见量**。
+    // 之前用两个高阈值 smoothstep 相乘导致几乎恒为 0（黄色消失），
+    // 现改为「一个较宽的角向带 + 固定下限」，保证任何时刻都有一小段黄。
+    float yPhase = 0.5 + 0.5*sin(ang*2.0 - t*0.5 + 2.1 + n*2.0);
+    float yBand = smoothstep(0.45, 0.75, yPhase);   // 阈值放宽
+    yBand = clamp(0.35 + 0.65*yBand, 0.0, 1.0);     // 保底 0.35，绝不归零
+    float yAmt = clamp(yBand * 0.9, 0.0, 0.9);
+
     half3 col = mix(green, yellow, yAmt);
 
-    // 关键：alpha = 星云浓度，背景透明。
-    //  centre 与边缘都渐隐到全透明，让白球透出来，绝不铺黑底。
-    float a = clamp(density * (0.5 + 0.9*n), 0.0, 0.82);
-    a *= smoothstep(0.05, 0.30, r);          // 中心留白
-    a *= 1.0 - smoothstep(0.86, 1.0, r);     // 边缘渐隐，不发黑
+    // alpha：绿色「角向分段 × 晕染丝缕」+ 黄色独立带，白底大面积透出。
+    float a = clamp(bands * filaments * 0.85 + yBand * 0.42, 0.0, 0.78);
+    a *= smoothstep(0.10, 0.32, r);          // 中心留白
+    a *= 1.0 - smoothstep(0.82, 1.0, r);     // 边缘渐隐，不发黑
     return half4(col, a);
 }
 """
@@ -211,27 +221,31 @@ private fun DrawScope.drawNebulaFallback(
     val g = colors.colorNebulaGreen
     val y = colors.colorNebulaYellow
     rotate(degrees = phase * 42f, pivot = center) {
+        // 绿色：分成几段窄色带，段间留透明间隔 → 减小绿色面积、产生「晕染丝缕」
         drawCircle(
             brush = Brush.sweepGradient(
                 colorStops = arrayOf(
-                    0.00f to g.copy(alpha = 0.04f),
-                    0.18f to g.copy(alpha = 0.55f),
-                    0.38f to g.copy(alpha = 0.16f),
-                    0.58f to g.copy(alpha = 0.50f),
-                    0.80f to g.copy(alpha = 0.22f),
-                    1.00f to g.copy(alpha = 0.04f),
+                    0.00f to Color.Transparent,
+                    0.14f to g.copy(alpha = 0.42f),
+                    0.26f to Color.Transparent,
+                    0.40f to g.copy(alpha = 0.46f),
+                    0.52f to Color.Transparent,
+                    0.68f to g.copy(alpha = 0.40f),
+                    0.80f to Color.Transparent,
+                    1.00f to Color.Transparent,
                 ),
                 center = center,
             ),
             radius = radius,
             center = center,
         )
+        // 绿色细环（只占中圈一小段半径，不铺满）
         drawCircle(
             brush = Brush.radialGradient(
                 colorStops = arrayOf(
-                    0.52f to Color.Transparent,
-                    0.70f to y.copy(alpha = 0.34f),
-                    0.84f to y.copy(alpha = 0.12f),
+                    0.34f to Color.Transparent,
+                    0.50f to g.copy(alpha = 0.32f),
+                    0.62f to Color.Transparent,
                     1.00f to Color.Transparent,
                 ),
                 center = center,
@@ -240,13 +254,32 @@ private fun DrawScope.drawNebulaFallback(
             radius = radius,
             center = center,
         )
+    }
+    // 黄色：另一套相位（反向旋转）独立成环，与绿色错开，保证「少量但看得见」
+    rotate(degrees = -phase * 30f + 120f, pivot = center) {
+        drawCircle(
+            brush = Brush.sweepGradient(
+                colorStops = arrayOf(
+                    0.00f to y.copy(alpha = 0.22f),
+                    0.20f to y.copy(alpha = 0.72f),
+                    0.34f to y.copy(alpha = 0.18f),
+                    0.62f to y.copy(alpha = 0.62f),
+                    0.76f to y.copy(alpha = 0.20f),
+                    1.00f to y.copy(alpha = 0.22f),
+                ),
+                center = center,
+            ),
+            radius = radius,
+            center = center,
+        )
         drawCircle(
             brush = Brush.radialGradient(
                 colorStops = arrayOf(
-                    0.30f to Color.Transparent,
-                    0.50f to g.copy(alpha = 0.38f),
-                    0.66f to g.copy(alpha = 0.10f),
-                    0.80f to Color.Transparent,
+                    0.00f to Color.Transparent,
+                    0.60f to Color.Transparent,
+                    0.76f to y.copy(alpha = 0.42f),
+                    0.90f to y.copy(alpha = 0.18f),
+                    1.00f to Color.Transparent,
                 ),
                 center = center,
                 radius = radius,
