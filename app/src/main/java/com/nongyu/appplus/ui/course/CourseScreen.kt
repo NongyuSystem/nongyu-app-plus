@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -90,45 +91,49 @@ fun CourseScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(top = s(12.dp), start = s(14.dp), end = s(14.dp)),
+            .padding(top = s(10.dp), start = s(12.dp), end = s(12.dp)),
     ) {
-        // ---------- 顶部：周切换 + 视图切换 ----------
+        // ---------- 顶部栏：左=周次+切换，右=周/日视图切换 ----------
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 上一周
-            RoundIconButton("‹", enabled = week > 1) {
-                CourseRepository.selectWeek(week - 1)
-            }
-            Spacer(modifier = Modifier.width(s(6.dp)))
-
-            // 周次 + 当前周标记
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "第 $week 周",
-                    fontSize = (15 * uiScale).sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.surface.colorText,
-                )
-                if (week == state.currentWeek) {
+            // 左：‹  第 N 周(本周)  ›
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(s(12.dp)))
+                    .background(colors.surface.colorCard)
+                    .padding(horizontal = s(2.dp), vertical = s(2.dp)),
+            ) {
+                RoundIconButton("‹", enabled = week > 1, uiScale = uiScale) {
+                    CourseRepository.selectWeek(week - 1)
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(s(64.dp)),
+                ) {
                     Text(
-                        text = "本周",
+                        text = "第 $week 周",
+                        fontSize = (13 * uiScale).sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.surface.colorText,
+                    )
+                    Text(
+                        text = if (week == state.currentWeek) "本周" else "共 ${state.maxWeek} 周",
                         fontSize = (8 * uiScale).sp,
-                        color = colors.brand.colorBrand,
+                        color = if (week == state.currentWeek) colors.brand.colorBrand
+                        else colors.surface.colorTextSecondary,
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.width(s(6.dp)))
-            // 下一周
-            RoundIconButton("›", enabled = week < state.maxWeek) {
-                CourseRepository.selectWeek(week + 1)
+                RoundIconButton("›", enabled = week < state.maxWeek, uiScale = uiScale) {
+                    CourseRepository.selectWeek(week + 1)
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // 周/日切换
+            // 右：周/日切换
             ViewModeSwitch(
                 mode = viewMode,
                 uiScale = uiScale,
@@ -136,13 +141,12 @@ fun CourseScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(s(8.dp)))
-
-        // 回到本周（不在本周时显示）
+        // 不在本周时给一个轻量入口
         if (week != state.currentWeek) {
+            Spacer(modifier = Modifier.height(s(6.dp)))
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(s(8.dp)))
                     .background(colors.brand.colorBrand.copy(alpha = 0.10f))
                     .pointerInput(week) {
                         detectTapGestures(onTap = { CourseRepository.backToCurrentWeek() })
@@ -150,7 +154,7 @@ fun CourseScreen(
                     .padding(horizontal = s(10.dp), vertical = s(4.dp)),
             ) {
                 Text(
-                    text = "回到本周（第 ${state.currentWeek} 周）",
+                    text = "回到第 ${state.currentWeek} 周",
                     fontSize = (10 * uiScale).sp,
                     color = colors.brand.colorBrand,
                 )
@@ -158,18 +162,26 @@ fun CourseScreen(
             Spacer(modifier = Modifier.height(s(8.dp)))
         }
 
-        // ---------- 课表主体 ----------
-        Column(
+        // ---------- 课表主体：撑满剩余高度 ----------
+        // 用 BoxWithConstraints 拿到可用高度，5 行均分，避免内容挤在上半屏。
+        // 注意：这里不再套 verticalScroll —— 内层网格自己撑满即可，
+        // 嵌套滚动会触发「无限高度约束」崩溃。
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
+                .fillMaxWidth(),
         ) {
+            // 表头约 22dp，其余给 5 行；每行不小于 46dp 以免文字挤在一起
+            val headerAndGap = s(26.dp)
+            val available = (maxHeight - headerAndGap).coerceAtLeast(s(46.dp * 5))
+            val rowH = (available / 5)
+
             when (viewMode) {
                 CourseViewMode.Week -> WeekGrid(
                     grid = grid,
                     attendanceBySlot = attendanceBySlot,
                     week = week,
-                    rowHeight = s(58.dp),
+                    rowHeight = rowH,
                     onCourseClick = { detailCourse = it },
                     onScheduleClick = { detailSchedule = it },
                     onEmptyCellClick = { day, row -> creatingAt = day to row },
@@ -185,7 +197,6 @@ fun CourseScreen(
                     onEmptyCellClick = { day, row -> creatingAt = day to row },
                 )
             }
-            Spacer(modifier = Modifier.height(s(90.dp)))
         }
     }
 
@@ -258,14 +269,13 @@ fun CourseScreen(
 
 /** 圆形小按钮（上一周/下一周） */
 @Composable
-private fun RoundIconButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun RoundIconButton(label: String, enabled: Boolean, uiScale: Float, onClick: () -> Unit) {
     val colors = NongyuTheme.colors
+    val size = (26 * uiScale).dp
     Box(
         modifier = Modifier
-            .size(26.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(colors.surface.colorCard)
-            .border(0.5.dp, colors.surface.colorOutline.copy(alpha = 0.4f), RoundedCornerShape(13.dp))
+            .size(size)
+            .clip(RoundedCornerShape(size / 2))
             .pointerInput(enabled) {
                 if (enabled) detectTapGestures(onTap = { onClick() })
             },
@@ -273,8 +283,8 @@ private fun RoundIconButton(label: String, enabled: Boolean, onClick: () -> Unit
     ) {
         Text(
             text = label,
-            fontSize = 14.sp,
-            color = if (enabled) colors.surface.colorText else colors.surface.colorTextSecondary.copy(alpha = 0.3f),
+            fontSize = (15 * uiScale).sp,
+            color = if (enabled) colors.surface.colorText else colors.surface.colorTextSecondary.copy(alpha = 0.25f),
         )
     }
 }

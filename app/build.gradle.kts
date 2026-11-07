@@ -12,10 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v32：修日视图崩溃 —— DayView 内层 verticalScroll 嵌在外层 verticalScroll 里，
-        // 导致无限高度约束；改为只由外层滚动。
-        versionCode = 32
-        versionName = "0.1.2test"
+        // v33：修课表版式 —— 状态栏安全区、顶部栏两端对齐、网格撑满高度、
+        // 时间列收窄 46→34dp、去掉多余的"周"字表头。
+        versionCode = 33
+        versionName = "0.1.3test"
     }
 
     buildTypes {

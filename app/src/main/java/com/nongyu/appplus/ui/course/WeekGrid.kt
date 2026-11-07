@@ -59,14 +59,13 @@ fun WeekGrid(
     onEmptyCellClick: (day: Int, startPeriod: Int) -> Unit,
 ) {
     val colors = NongyuTheme.colors
-    val timeColWidth = 46.dp
+    // 时间列收窄：原来 46dp 在 411dp 屏上占比过大（约 11%），改为 34dp
+    val timeColWidth = 34.dp
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // ---- 表头：周一到周日 + 日期 ----
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.width(timeColWidth), contentAlignment = Alignment.Center) {
-                Text("周", fontSize = 10.sp, color = colors.surface.colorTextSecondary)
-            }
+        // ---- 表头：只放周一~周日，不再有"周"字列 ----
+        Row(modifier = Modifier.fillMaxWidth().height(22.dp)) {
+            Box(modifier = Modifier.width(timeColWidth))
             WEEKDAY_LABELS.forEach { label ->
                 Box(
                     modifier = Modifier.weight(1f),
@@ -74,14 +73,13 @@ fun WeekGrid(
                 ) {
                     Text(
                         text = label.removePrefix("周"),
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
                         color = colors.surface.colorTextSecondary,
                     )
                 }
             }
         }
-
-        Box(modifier = Modifier.height(4.dp))
 
         // ---- 网格主体 ----
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -94,15 +92,15 @@ fun WeekGrid(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = periodRangeLabel(row),
+                                text = "${row * 2 + 1}",
                                 fontSize = 9.sp,
                                 color = colors.surface.colorText,
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                text = periodTimeLabel(row),
-                                fontSize = 7.sp,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.7f),
+                                text = "${row * 2 + 2}",
+                                fontSize = 8.sp,
+                                color = colors.surface.colorTextSecondary.copy(alpha = 0.65f),
                             )
                         }
                     }
