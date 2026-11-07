@@ -12,9 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v18：修输入框比导航栏窄 —— AnimatedVisibility 未 fillMaxWidth 导致按内容测量。
-        versionCode = 18
-        versionName = "0.0.17test"
+        // v19：导航栏加高 10dp、左右各缩 2dp；图标 20→26dp、文字 10→9sp；
+        // 用 Canvas 手绘 4 个真实矢量图标（四宫格/日历/指南针/人形），替换绿色占位方块。
+        versionCode = 19
+        versionName = "0.0.18test"
     }
 
     buildTypes {
