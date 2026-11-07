@@ -22,26 +22,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.data.course.AttendanceStatus
 import com.nongyu.appplus.data.course.CourseEntry
-import com.nongyu.appplus.data.course.MAJOR_SLOT_COUNT
+import com.nongyu.appplus.data.course.GridCell
+import com.nongyu.appplus.data.course.PERIOD_ROW_COUNT
 import com.nongyu.appplus.data.course.ScheduleEntry
 import com.nongyu.appplus.data.course.WEEKDAY_LABELS
 import com.nongyu.appplus.data.course.WeekGridData
 import com.nongyu.appplus.data.course.getCourseColor
 import com.nongyu.appplus.data.course.getPaletteColor
+import com.nongyu.appplus.data.course.periodEnd
 import com.nongyu.appplus.data.course.periodRangeLabel
-import com.nongyu.appplus.data.course.periodTimeLabel
+import com.nongyu.appplus.data.course.periodStart
 import com.nongyu.appplus.data.course.stackCourse
 import com.nongyu.appplus.data.course.stackSchedules
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
 /**
- * 日视图：按星期横向切换，纵向列出当天 5 个大节。
- * 与周视图共用同一份 [WeekGridData]，不重复计算。
+ * 日视图：顶部星期切换条 + 当天 10 节课的纵向列表。
+ * 与周视图共用同一份 [WeekGridData]。
  */
 @Composable
 fun DayView(
@@ -50,6 +51,7 @@ fun DayView(
     onSelectDay: (Int) -> Unit,
     attendanceBySlot: Map<String, AttendanceStatus>,
     week: Int,
+    dateLabels: List<String>,
     modifier: Modifier = Modifier,
     onCourseClick: (CourseEntry) -> Unit,
     onScheduleClick: (ScheduleEntry) -> Unit,
@@ -58,32 +60,33 @@ fun DayView(
     val colors = NongyuTheme.colors
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // 星期选择条
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // 星期切换条
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             WEEKDAY_LABELS.forEachIndexed { index, label ->
                 val selected = index == selectedDay
-                Box(
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(9.dp))
                         .background(
-                            if (selected) colors.brand.colorBrand.copy(alpha = 0.12f)
+                            if (selected) colors.brand.colorBrand
                             else colors.surface.colorCard,
                         )
-                        .border(
-                            1.dp,
-                            if (selected) colors.brand.colorBrand else colors.surface.colorOutline.copy(alpha = 0.4f),
-                            RoundedCornerShape(8.dp),
-                        )
                         .pointerInput(index) { detectTapGestures(onTap = { onSelectDay(index) }) }
-                        .padding(vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
                         text = label.removePrefix("周"),
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) colors.brand.colorBrand else colors.surface.colorTextSecondary,
+                        color = if (selected) Color.White else colors.surface.colorText,
+                    )
+                    Text(
+                        text = dateLabels.getOrElse(index) { "" },
+                        fontSize = 8.sp,
+                        color = if (selected) Color.White.copy(alpha = 0.8f)
+                        else colors.surface.colorTextSecondary,
                     )
                 }
             }
@@ -93,17 +96,17 @@ fun DayView(
 
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            repeat(MAJOR_SLOT_COUNT) { row ->
+            for (row in 0 until PERIOD_ROW_COUNT) {
                 val cell = grid.getOrNull(row)?.getOrNull(selectedDay)
                 when (cell) {
-                    is com.nongyu.appplus.data.course.GridCell.Stack -> {
+                    is GridCell.Stack -> {
                         val course = stackCourse(cell.value)
                         val schedules = stackSchedules(cell.value)
                         DayEntryCard(
-                            rowLabel = periodRangeLabel(row),
-                            timeLabel = periodTimeLabel(row),
+                            startPeriod = row + 1,
+                            endPeriod = (row + cell.value.spanRows).coerceAtMost(PERIOD_ROW_COUNT),
                             course = course,
                             schedules = schedules,
                             status = course?.let { attendanceBySlot["${it.id}:$week:${selectedDay + 1}"] },
@@ -113,16 +116,10 @@ fun DayView(
                             },
                         )
                     }
-                    is com.nongyu.appplus.data.course.GridCell.Occupied -> {
-                        // 连堂占位：由上一个跨行卡片覆盖，此处留空
-                        EmptyDaySlot(periodRangeLabel(row), periodTimeLabel(row)) {
-                            onEmptyCellClick(selectedDay, row)
-                        }
-                    }
-                    null -> {
-                        EmptyDaySlot(periodRangeLabel(row), periodTimeLabel(row)) {
-                            onEmptyCellClick(selectedDay, row)
-                        }
+
+                    else -> {
+                        // Occupied 由上方跨行卡片覆盖，null 直接给"空闲"
+                        EmptyDaySlot(row + 1) { onEmptyCellClick(selectedDay, row + 1) }
                     }
                 }
             }
@@ -132,8 +129,8 @@ fun DayView(
 
 @Composable
 private fun DayEntryCard(
-    rowLabel: String,
-    timeLabel: String,
+    startPeriod: Int,
+    endPeriod: Int,
     course: CourseEntry?,
     schedules: List<ScheduleEntry>,
     status: AttendanceStatus?,
@@ -150,15 +147,31 @@ private fun DayEntryCard(
     Row(modifier = Modifier.fillMaxWidth()) {
         // 左：节次 + 时间
         Column(
-            modifier = Modifier.width(56.dp).padding(top = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(52.dp).padding(vertical = 6.dp),
+            horizontalAlignment = Alignment.End,
         ) {
-            Text(rowLabel, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = colors.surface.colorText)
-            Text(timeLabel, fontSize = 7.sp, color = colors.surface.colorTextSecondary.copy(alpha = 0.7f))
+            Text(
+                text = periodStart(startPeriod),
+                fontSize = 8.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
+            )
+            Text(
+                text = if (startPeriod == endPeriod) "$startPeriod"
+                else "$startPeriod-$endPeriod",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.surface.colorText,
+            )
+            Text(
+                text = periodEnd(endPeriod),
+                fontSize = 8.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
+            )
         }
+        Spacer(modifier = Modifier.width(6.dp))
 
         // 右：卡片
-        Box(
+        Column(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(10.dp))
@@ -166,67 +179,83 @@ private fun DayEntryCard(
                 .pointerInput(name) { detectTapGestures(onTap = { onClick() }) }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-            Column {
+            Text(
+                text = name,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(color.text),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            val details = buildList {
+                (course?.room ?: schedules.firstOrNull()?.location)
+                    ?.takeIf { it.isNotBlank() }?.let { add(it) }
+                course?.teacher?.takeIf { it.isNotBlank() }?.let { add(it) }
+                schedules.firstOrNull()?.content?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+            if (details.isNotEmpty()) {
                 Text(
-                    text = name,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(color.text),
+                    text = details.joinToString(" · "),
+                    fontSize = 10.sp,
+                    color = Color(color.text).copy(alpha = 0.75f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                val details = buildList {
-                    course?.teacher?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    (course?.room ?: schedules.firstOrNull()?.location)
-                        ?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    schedules.firstOrNull()?.content?.takeIf { it.isNotBlank() }?.let { add(it) }
-                }
-                if (details.isNotEmpty()) {
-                    Text(
-                        text = details.joinToString(" · "),
-                        fontSize = 10.sp,
-                        color = Color(color.text).copy(alpha = 0.75f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (status != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "本节：${status.label}",
-                        fontSize = 9.sp,
-                        color = Color(color.text).copy(alpha = 0.85f),
-                    )
-                }
+            }
+            if (status != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "本节：${status.label}",
+                    fontSize = 9.sp,
+                    color = Color(color.text).copy(alpha = 0.85f),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun EmptyDaySlot(rowLabel: String, timeLabel: String, onClick: () -> Unit) {
+private fun EmptyDaySlot(period: Int, onClick: () -> Unit) {
     val colors = NongyuTheme.colors
     Row(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.width(56.dp).padding(top = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(52.dp).padding(vertical = 4.dp),
+            horizontalAlignment = Alignment.End,
         ) {
-            Text(rowLabel, fontSize = 10.sp, color = colors.surface.colorTextSecondary)
-            Text(timeLabel, fontSize = 7.sp, color = colors.surface.colorTextSecondary.copy(alpha = 0.6f))
+            Text(
+                text = periodStart(period),
+                fontSize = 8.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.6f),
+            )
+            Text(
+                text = "$period",
+                fontSize = 13.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.75f),
+            )
+            Text(
+                text = periodEnd(period),
+                fontSize = 8.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.6f),
+            )
         }
+        Spacer(modifier = Modifier.width(6.dp))
         Box(
             modifier = Modifier
                 .weight(1f)
-                .height(38.dp)
+                .height(34.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(colors.surface.colorCard)
-                .border(0.5.dp, colors.surface.colorOutline.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                .border(0.5.dp, colors.surface.colorOutline.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
                 .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) }
                 .padding(horizontal = 10.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            Text("空闲", fontSize = 10.sp, color = colors.surface.colorTextSecondary.copy(alpha = 0.5f))
+            Text(
+                text = "空闲 · 点此添加日程",
+                fontSize = 9.sp,
+                color = colors.surface.colorTextSecondary.copy(alpha = 0.5f),
+            )
         }
     }
 }

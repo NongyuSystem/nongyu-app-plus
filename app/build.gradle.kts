@@ -12,10 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v33：修课表版式 —— 状态栏安全区、顶部栏两端对齐、网格撑满高度、
-        // 时间列收窄 46→34dp、去掉多余的"周"字表头。
-        versionCode = 33
-        versionName = "0.1.3test"
+        // v34：课表版式重做，对齐旧版 —— 10 行网格（每节一行）、左侧三行时间轴、
+        // 标题栏「农屿课表」+ 圆形按钮、表头显示周次与日期。
+        versionCode = 34
+        versionName = "0.1.4test"
     }
 
     buildTypes {
