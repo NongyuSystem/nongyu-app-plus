@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v27：上一版下移/压行高过头，回调：下移 0.16→0.07，行高恢复正常，间距 0.012。
-        versionCode = 27
-        versionName = "0.0.26test"
+        // v29：球体 96→78dp（光晕外扩使观感大于几何尺寸，需要再收一档）。
+        versionCode = 29
+        versionName = "0.0.28test"
     }
 
     buildTypes {
