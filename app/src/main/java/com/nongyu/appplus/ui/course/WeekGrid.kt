@@ -27,25 +27,34 @@ import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.data.course.AttendanceStatus
 import com.nongyu.appplus.data.course.CourseEntry
 import com.nongyu.appplus.data.course.GridCell
-import com.nongyu.appplus.data.course.MAJOR_SLOT_COUNT
+import com.nongyu.appplus.data.course.PERIOD_ROW_COUNT
 import com.nongyu.appplus.data.course.ScheduleEntry
 import com.nongyu.appplus.data.course.StackItem
 import com.nongyu.appplus.data.course.WEEKDAY_LABELS
 import com.nongyu.appplus.data.course.WeekGridData
 import com.nongyu.appplus.data.course.getCourseColor
 import com.nongyu.appplus.data.course.getPaletteColor
-import com.nongyu.appplus.data.course.periodRangeLabel
-import com.nongyu.appplus.data.course.periodTimeLabel
-import com.nongyu.appplus.data.course.stackCourse
+import com.nongyu.appplus.data.course.periodEnd
+import com.nongyu.appplus.data.course.periodStart
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
 /**
- * 周视图课表网格：左侧时间轴 + 7 天 × 5 大节。
+ * 周视图课表 —— 版式对齐旧版 `农屿课表`：
  *
- * 渲染约定（与旧项目 WeekGrid 一致）：
- * - 连堂课跨行显示（stack 的 spanRows 决定高度）；
- * - 同格多课显示堆叠指示条；
- * - 有考勤记录的课在卡片右下角显示本节状态（签/迟/缺/假/未）。
+ * ```
+ *  第9周   周一   周三   周四   周五   周六   周日
+ *  共16周  11/2   11/4   11/5   11/6   11/7   11/8
+ *  08:10 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    1   |  [课程卡]        [课程卡]
+ *  08:55 |
+ *  09:05 |
+ *    2   |
+ *  09:50 |
+ *        ┊  ← 大节之间留空隙
+ *  10:10 |
+ *    3   |
+ * ```
+ * 特点：**10 行，每节一行**；左侧是「开始时间 / 大号节次 / 结束时间」三行文字。
  */
 @Composable
 fun WeekGrid(
@@ -53,54 +62,87 @@ fun WeekGrid(
     attendanceBySlot: Map<String, AttendanceStatus>,
     week: Int,
     rowHeight: Dp,
+    maxWeek: Int,
+    dateLabels: List<String>,
     modifier: Modifier = Modifier,
     onCourseClick: (CourseEntry) -> Unit,
     onScheduleClick: (ScheduleEntry) -> Unit,
     onEmptyCellClick: (day: Int, startPeriod: Int) -> Unit,
 ) {
     val colors = NongyuTheme.colors
-    // 时间列收窄：原来 46dp 在 411dp 屏上占比过大（约 11%），改为 34dp
-    val timeColWidth = 34.dp
+    val timeColWidth = 44.dp
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // ---- 表头：只放周一~周日，不再有"周"字列 ----
-        Row(modifier = Modifier.fillMaxWidth().height(22.dp)) {
-            Box(modifier = Modifier.width(timeColWidth))
-            WEEKDAY_LABELS.forEach { label ->
-                Box(
+        // ---------- 表头：第N周/共M周 + 星期 + 日期 ----------
+        Row(modifier = Modifier.fillMaxWidth()) {
+            // 左上角两周文字
+            Column(
+                modifier = Modifier.width(timeColWidth + 8.dp).padding(start = 2.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = "第${week}周",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.surface.colorText,
+                )
+                Text(
+                    text = "共${maxWeek}周",
+                    fontSize = 9.sp,
+                    color = colors.surface.colorTextSecondary,
+                )
+            }
+
+            WEEKDAY_LABELS.forEachIndexed { index, label ->
+                Column(
                     modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = label.removePrefix("周"),
-                        fontSize = 10.sp,
+                        text = label,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = colors.surface.colorTextSecondary,
+                        color = colors.surface.colorText,
+                    )
+                    Text(
+                        text = dateLabels.getOrElse(index) { "" },
+                        fontSize = 9.sp,
+                        color = colors.surface.colorTextSecondary.copy(alpha = 0.75f),
                     )
                 }
             }
         }
 
-        // ---- 网格主体 ----
+        Box(modifier = Modifier.height(6.dp))
+
+        // ---------- 网格主体 ----------
         Row(modifier = Modifier.fillMaxWidth()) {
-            // 时间轴
-            Column(modifier = Modifier.width(timeColWidth)) {
-                repeat(MAJOR_SLOT_COUNT) { row ->
+            // 左侧时间轴：每行显示 开始时间 / 大号节次 / 结束时间
+            Column(modifier = Modifier.width(timeColWidth + 8.dp)) {
+                for (row in 0 until PERIOD_ROW_COUNT) {
                     Box(
                         modifier = Modifier.height(rowHeight).fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
+                        contentAlignment = Alignment.CenterEnd,
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            modifier = Modifier.padding(end = 4.dp),
+                        ) {
                             Text(
-                                text = "${row * 2 + 1}",
-                                fontSize = 9.sp,
-                                color = colors.surface.colorText,
-                                fontWeight = FontWeight.Medium,
+                                text = periodStart(row + 1),
+                                fontSize = 8.sp,
+                                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
                             )
                             Text(
-                                text = "${row * 2 + 2}",
+                                text = "${row + 1}",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.surface.colorText,
+                            )
+                            Text(
+                                text = periodEnd(row + 1),
                                 fontSize = 8.sp,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.65f),
+                                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
                             )
                         }
                     }
@@ -111,12 +153,12 @@ fun WeekGrid(
             for (day in 0 until 7) {
                 Column(modifier = Modifier.weight(1f)) {
                     var row = 0
-                    while (row < MAJOR_SLOT_COUNT) {
+                    while (row < PERIOD_ROW_COUNT) {
                         val cell = grid.getOrNull(row)?.getOrNull(day)
                         when (cell) {
                             is GridCell.Stack -> {
-                                val span = cell.value.spanRows.coerceAtMost(MAJOR_SLOT_COUNT - row)
-                                CourseCell(
+                                val span = cell.value.spanRows.coerceAtMost(PERIOD_ROW_COUNT - row)
+                                CourseBlock(
                                     items = cell.value.items,
                                     attendance = attendanceBySlot,
                                     week = week,
@@ -127,14 +169,16 @@ fun WeekGrid(
                                 )
                                 row += span
                             }
+
                             is GridCell.Occupied -> {
-                                // 连堂占位行：已被上方跨行块覆盖，跳过
+                                // 被上方连堂课覆盖
                                 row += 1
                             }
+
                             null -> {
-                                EmptyCell(
+                                EmptyPeriod(
                                     height = rowHeight,
-                                    onClick = { onEmptyCellClick(day, row) },
+                                    onClick = { onEmptyCellClick(day, row + 1) },
                                 )
                                 row += 1
                             }
@@ -146,25 +190,24 @@ fun WeekGrid(
     }
 }
 
-/** 空白格：可点按（预留给"新建日程"） */
+/** 空节：只有一条极淡的底色，不干扰视觉 */
 @Composable
-private fun EmptyCell(height: Dp, onClick: () -> Unit) {
-    val colors = NongyuTheme.colors
+private fun EmptyPeriod(height: Dp, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(height)
-            .padding(1.dp)
+            .padding(horizontal = 1.5.dp, vertical = 0.5.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .background(colors.surface.colorCard)
-            .border(0.5.dp, colors.surface.colorOutline.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
     )
 }
 
-/** 课程 / 日程卡片（可能同格堆叠多个） */
+/**
+ * 课程 / 日程卡片。对齐旧版：纵向排列「课程名 / 地点 / 教师」，
+ * 圆角较大、无边框、使用浅色底 + 深色字。
+ */
 @Composable
-private fun CourseCell(
+private fun CourseBlock(
     items: List<StackItem>,
     attendance: Map<String, AttendanceStatus>,
     week: Int,
@@ -175,25 +218,22 @@ private fun CourseCell(
 ) {
     val course = items.filterIsInstance<StackItem.Course>().firstOrNull()?.course
     val schedules = items.filterIsInstance<StackItem.Schedule>().map { it.schedule }
-
     val primaryName = course?.name ?: schedules.firstOrNull()?.title ?: ""
+
     val color = if (course != null) {
         getCourseColor(course.name)
     } else {
-        getPaletteColor(schedules.firstOrNull()?.colorIndex)
-            ?: getCourseColor(primaryName)
+        getPaletteColor(schedules.firstOrNull()?.colorIndex) ?: getCourseColor(primaryName)
     }
 
-    val sessionStatus = course?.let {
-        attendance["${it.id}:$week:${dayIndex + 1}"]
-    }
+    val sessionStatus = course?.let { attendance["${it.id}:$week:${dayIndex + 1}"] }
 
     Box(
         modifier = Modifier
             .height(height)
-            .padding(1.dp)
+            .padding(horizontal = 1.5.dp, vertical = 1.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(Color(color.bg))
             .pointerInput(course?.id, schedules.firstOrNull()?.id) {
                 detectTapGestures(
@@ -202,68 +242,65 @@ private fun CourseCell(
                         else schedules.firstOrNull()?.let(onClickSchedule)
                     },
                 )
-            },
+            }
+            .padding(horizontal = 5.dp, vertical = 4.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 3.dp, vertical = 2.dp),
-            verticalArrangement = Arrangement.Top,
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = primaryName,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color(color.text),
-                maxLines = if (height > 60.dp) 3 else 2,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 11.sp,
+                lineHeight = 12.sp,
             )
-            val subtitle = course?.room ?: schedules.firstOrNull()?.location
-            if (!subtitle.isNullOrBlank() && height > 52.dp) {
+            // 地点
+            val place = course?.room ?: schedules.firstOrNull()?.location
+            if (!place.isNullOrBlank() && height > 52.dp) {
                 Text(
-                    text = subtitle,
-                    fontSize = 7.sp,
-                    color = Color(color.text).copy(alpha = 0.75f),
+                    text = place,
+                    fontSize = 8.sp,
+                    color = Color(color.text).copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 教师
+            if (!course?.teacher.isNullOrBlank() && height > 64.dp) {
+                Text(
+                    text = course!!.teacher,
+                    fontSize = 8.sp,
+                    color = Color(color.text).copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
 
-        // 同格堆叠指示：右上角小圆点带数量
+        // 同格堆叠
         if (items.size > 1) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(2.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(color.text).copy(alpha = 0.18f))
-                    .padding(horizontal = 3.dp, vertical = 1.dp),
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(color.text).copy(alpha = 0.16f))
+                    .padding(horizontal = 2.dp, vertical = 0.5.dp),
             ) {
-                Text(
-                    text = items.size.toString(),
-                    fontSize = 7.sp,
-                    color = Color(color.text),
-                )
+                Text(items.size.toString(), fontSize = 7.sp, color = Color(color.text))
             }
         }
 
-        // 本节考勤状态（右下角）
+        // 本节考勤
         if (sessionStatus != null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(2.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(color.text).copy(alpha = 0.20f))
-                    .padding(horizontal = 3.dp, vertical = 1.dp),
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(color.text).copy(alpha = 0.18f))
+                    .padding(horizontal = 2.dp, vertical = 0.5.dp),
             ) {
-                Text(
-                    text = sessionStatus.shortLabel,
-                    fontSize = 7.sp,
-                    color = Color(color.text),
-                )
+                Text(sessionStatus.shortLabel, fontSize = 7.sp, color = Color(color.text))
             }
         }
     }

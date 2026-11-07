@@ -1,15 +1,15 @@
 package com.nongyu.appplus.data.course
 
 /**
- * 周课表矩阵构建 —— 移植自旧项目
+ * 周课表矩阵构建 —— 对齐旧项目
  * `nongyu-rn-app/src/modules/course/model/weekMatrix.ts`。
  *
- * 核心规则（与旧版一致，逐条对应）：
- * 1. 每天 5 个大课区间（MAJOR_SLOT_COUNT）× 7 天。
- * 2. 连堂课写入主格 `GridStack`，并把下方被占用的行标记为 `GridOccupied`。
- * 3. 课程优先置顶；自定义日程可与课程冲突并入同一 stack（课程在前）。
- * 4. 日程落在"连堂占位行"时跳过，避免破坏跨行结构。
- * 5. 同一主格已有课程时，后写入的课程被忽略（保留先写入，即 T1）。
+ * 与旧版 UI 一致：**10 行（每节一行）× 7 列**，连堂课在首行占位并向下跨行。
+ * 规则：
+ * 1. 连堂课写入主格 `GridStack`，下方被占用的行标记为 `GridOccupied`。
+ * 2. 课程优先置顶；自定义日程可与课程冲突并入同一 stack（课程在前）。
+ * 3. 日程落在"占位行"时跳过，避免破坏跨行结构。
+ * 4. 同一主格已有课程时，后写入的课程被忽略（保留先写入）。
  */
 
 /** 某课在指定教学周是否有效 */
@@ -52,7 +52,7 @@ fun maxWeekFromAll(courses: List<CourseEntry>, schedules: List<ScheduleEntry>): 
 }
 
 private fun emptyGrid(): WeekGridData =
-    List(MAJOR_SLOT_COUNT) { List<GridCell?>(7) { null } }
+    List(PERIOD_ROW_COUNT) { List<GridCell?>(7) { null } }
 
 /** 课程在前、日程按 createdAt 升序 */
 private fun sortStackItems(items: List<StackItem>): List<StackItem> {
@@ -62,7 +62,6 @@ private fun sortStackItems(items: List<StackItem>): List<StackItem> {
     return courses + schedules
 }
 
-/** 把连堂占用的下方行标记为 Occupied（不覆盖已有内容） */
 private fun writeOccupied(
     grid: MutableList<MutableList<GridCell?>>,
     startRow: Int,
@@ -71,13 +70,13 @@ private fun writeOccupied(
 ) {
     for (s in 1 until spanRows) {
         val r = startRow + s
-        if (r >= MAJOR_SLOT_COUNT) break
+        if (r >= PERIOD_ROW_COUNT) break
         if (grid[r][col] != null) break
         grid[r][col] = GridCell.Occupied(GridOccupied(startRow))
     }
 }
 
-/** 构建单周 5×7 矩阵（仅课程） */
+/** 构建单周 10×7 矩阵（仅课程） */
 fun buildWeekGrid(week: Int, courses: List<CourseEntry>): WeekGridData {
     val grid = emptyGrid().map { it.toMutableList() }.toMutableList()
 
@@ -85,11 +84,10 @@ fun buildWeekGrid(week: Int, courses: List<CourseEntry>): WeekGridData {
         if (!weekMatches(week, course)) continue
 
         val col = (course.day.coerceIn(1, 7)) - 1
-        val startRow = slotIndexFromPeriod(course.startPeriod)
+        val startRow = rowFromPeriod(course.startPeriod)
         val spanRows = spanRowsFromPeriods(course.startPeriod, course.endPeriod)
 
         val existing = grid[startRow][col]
-        // 同格多课：保留先写入的
         if (existing is GridCell.Stack || existing is GridCell.Occupied) continue
 
         grid[startRow][col] = GridCell.Stack(
@@ -113,19 +111,15 @@ fun buildWeekGridWithSchedules(
         if (!scheduleMatches(week, schedule)) continue
 
         val col = (schedule.day.coerceIn(1, 7)) - 1
-        val startRow = slotIndexFromPeriod(schedule.startPeriod)
+        val startRow = rowFromPeriod(schedule.startPeriod)
         val spanRows = spanRowsFromPeriods(schedule.startPeriod, schedule.endPeriod)
 
         when (val existing = grid[startRow][col]) {
-            is GridCell.Occupied -> {
-                // 落在连堂占位行：跳过，避免破坏跨行结构
-                continue
-            }
+            is GridCell.Occupied -> continue
 
             is GridCell.Stack -> {
                 val nextItems = sortStackItems(existing.value.items + StackItem.Schedule(schedule))
                 val hasCourse = existing.value.items.any { it is StackItem.Course }
-                // span 以课程为准；无课则取较大 span
                 val courseSpan = if (hasCourse) {
                     existing.value.spanRows
                 } else {
