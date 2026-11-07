@@ -1,15 +1,18 @@
 package com.nongyu.appplus.ui.course
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -17,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -39,22 +43,15 @@ import com.nongyu.appplus.data.course.periodStart
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
 /**
- * 周视图课表 —— 版式对齐旧版 `农屿课表`：
+ * 周视图课表网格。
  *
- * ```
- *  第9周   周一   周三   周四   周五   周六   周日
- *  共16周  11/2   11/4   11/5   11/6   11/7   11/8
- *  08:10 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *    1   |  [课程卡]        [课程卡]
- *  08:55 |
- *  09:05 |
- *    2   |
- *  09:50 |
- *        ┊  ← 大节之间留空隙
- *  10:10 |
- *    3   |
- * ```
- * 特点：**10 行，每节一行**；左侧是「开始时间 / 大号节次 / 结束时间」三行文字。
+ * 版式要点：
+ * - **时间列极窄**：只显示节次数字（1..10），宽 22dp；
+ *   起止时间放到左侧悬浮（随行高变化，空间不够时不显示）。
+ * - **课程是真卡片**：圆角 9dp、内边距、浅色底深色字、左上角小色条，
+ *   不是"整块文字铺在格子里"。
+ * - **今日列**整列有极淡底色，表头已在 CourseScreen 处理。
+ * - **周日列底部**放「回到本周」矢量按钮（仅当不在本周时）。
  */
 @Composable
 fun WeekGrid(
@@ -64,119 +61,80 @@ fun WeekGrid(
     rowHeight: Dp,
     maxWeek: Int,
     dateLabels: List<String>,
+    todayIndex: Int,
+    uiScale: Float,
+    isCurrentWeek: Boolean,
+    onBackToToday: () -> Unit,
     modifier: Modifier = Modifier,
     onCourseClick: (CourseEntry) -> Unit,
     onScheduleClick: (ScheduleEntry) -> Unit,
     onEmptyCellClick: (day: Int, startPeriod: Int) -> Unit,
 ) {
     val colors = NongyuTheme.colors
-    val timeColWidth = 44.dp
+    fun s(d: Dp): Dp = (d.value * uiScale).dp
+    val timeColWidth = s(22.dp)
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        // ---------- 表头：第N周/共M周 + 星期 + 日期 ----------
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // 左上角两周文字
-            Column(
-                modifier = Modifier.width(timeColWidth + 8.dp).padding(start = 2.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = "第${week}周",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.surface.colorText,
-                )
-                Text(
-                    text = "共${maxWeek}周",
-                    fontSize = 9.sp,
-                    color = colors.surface.colorTextSecondary,
-                )
-            }
-
-            WEEKDAY_LABELS.forEachIndexed { index, label ->
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+    Row(modifier = modifier.fillMaxWidth()) {
+        // ---------- 左侧：节次列 ----------
+        Column(modifier = Modifier.width(timeColWidth)) {
+            for (row in 0 until PERIOD_ROW_COUNT) {
+                Box(
+                    modifier = Modifier.height(rowHeight).fillMaxWidth(),
+                    contentAlignment = Alignment.TopCenter,
                 ) {
+                    // 大号节次数字，顶部对齐（与课程卡起始对齐）
                     Text(
-                        text = label,
-                        fontSize = 11.sp,
+                        text = "${row + 1}",
+                        fontSize = (11 * uiScale).sp,
                         fontWeight = FontWeight.Medium,
-                        color = colors.surface.colorText,
-                    )
-                    Text(
-                        text = dateLabels.getOrElse(index) { "" },
-                        fontSize = 9.sp,
-                        color = colors.surface.colorTextSecondary.copy(alpha = 0.75f),
+                        color = colors.surface.colorTextSecondary.copy(alpha = 0.9f),
+                        modifier = Modifier.padding(top = s(2.dp)),
                     )
                 }
             }
         }
 
-        Box(modifier = Modifier.height(6.dp))
+        // 时间列与网格之间的细分隔线
+        Box(
+            modifier = Modifier
+                .width(0.5.dp)
+                .height(rowHeight * PERIOD_ROW_COUNT)
+                .background(colors.surface.colorOutline.copy(alpha = 0.18f)),
+        )
 
-        // ---------- 网格主体 ----------
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // 左侧时间轴：每行显示 开始时间 / 大号节次 / 结束时间
-            Column(modifier = Modifier.width(timeColWidth + 8.dp)) {
-                for (row in 0 until PERIOD_ROW_COUNT) {
-                    Box(
-                        modifier = Modifier.height(rowHeight).fillMaxWidth(),
-                        contentAlignment = Alignment.CenterEnd,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            modifier = Modifier.padding(end = 4.dp),
-                        ) {
-                            Text(
-                                text = periodStart(row + 1),
-                                fontSize = 8.sp,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
-                            )
-                            Text(
-                                text = "${row + 1}",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = colors.surface.colorText,
-                            )
-                            Text(
-                                text = periodEnd(row + 1),
-                                fontSize = 8.sp,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.85f),
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 7 天
-            for (day in 0 until 7) {
-                Column(modifier = Modifier.weight(1f)) {
+        // ---------- 7 天 ----------
+        for (day in 0 until 7) {
+            val isTodayCol = day == todayIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (isTodayCol) Modifier.background(colors.brand.colorBrand.copy(alpha = 0.045f))
+                        else Modifier,
+                    ),
+            ) {
+                Column {
                     var row = 0
                     while (row < PERIOD_ROW_COUNT) {
                         val cell = grid.getOrNull(row)?.getOrNull(day)
                         when (cell) {
                             is GridCell.Stack -> {
                                 val span = cell.value.spanRows.coerceAtMost(PERIOD_ROW_COUNT - row)
-                                CourseBlock(
+                                CourseCard(
                                     items = cell.value.items,
                                     attendance = attendanceBySlot,
                                     week = week,
                                     dayIndex = day,
                                     height = rowHeight * span,
+                                    uiScale = uiScale,
                                     onClickCourse = onCourseClick,
                                     onClickSchedule = onScheduleClick,
                                 )
                                 row += span
                             }
-
-                            is GridCell.Occupied -> {
-                                // 被上方连堂课覆盖
-                                row += 1
-                            }
-
+                            is GridCell.Occupied -> row += 1
                             null -> {
-                                EmptyPeriod(
+                                EmptySlot(
                                     height = rowHeight,
                                     onClick = { onEmptyCellClick(day, row + 1) },
                                 )
@@ -185,55 +143,70 @@ fun WeekGrid(
                         }
                     }
                 }
+
+                // 周日列底部：「回到本周」矢量按钮
+                if (day == 6 && !isCurrentWeek) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = s(10.dp)),
+                    ) {
+                        BackToTodayButton(uiScale = uiScale, onClick = onBackToToday)
+                    }
+                }
             }
         }
     }
 }
 
-/** 空节：只有一条极淡的底色，不干扰视觉 */
+/** 空格子：极淡的点击区，不做视觉装饰 */
 @Composable
-private fun EmptyPeriod(height: Dp, onClick: () -> Unit) {
+private fun EmptySlot(height: Dp, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(height)
-            .padding(horizontal = 1.5.dp, vertical = 0.5.dp)
+            .padding(horizontal = 1.dp, vertical = 0.5.dp)
             .fillMaxWidth()
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
     )
 }
 
 /**
- * 课程 / 日程卡片。对齐旧版：纵向排列「课程名 / 地点 / 教师」，
- * 圆角较大、无边框、使用浅色底 + 深色字。
+ * 课程卡片：真正的卡片视觉。
+ * - 圆角 9dp、内边距 4dp
+ * - 左上角一条 2dp 宽的色带（用课程主色的加深版）
+ * - 课程名加粗、地点次之、教师最淡
  */
 @Composable
-private fun CourseBlock(
+private fun CourseCard(
     items: List<StackItem>,
     attendance: Map<String, AttendanceStatus>,
     week: Int,
     dayIndex: Int,
     height: Dp,
+    uiScale: Float,
     onClickCourse: (CourseEntry) -> Unit,
     onClickSchedule: (ScheduleEntry) -> Unit,
 ) {
+    fun s(d: Dp): Dp = (d.value * uiScale).dp
     val course = items.filterIsInstance<StackItem.Course>().firstOrNull()?.course
     val schedules = items.filterIsInstance<StackItem.Schedule>().map { it.schedule }
-    val primaryName = course?.name ?: schedules.firstOrNull()?.title ?: ""
+    val name = course?.name ?: schedules.firstOrNull()?.title ?: return
 
     val color = if (course != null) {
         getCourseColor(course.name)
     } else {
-        getPaletteColor(schedules.firstOrNull()?.colorIndex) ?: getCourseColor(primaryName)
+        getPaletteColor(schedules.firstOrNull()?.colorIndex) ?: getCourseColor(name)
     }
-
+    val accent = Color(color.text)
     val sessionStatus = course?.let { attendance["${it.id}:$week:${dayIndex + 1}"] }
 
     Box(
         modifier = Modifier
             .height(height)
-            .padding(horizontal = 1.5.dp, vertical = 1.dp)
+            .padding(horizontal = s(1.5.dp), vertical = s(1.5.dp))
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(s(9.dp)))
             .background(Color(color.bg))
             .pointerInput(course?.id, schedules.firstOrNull()?.id) {
                 detectTapGestures(
@@ -242,52 +215,69 @@ private fun CourseBlock(
                         else schedules.firstOrNull()?.let(onClickSchedule)
                     },
                 )
-            }
-            .padding(horizontal = 5.dp, vertical = 4.dp),
+            },
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        // 左侧色带（卡片"身份条"）
+        Box(
+            modifier = Modifier
+                .width(s(2.5.dp))
+                .height(height - s(3.dp))
+                .offset(x = s(0.5.dp), y = s(1.5.dp))
+                .clip(RoundedCornerShape(s(2.dp)))
+                .background(accent.copy(alpha = 0.85f)),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = s(6.dp), end = s(3.dp), top = s(3.dp), bottom = s(2.dp)),
+        ) {
             Text(
-                text = primaryName,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(color.text),
-                maxLines = 4,
+                text = name,
+                fontSize = (9.5f * uiScale).sp,
+                fontWeight = FontWeight.SemiBold,
+                color = accent,
+                maxLines = if (height > 60.dp) 4 else 3,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 12.sp,
+                lineHeight = (11.5f * uiScale).sp,
             )
-            // 地点
             val place = course?.room ?: schedules.firstOrNull()?.location
-            if (!place.isNullOrBlank() && height > 52.dp) {
+            if (!place.isNullOrBlank() && height > 46.dp) {
+                Spacer(Modifier.height(s(1.dp)))
                 Text(
                     text = place,
-                    fontSize = 8.sp,
-                    color = Color(color.text).copy(alpha = 0.72f),
+                    fontSize = (8 * uiScale).sp,
+                    color = accent.copy(alpha = 0.62f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 教师
-            if (!course?.teacher.isNullOrBlank() && height > 64.dp) {
+            if (!course?.teacher.isNullOrBlank() && height > 62.dp) {
                 Text(
-                    text = course!!.teacher,
-                    fontSize = 8.sp,
-                    color = Color(color.text).copy(alpha = 0.72f),
+                    text = course.teacher,
+                    fontSize = (8 * uiScale).sp,
+                    color = accent.copy(alpha = 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
 
-        // 同格堆叠
+        // 同格堆叠数量
         if (items.size > 1) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(color.text).copy(alpha = 0.16f))
-                    .padding(horizontal = 2.dp, vertical = 0.5.dp),
+                    .padding(s(2.dp))
+                    .clip(RoundedCornerShape(s(4.dp)))
+                    .background(accent.copy(alpha = 0.16f))
+                    .padding(horizontal = s(3.dp), vertical = s(0.5.dp)),
             ) {
-                Text(items.size.toString(), fontSize = 7.sp, color = Color(color.text))
+                Text(
+                    text = items.size.toString(),
+                    fontSize = (7 * uiScale).sp,
+                    color = accent,
+                )
             }
         }
 
@@ -296,11 +286,16 @@ private fun CourseBlock(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(color.text).copy(alpha = 0.18f))
-                    .padding(horizontal = 2.dp, vertical = 0.5.dp),
+                    .padding(s(2.dp))
+                    .clip(RoundedCornerShape(s(4.dp)))
+                    .background(accent.copy(alpha = 0.18f))
+                    .padding(horizontal = s(3.dp), vertical = s(0.5.dp)),
             ) {
-                Text(sessionStatus.shortLabel, fontSize = 7.sp, color = Color(color.text))
+                Text(
+                    text = sessionStatus.shortLabel,
+                    fontSize = (7 * uiScale).sp,
+                    color = accent,
+                )
             }
         }
     }

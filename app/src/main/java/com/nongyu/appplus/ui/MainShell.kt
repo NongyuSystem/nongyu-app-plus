@@ -186,10 +186,14 @@ fun MainShell() {
         val labelSize = (8f * uiScale).sp
 
         // 页面内容：目前只有「课表」有实现，其余三页仍为留白占位。
+        // 底部要给导航栏留出空间，否则课表底部几行会被导航栏盖住。
+        // 导航栏占位 = 高度 62 + 上下 padding 18*2 + 额外呼吸 8
+        val navBottomInset = navHeight + s(18.dp) * 2 + s(8.dp)
         Box(modifier = Modifier.fillMaxSize()) {
             when (selectedTab) {
                 1 -> CourseScreen(
                     uiScale = uiScale,
+                    bottomInset = navBottomInset,
                     modifier = Modifier.fillMaxSize(),
                 )
                 else -> {
