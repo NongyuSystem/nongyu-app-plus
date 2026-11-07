@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v25：缩小导航栏/输入栏高度与图标文字（74→62dp、36→30dp、9→8sp）。
-        versionCode = 25
-        versionName = "0.0.24test"
+        // v27：上一版下移/压行高过头，回调：下移 0.16→0.07，行高恢复正常，间距 0.012。
+        versionCode = 27
+        versionName = "0.0.26test"
     }
 
     buildTypes {

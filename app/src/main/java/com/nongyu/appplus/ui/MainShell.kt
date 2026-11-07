@@ -411,17 +411,27 @@ private fun NavItem(
         modifier = modifier
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
         horizontalAlignment = Alignment.CenterHorizontally,
+        // 整体下移：导航栏本身是垂直居中，加一点顶部内边距把图标+文字压向下方。
+        // 偏移量随图标尺寸等比，避免不同 uiScale 下偏得不一样。
         verticalArrangement = Arrangement.Center,
     ) {
-        Canvas(modifier = Modifier.size(iconSize)) {
-            drawNavIcon(icon, tint)
+        // 整体轻微下移；幅度取图标尺寸的 0.07（上一版 0.16 明显过头）
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.offset(y = (iconSize.value * 0.07f).dp),
+        ) {
+            Canvas(modifier = Modifier.size(iconSize)) {
+                drawNavIcon(icon, tint)
+            }
+            // 图标与文字继续靠近：不留 Spacer，用压缩行高让文字紧贴图标下缘
+            Text(
+                text = label,
+                color = tint,
+                fontSize = labelSize,
+                style = TextStyle(lineHeight = labelSize * 0.92f),
+            )
         }
-        Spacer(modifier = Modifier.height((iconSize.value * 0.028f).dp))
-        Text(
-            text = label,
-            color = tint,
-            fontSize = labelSize,
-        )
     }
 }
 
