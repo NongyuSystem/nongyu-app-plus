@@ -2,11 +2,13 @@ package com.nongyu.appplus.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +29,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,8 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
@@ -74,10 +79,23 @@ fun MainShell() {
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
 
+    // 雷达波：进入/退出激活态（变黑 / 变亮）时各发一圈快速扩散并淡出的圆环。
+    // pulseKey 每次自增就重新跑一遍动画；pulse 从 0→1 驱动半径与透明度。
+    var pulseKey by remember { mutableIntStateOf(0) }
+    val pulse = remember { Animatable(0f) }
+
     val active = mode != OrbMode.Idle
 
     // 退出激活态：返回键优先，其次再次点按。
     BackHandler(enabled = active) { mode = OrbMode.Idle }
+
+    // 激活态切换时触发一次雷达波（变黑与变亮都发）。
+    LaunchedEffect(pulseKey) {
+        if (pulseKey > 0) {
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, animationSpec = tween(520))
+        }
+    }
 
     // 全屏 dim（第 2、3 激活态）
     val dimAlpha by animateFloatAsState(
@@ -132,16 +150,6 @@ fun MainShell() {
             // 仅作占位，无任何业务内容
         }
 
-        // 全屏 dim：激活态时压暗后景
-        if (dimAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(dimAlpha)
-                    .background(Color(0xFF0A140F)),
-            )
-        }
-
         // 底栏：贴底、2+2、中间留空
         Row(
             modifier = Modifier
@@ -160,6 +168,45 @@ fun MainShell() {
             Spacer(modifier = Modifier.width(96.dp))
             NavItem(TABS[2], selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 2 }
             NavItem(TABS[3], selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 3 }
+        }
+
+        // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
+        // （此前画在导航栏之前，导航栏永远不变暗。）
+        if (dimAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(dimAlpha)
+                    .background(Color(0xFF0A140F)),
+            )
+        }
+
+        // 全屏雷达波：从球心（屏幕底部中央）向外扩散到整屏并淡出。
+        // 画在 dim 之后、球体之前 —— 压在暗色后景上、位于球体下层。
+        if (pulse.value > 0f && pulse.value < 1f) {
+            val pv = pulse.value
+            // 扩散半径：从球半径一直覆盖到整屏对角线，保证「全屏」。
+            val ease = 1f - (1f - pv) * (1f - pv)   // easeOut，前段冲得快
+            val ringAlpha = (1f - pv) * 0.55f        // 随扩散淡出
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val cy = size.height - 26.dp.toPx() - 60.dp.toPx()
+                val maxR = kotlin.math.hypot(size.width.toDouble(), size.height.toDouble()).toFloat()
+                val r = 60.dp.toPx() + ease * maxR
+                // 一圈亮环 + 一圈更宽更淡的伴随环，形成雷达波纹
+                drawCircle(
+                    color = colors.brand.colorBrand.copy(alpha = ringAlpha),
+                    radius = r,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = 3.dp.toPx()),
+                )
+                drawCircle(
+                    color = colors.brand.colorBrand.copy(alpha = ringAlpha * 0.45f),
+                    radius = r * 0.86f,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = 10.dp.toPx()),
+                )
+            }
         }
 
         // 正中凸起的农小屿星云球（激活态为最高层）。
@@ -184,11 +231,15 @@ fun MainShell() {
                             // 按下后等待释放；抬手 / 移出 / 手势取消都会返回。
                             // 只有长按态需要「松手后恢复」，点按态(Input)要保留。
                             tryAwaitRelease()
-                            if (longPressed) mode = OrbMode.Idle
+                            if (longPressed) {
+                                mode = OrbMode.Idle
+                                pulseKey++   // 变亮时再发一圈雷达波
+                            }
                         },
                         onLongPress = {
                             longPressed = true
                             mode = OrbMode.Listening
+                            pulseKey++       // 变黑时发一圈雷达波
                         },
                         onTap = {
                             if (!longPressed) {
@@ -202,6 +253,8 @@ fun MainShell() {
             NongyuOrb(
                 diameter = 120.dp,
                 speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
+                // 激活态有全屏 dim，球边缘要消融进暗背景，不能留灰白亮边。
+                dimmed = active,
             )
         }
 
