@@ -1,7 +1,16 @@
 package com.nongyu.appplus.ui.course
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,21 +24,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -37,50 +47,52 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.data.course.AttendanceStatus
-import com.nongyu.appplus.data.course.COURSE_COLOR_PALETTE
-import com.nongyu.appplus.data.course.CourseAttendance
 import com.nongyu.appplus.data.course.CourseEntry
 import com.nongyu.appplus.data.course.CourseRepository
 import com.nongyu.appplus.data.course.PERIOD_ROW_COUNT
 import com.nongyu.appplus.data.course.ScheduleEntry
 import com.nongyu.appplus.data.course.buildWeekGridWithSchedules
-import com.nongyu.appplus.data.course.countAttendanceByCourseId
-import com.nongyu.appplus.data.course.formatAttendanceSummary
-import com.nongyu.appplus.data.course.formatFullAttendanceSummary
-import com.nongyu.appplus.data.course.countFullAttendanceForCourse
-import com.nongyu.appplus.data.course.getCourseColor
 import com.nongyu.appplus.data.course.indexAttendanceBySlot
-import com.nongyu.appplus.data.course.listAttendancesForCourse
 import com.nongyu.appplus.ui.theme.NongyuTheme
+import kotlinx.coroutines.launch
 
 /** 视图模式 */
 private enum class CourseViewMode { Week, Day }
 
 /**
- * 课表页（周视图 / 日视图切换、周次切换、课程详情、日程增删改、考勤）。
+ * 课表页。
  *
- * 数据全部来自 [CourseRepository]（当前为本地假数据）。
- * 本页与导航壳解耦：只依赖 uiScale 缩放系数与主题色。
+ * 本轮改造要点（对齐旧版并修版式）：
+ * 1. 底部避让 [bottomInset]，避免被导航栏遮盖
+ * 2. 左时间列收窄到 30dp
+ * 3. 课程卡做成真正的卡片（圆角 + 内边距 + 轻阴影感）
+ * 4. 左右滑动切周，去掉前后周按钮
+ * 5. 周日列下方放「回本周」矢量按钮
+ * 6. 周/日切换、切周都有过渡动画
+ * 7. 点「第N周」弹出日历快速跳周
+ * 8. 课程详情改为底部抽屉（导航栏变形为标签胶囊的形态）
+ * 9. 今日日期在表头加深底色
  */
 @Composable
 fun CourseScreen(
     uiScale: Float,
+    bottomInset: Dp,
     modifier: Modifier = Modifier,
 ) {
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
     val colors = NongyuTheme.colors
     val state by CourseRepository.state.collectAsState()
+    val scope = rememberCoroutineScope()
 
     var viewMode by rememberSaveable { mutableStateOf(CourseViewMode.Week) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
+    var showWeekPicker by remember { mutableStateOf(false) }
 
-    // 弹窗状态
     var detailCourse by remember { mutableStateOf<CourseEntry?>(null) }
     var detailSchedule by remember { mutableStateOf<ScheduleEntry?>(null) }
     var editingSchedule by remember { mutableStateOf<ScheduleEntry?>(null) }
     var creatingAt by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
-    // 当前周的矩阵（周/日视图共用）
     val week = state.selectedWeek
     val grid = remember(week, state.courses, state.schedules) {
         buildWeekGridWithSchedules(week, state.courses, state.schedules)
@@ -89,21 +101,36 @@ fun CourseScreen(
         indexAttendanceBySlot(state.attendances)
     }
 
-    // 本周每天日期（M/D），由开学日推算
-    val dateLabels = remember(week) {
-        val monday = CourseRepository.semesterStart
-            .plusWeeks((week - 1).toLong())
-        (0..6).map { d -> monday.plusDays(d.toLong()).let { "${it.monthValue}/${it.dayOfMonth}" } }
+    // 本周每天日期与「今天」下标
+    val todayWeek = CourseRepository.computeCurrentWeek(CourseRepository.semesterStart)
+    val todayDayOfWeek = java.time.LocalDate.now().dayOfWeek.value - 1  // 0=周一
+
+    val weekDates = remember(week) {
+        val monday = CourseRepository.semesterStart.plusWeeks((week - 1).toLong())
+        (0..6).map { monday.plusDays(it.toLong()) }
+    }
+    val dateLabels = weekDates.map { "${it.monthValue}/${it.dayOfMonth}" }
+    val todayIndex = if (week == todayWeek) todayDayOfWeek else -1
+
+    /** 切周：带动画方向 */
+    var slideDir by remember { mutableIntStateOf(1) }
+    fun goWeek(delta: Int) {
+        val target = (week + delta).coerceIn(1, state.maxWeek)
+        if (target != week) {
+            slideDir = if (delta > 0) 1 else -1
+            CourseRepository.selectWeek(target)
+        }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(top = s(6.dp), start = s(14.dp), end = s(14.dp)),
+            .padding(top = s(4.dp), start = s(12.dp), end = s(12.dp))
+            .padding(bottom = bottomInset),
     ) {
-        // ---------- 标题栏：农屿课表 + 右侧三个圆形按钮 ----------
+        // ================= 标题栏 =================
         Row(
-            modifier = Modifier.fillMaxWidth().height(s(40.dp)),
+            modifier = Modifier.fillMaxWidth().height(s(42.dp)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -113,80 +140,139 @@ fun CourseScreen(
                 color = colors.surface.colorText,
             )
             Spacer(modifier = Modifier.weight(1f))
-            // 周/日视图切换（旧版是日历图标，这里用分段控件更直观）
+
+            // 周/日切换（带滑块动画）
             ViewModeSwitch(mode = viewMode, uiScale = uiScale, onChange = { viewMode = it })
-            Spacer(modifier = Modifier.width(s(8.dp)))
-            // 上一周 / 下一周
-            CircleHeaderButton("‹", enabled = week > 1, uiScale = uiScale) {
-                CourseRepository.selectWeek(week - 1)
-            }
-            Spacer(modifier = Modifier.width(s(6.dp)))
-            CircleHeaderButton("›", enabled = week < state.maxWeek, uiScale = uiScale) {
-                CourseRepository.selectWeek(week + 1)
-            }
         }
 
-        // 不在本周时给一个轻量入口
-        if (week != state.currentWeek) {
-            Box(
+        Spacer(modifier = Modifier.height(s(2.dp)))
+
+        // ================= 表头：第N周(可点) + 星期 =================
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // 左：第N周 / 共M周（点击弹日历）
+            Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(s(8.dp)))
-                    .background(colors.brand.colorBrand.copy(alpha = 0.10f))
-                    .pointerInput(week) {
-                        detectTapGestures(onTap = { CourseRepository.backToCurrentWeek() })
+                    .clip(RoundedCornerShape(s(9.dp)))
+                    .background(colors.brand.colorBrand.copy(alpha = 0.09f))
+                    .pointerInput(state.maxWeek) {
+                        detectTapGestures(onTap = { showWeekPicker = true })
                     }
-                    .padding(horizontal = s(10.dp), vertical = s(3.dp)),
+                    .padding(horizontal = s(8.dp), vertical = s(4.dp)),
             ) {
                 Text(
-                    text = "回到第 ${state.currentWeek} 周",
-                    fontSize = (10 * uiScale).sp,
+                    text = "第${week}周",
+                    fontSize = (12 * uiScale).sp,
+                    fontWeight = FontWeight.Bold,
                     color = colors.brand.colorBrand,
                 )
+                Text(
+                    text = "共${state.maxWeek}周",
+                    fontSize = (8 * uiScale).sp,
+                    color = colors.surface.colorTextSecondary,
+                )
             }
-            Spacer(modifier = Modifier.height(s(4.dp)))
+
+            Spacer(modifier = Modifier.width(s(6.dp)))
+
+            // 右：周一~周日 + 日期（今天加深）
+            Row(modifier = Modifier.weight(1f)) {
+                dayHeaders(
+                    dateLabels = dateLabels,
+                    todayIndex = todayIndex,
+                    uiScale = uiScale,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
 
-        // ---------- 课表主体：10 行撑满剩余高度 ----------
+        Spacer(modifier = Modifier.height(s(4.dp)))
+
+        // ================= 课表主体（左右滑动切周 + 切换动画）=================
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .pointerInput(state.maxWeek) {
+                    var accumulated = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { accumulated = 0f },
+                        onHorizontalDrag = { _, dragAmount -> accumulated += dragAmount },
+                        onDragEnd = {
+                            val threshold = 60f
+                            if (accumulated < -threshold) goWeek(1)
+                            else if (accumulated > threshold) goWeek(-1)
+                            accumulated = 0f
+                        },
+                    )
+                },
         ) {
-            // 表头（第N周/共M周 + 星期 + 日期）约 36dp
-            val headerH = s(36.dp)
-            val available = (maxHeight - headerH).coerceAtLeast(s(28.dp * PERIOD_ROW_COUNT))
-            val rowH = available / PERIOD_ROW_COUNT
+            val rowH = ((maxHeight - s(4.dp)) / PERIOD_ROW_COUNT)
+                .coerceAtLeast(s(24.dp))
 
-            when (viewMode) {
-                CourseViewMode.Week -> WeekGrid(
-                    grid = grid,
-                    attendanceBySlot = attendanceBySlot,
-                    week = week,
-                    rowHeight = rowH,
-                    maxWeek = state.maxWeek,
-                    dateLabels = dateLabels,
-                    onCourseClick = { detailCourse = it },
-                    onScheduleClick = { detailSchedule = it },
-                    onEmptyCellClick = { day, period -> creatingAt = day to period },
-                )
-                CourseViewMode.Day -> DayView(
-                    grid = grid,
-                    selectedDay = selectedDay,
-                    onSelectDay = { selectedDay = it },
-                    attendanceBySlot = attendanceBySlot,
-                    week = week,
-                    dateLabels = dateLabels,
-                    onCourseClick = { detailCourse = it },
-                    onScheduleClick = { detailSchedule = it },
-                    onEmptyCellClick = { day, period -> creatingAt = day to period },
-                )
+            AnimatedContent(
+                targetState = viewMode to week,
+                transitionSpec = {
+                    val forward = (targetState.second - initialState.second) >= 0
+                    val dir = if (forward) 1 else -1
+                    (slideInHorizontally(tween(260)) { it / 4 * dir } + fadeIn(tween(200)))
+                        .togetherWith(
+                            slideOutHorizontally(tween(260)) { -it / 4 * dir } + fadeOut(tween(160)),
+                        )
+                },
+                label = "courseSwap",
+            ) { (mode, _) ->
+                when (mode) {
+                    CourseViewMode.Week -> WeekGrid(
+                        grid = grid,
+                        attendanceBySlot = attendanceBySlot,
+                        week = week,
+                        rowHeight = rowH,
+                        maxWeek = state.maxWeek,
+                        dateLabels = dateLabels,
+                        todayIndex = todayIndex,
+                        uiScale = uiScale,
+                        isCurrentWeek = week == todayWeek,
+                        onBackToToday = { CourseRepository.backToCurrentWeek() },
+                        onCourseClick = { detailCourse = it },
+                        onScheduleClick = { detailSchedule = it },
+                        onEmptyCellClick = { day, period -> creatingAt = day to period },
+                    )
+                    CourseViewMode.Day -> DayView(
+                        grid = grid,
+                        selectedDay = selectedDay,
+                        onSelectDay = { selectedDay = it },
+                        attendanceBySlot = attendanceBySlot,
+                        week = week,
+                        dateLabels = dateLabels,
+                        todayIndex = todayIndex,
+                        uiScale = uiScale,
+                        onCourseClick = { detailCourse = it },
+                        onScheduleClick = { detailSchedule = it },
+                        onEmptyCellClick = { day, period -> creatingAt = day to period },
+                    )
+                }
             }
         }
     }
 
-    // ---------- 弹窗 ----------
+    // ================= 弹层 =================
+    if (showWeekPicker) {
+        WeekPickerSheet(
+            currentWeek = week,
+            maxWeek = state.maxWeek,
+            todayWeek = todayWeek,
+            uiScale = uiScale,
+            onPick = { w ->
+                slideDir = if (w >= week) 1 else -1
+                CourseRepository.selectWeek(w)
+                showWeekPicker = false
+            },
+            onDismiss = { showWeekPicker = false },
+        )
+    }
+
     detailCourse?.let { course ->
-        CourseDetailDialog(
+        CourseDetailSheet(
             course = course,
             week = week,
             attendances = state.attendances,
@@ -199,7 +285,7 @@ fun CourseScreen(
     }
 
     detailSchedule?.let { schedule ->
-        ScheduleDetailDialog(
+        ScheduleDetailSheet(
             schedule = schedule,
             uiScale = uiScale,
             onDismiss = { detailSchedule = null },
@@ -215,7 +301,7 @@ fun CourseScreen(
     }
 
     editingSchedule?.let { schedule ->
-        ScheduleFormDialog(
+        ScheduleFormSheet(
             initial = schedule,
             uiScale = uiScale,
             onDismiss = { editingSchedule = null },
@@ -227,10 +313,9 @@ fun CourseScreen(
     }
 
     creatingAt?.let { (day, period) ->
-        // period 已经是 1..10 的节次（空节点按所在行直接给出），这里只需夹紧范围
         val sp = period.coerceIn(1, 10)
         val ep = (sp + 1).coerceIn(sp, 10)
-        ScheduleFormDialog(
+        ScheduleFormSheet(
             initial = ScheduleEntry(
                 id = "s_${System.currentTimeMillis()}",
                 title = "",
@@ -251,31 +336,54 @@ fun CourseScreen(
     }
 }
 
-/** 标题栏圆形按钮（上一周/下一周）—— 对齐旧版右上角的圆形图标按钮 */
+/** 周一到周日表头：日期，今天加深底色 */
 @Composable
-private fun CircleHeaderButton(label: String, enabled: Boolean, uiScale: Float, onClick: () -> Unit) {
+private fun dayHeaders(
+    dateLabels: List<String>,
+    todayIndex: Int,
+    uiScale: Float,
+    modifier: Modifier = Modifier,
+) {
     val colors = NongyuTheme.colors
-    val size = (32 * uiScale).dp
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(size / 2))
-            .background(colors.brand.colorBrand.copy(alpha = 0.10f))
-            .pointerInput(enabled) {
-                if (enabled) detectTapGestures(onTap = { onClick() })
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            fontSize = (17 * uiScale).sp,
-            color = if (enabled) colors.brand.colorBrand
-            else colors.surface.colorTextSecondary.copy(alpha = 0.25f),
-        )
+    Row(modifier = modifier) {
+        com.nongyu.appplus.data.course.WEEKDAY_LABELS.forEachIndexed { i, label ->
+            val isToday = i == todayIndex
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape((7 * uiScale).dp))
+                        .background(
+                            if (isToday) colors.brand.colorBrand.copy(alpha = 0.14f)
+                            else Color.Transparent,
+                        )
+                        .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = label.removePrefix("周"),
+                            fontSize = (10 * uiScale).sp,
+                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isToday) colors.brand.colorBrand
+                            else colors.surface.colorTextSecondary,
+                        )
+                        Text(
+                            text = dateLabels.getOrElse(i) { "" },
+                            fontSize = (8 * uiScale).sp,
+                            color = if (isToday) colors.brand.colorBrand
+                            else colors.surface.colorTextSecondary.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
-/** 周/日切换分段控件 */
+/** 周/日切换：带滑块动画的分段控件 */
 @Composable
 private fun ViewModeSwitch(
     mode: CourseViewMode,
@@ -283,30 +391,69 @@ private fun ViewModeSwitch(
     onChange: (CourseViewMode) -> Unit,
 ) {
     val colors = NongyuTheme.colors
+    val isDay = mode == CourseViewMode.Day
+    val bgAlpha by animateFloatAsState(
+        targetValue = if (isDay) 1f else 0f,
+        animationSpec = tween(220),
+        label = "modeBg",
+    )
+
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(colors.surface.colorCard)
-            .border(0.5.dp, colors.surface.colorOutline.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
-            .padding(2.dp),
+            .clip(RoundedCornerShape((10 * uiScale).dp))
+            .background(colors.brand.colorBrand.copy(alpha = 0.10f))
+            .padding((2 * uiScale).dp),
     ) {
         listOf(CourseViewMode.Week to "周", CourseViewMode.Day to "日").forEach { (m, label) ->
             val selected = mode == m
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(if (selected) colors.brand.colorBrand else Color.Transparent)
+                    .clip(RoundedCornerShape((8 * uiScale).dp))
+                    .background(
+                        if (selected) colors.brand.colorBrand else Color.Transparent,
+                    )
                     .pointerInput(m) { detectTapGestures(onTap = { onChange(m) }) }
-                    // 点击区域至少 36x26dp：原来只有 10x3dp padding，太小点不中
-                    .padding(horizontal = (16 * uiScale).dp, vertical = (7 * uiScale).dp),
+                    .padding(horizontal = (14 * uiScale).dp, vertical = (5 * uiScale).dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = label,
                     fontSize = (11 * uiScale).sp,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                     color = if (selected) Color.White else colors.surface.colorTextSecondary,
                 )
             }
+        }
+    }
+}
+
+/** 周日列下方的「回到本周」矢量按钮 */
+@Composable
+fun BackToTodayButton(
+    uiScale: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = NongyuTheme.colors
+    val size = (22 * uiScale).dp
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(colors.brand.colorBrand)
+            .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
+        contentAlignment = Alignment.Center,
+    ) {
+        // 矢量「回到今天」图标：圆环 + 中心点
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(size * 0.58f)) {
+            val r = size.toPx() * 0.58f / 2f
+            val sw = r * 0.30f
+            drawCircle(
+                color = Color.White,
+                radius = r * 0.72f,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sw),
+            )
+            drawCircle(color = Color.White, radius = r * 0.26f)
         }
     }
 }
