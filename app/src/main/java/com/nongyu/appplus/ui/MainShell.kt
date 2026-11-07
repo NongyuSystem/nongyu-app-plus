@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.ai.NongyuOrb
@@ -139,13 +141,15 @@ fun MainShell() {
         animationSpec = tween(420),
         label = "inputScale",
     )
+    // 输入框与导航栏**完全同步**：高 74dp、圆角 24dp、左右 18dp。
+    // 收敛态（变形前）用接近胶囊的圆角，展开到位即与导航栏一致。
     val inputHeight by animateDpAsState(
-        targetValue = 64.dp,
+        targetValue = 74.dp,
         animationSpec = tween(420),
         label = "inputHeight",
     )
     val inputCorner by animateDpAsState(
-        targetValue = if (mode == OrbMode.Input) 22.dp else 66.dp,
+        targetValue = if (mode == OrbMode.Input) 24.dp else 66.dp,
         animationSpec = tween(420),
         label = "inputCorner",
     )
@@ -160,8 +164,7 @@ fun MainShell() {
             // 仅作占位，无任何业务内容
         }
 
-        // 底栏：贴底、2+2、中间留空。
-        // 尺寸：高 74.dp、左右各 18.dp（比上一版的 10.dp 各缩 8dp，整体更窄）。
+        // 底栏：贴底、2+2、中间留空。边界用 featheredEdge 虚化（无硬边框）。
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -169,9 +172,9 @@ fun MainShell() {
                 .fillMaxWidth()
                 .height(74.dp)
                 .alpha(navAlpha)
+                .featheredEdge(colors.navBar.colorItem, 24.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(colors.navBar.colorContainer)
-                .border(1.dp, colors.surface.colorOutline, RoundedCornerShape(24.dp)),
+                .background(colors.navBar.colorContainer),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 0 }
@@ -305,9 +308,10 @@ fun MainShell() {
                         scaleX = inputScale
                         transformOrigin = TransformOrigin(0.5f, 0.5f)
                     }
+                    // 与导航栏用同一套虚化边界，二者观感一致
+                    .featheredEdge(colors.navBar.colorItem, inputCorner)
                     .clip(RoundedCornerShape(inputCorner))
                     .background(colors.surface.colorCard)
-                    .border(1.dp, colors.surface.colorOutline, RoundedCornerShape(inputCorner))
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -343,6 +347,31 @@ fun MainShell() {
 private enum class NavIcon { Grid, Calendar, Compass, Person }
 
 /**
+ * 边界虚化 Modifier：在控件外侧画多层「逐圈外扩 + alpha 递减」的圆角描边，
+ * 等效于把边界向外糊开约 6.dp，边界自然过渡到背景，没有生硬的 1.dp 线条。
+ *
+ * 注意：Compose 没有「背景毛玻璃 / backdrop blur」能力
+ * （Modifier.blur / RenderEffect 模糊的是控件自身，不是背后内容，且 API<31 失效），
+ * 所以这里用「多层柔边」做出虚化观感，而不是真正的背景模糊。
+ */
+private fun Modifier.featheredEdge(tint: Color, corner: Dp): Modifier = this.drawBehind {
+    val cornerPx = corner.toPx()
+    val layers = 7
+    for (i in layers downTo 1) {
+        val t = i / layers.toFloat()               // 1.0(最外) .. 0.14(最内)
+        val expand = t * 6.dp.toPx()               // 外扩距离
+        val a = (1f - t) * 0.10f                   // 越外越淡
+        drawRoundRect(
+            color = tint.copy(alpha = a),
+            topLeft = Offset(-expand, -expand * 0.7f),
+            size = Size(size.width + expand * 2f, size.height + expand * 1.4f),
+            cornerRadius = CornerRadius(cornerPx + expand, cornerPx + expand),
+            style = Stroke(width = 1.2.dp.toPx() * (1f - t * 0.5f)),
+        )
+    }
+}
+
+/**
  * 单个导航项：图标 + 文案。
  * 尺寸：图标 26.dp（原 20.dp 偏小），文字 9.sp（原 10.sp 偏大）。
  * 选中态：图标与文字都用品牌色，未选中用低透明度中性色。
@@ -364,7 +393,7 @@ private fun NavItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Canvas(modifier = Modifier.size(32.dp)) {
+        Canvas(modifier = Modifier.size(36.dp)) {
             drawNavIcon(icon, tint)
         }
         Spacer(modifier = Modifier.height(1.dp))

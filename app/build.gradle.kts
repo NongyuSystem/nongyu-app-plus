@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v20：导航栏左右更窄（10→18dp）、图标 26→32dp、图标与文字间距 3→1dp。
-        versionCode = 20
-        versionName = "0.0.19test"
+        // v22：输入栏与导航栏完全同步（高 74dp / 圆角 24dp / 左右 18dp / 同一套虚化边界）。
+        versionCode = 22
+        versionName = "0.0.21test"
     }
 
     buildTypes {
