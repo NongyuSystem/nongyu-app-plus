@@ -60,6 +60,17 @@ import kotlinx.coroutines.launch
 private enum class CourseViewMode { Week, Day }
 
 /**
+ * 课程/日程详情在**底部导航栏位置**要展示的信息。
+ * MainShell 收到后会让导航栏原地变形为一排标签胶囊（而不是另开弹窗）。
+ */
+data class CourseDetailBar(
+    val title: String,
+    val pills: List<String>,
+    val courseId: String? = null,
+    val scheduleId: String? = null,
+)
+
+/**
  * 课表页。
  *
  * 本轮改造要点（对齐旧版并修版式）：
@@ -77,6 +88,11 @@ private enum class CourseViewMode { Week, Day }
 fun CourseScreen(
     uiScale: Float,
     bottomInset: Dp,
+    /**
+     * 详情状态上报：非 null 时底部导航栏会**变形为标签胶囊**（第 8 项要求），
+     * 由 MainShell 绘制，因此这里把「标题 + 胶囊列表」传上去。
+     */
+    onDetailChange: (CourseDetailBar?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
@@ -175,7 +191,11 @@ fun CourseScreen(
             Spacer(modifier = Modifier.width(s(6.dp)))
 
             // 右：周一~周日 + 日期（今天加深）
+            // 关键：表头必须与网格用**完全相同的左侧占位**（22dp 节次列 + 0.5dp 分隔线），
+            // 否则每天列宽基准不同，表头和格子永远对不齐。
             Row(modifier = Modifier.weight(1f)) {
+                // 占位：与 WeekGrid 的节次列等宽
+                Spacer(modifier = Modifier.width(s(22.dp) + 0.5.dp))
                 dayHeaders(
                     dateLabels = dateLabels,
                     todayIndex = todayIndex,
@@ -272,16 +292,31 @@ fun CourseScreen(
     }
 
     detailCourse?.let { course ->
-        CourseDetailSheet(
-            course = course,
-            week = week,
-            attendances = state.attendances,
-            uiScale = uiScale,
-            onDismiss = { detailCourse = null },
-            onSetAttendance = { status ->
-                CourseRepository.setAttendance(course.id, week, course.day, status)
-            },
-        )
+        // 课程详情**不再弹窗**：上报给 MainShell，让底部导航栏原地变形为标签胶囊。
+        androidx.compose.runtime.LaunchedEffect(course, week) {
+            onDetailChange(
+                CourseDetailBar(
+                    title = course.name,
+                    pills = buildList {
+                        add("📍 ${course.room.ifBlank { "—" }}")
+                        add("👤 ${course.teacher.ifBlank { "—" }}")
+                        add(
+                            "🕘 周${"一二三四五六日"[course.day - 1]} " +
+                                "${course.startPeriod}-${course.endPeriod}节 " +
+                                "${com.nongyu.appplus.data.course.periodStart(course.startPeriod)}" +
+                                "-${com.nongyu.appplus.data.course.periodEnd(course.endPeriod)}",
+                        )
+                        add("📅 ${weekLabel(course)}")
+                    },
+                    courseId = course.id,
+                ),
+            )
+        }
+    }
+
+    // 详情关闭时清掉上报
+    androidx.compose.runtime.LaunchedEffect(detailCourse) {
+        if (detailCourse == null) onDetailChange(null)
     }
 
     detailSchedule?.let { schedule ->
@@ -333,6 +368,18 @@ fun CourseScreen(
                 creatingAt = null
             },
         )
+    }
+}
+
+/** 周次文案（本文件内用） */
+private fun weekLabel(course: CourseEntry): String {
+    val list = course.weeksList
+    if (!list.isNullOrEmpty()) return list.sorted().joinToString(",") + "周"
+    val base = "${course.weeks.start}-${course.weeks.end}周"
+    return when {
+        course.odd -> "$base（单）"
+        course.even -> "$base（双）"
+        else -> base
     }
 }
 

@@ -172,10 +172,12 @@ private fun EmptySlot(height: Dp, onClick: () -> Unit) {
 }
 
 /**
- * 课程卡片：真正的卡片视觉。
- * - 圆角 9dp、内边距 4dp
- * - 左上角一条 2dp 宽的色带（用课程主色的加深版）
- * - 课程名加粗、地点次之、教师最淡
+ * 课程卡片。
+ *
+ * 按反馈简化：
+ * - **整张卡一个底色**，不再有左侧独立色条；
+ * - 内容**上下居中**（原来顶部对齐显得头重脚轻）；
+ * - 圆角 8dp，内边距 4dp，课程名为主、地点教师为次。
  */
 @Composable
 private fun CourseCard(
@@ -206,7 +208,7 @@ private fun CourseCard(
             .height(height)
             .padding(horizontal = s(1.5.dp), vertical = s(1.5.dp))
             .fillMaxWidth()
-            .clip(RoundedCornerShape(s(9.dp)))
+            .clip(RoundedCornerShape(s(12.dp)))
             .background(Color(color.bg))
             .pointerInput(course?.id, schedules.firstOrNull()?.id) {
                 detectTapGestures(
@@ -215,22 +217,15 @@ private fun CourseCard(
                         else schedules.firstOrNull()?.let(onClickSchedule)
                     },
                 )
-            },
+            }
+            .padding(horizontal = s(4.dp), vertical = s(3.dp)),
+        // 内容整体上下居中
+        contentAlignment = Alignment.Center,
     ) {
-        // 左侧色带（卡片"身份条"）
-        Box(
-            modifier = Modifier
-                .width(s(2.5.dp))
-                .height(height - s(3.dp))
-                .offset(x = s(0.5.dp), y = s(1.5.dp))
-                .clip(RoundedCornerShape(s(2.dp)))
-                .background(accent.copy(alpha = 0.85f)),
-        )
-
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = s(6.dp), end = s(3.dp), top = s(3.dp), bottom = s(2.dp)),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = name,
@@ -240,6 +235,7 @@ private fun CourseCard(
                 maxLines = if (height > 60.dp) 4 else 3,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = (11.5f * uiScale).sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
             val place = course?.room ?: schedules.firstOrNull()?.location
             if (!place.isNullOrBlank() && height > 46.dp) {
@@ -247,18 +243,20 @@ private fun CourseCard(
                 Text(
                     text = place,
                     fontSize = (8 * uiScale).sp,
-                    color = accent.copy(alpha = 0.62f),
+                    color = accent.copy(alpha = 0.60f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
-            if (!course?.teacher.isNullOrBlank() && height > 62.dp) {
+            if (!course?.teacher.isNullOrBlank() && height > 66.dp) {
                 Text(
                     text = course.teacher,
                     fontSize = (8 * uiScale).sp,
-                    color = accent.copy(alpha = 0.55f),
+                    color = accent.copy(alpha = 0.52f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
         }
@@ -268,7 +266,6 @@ private fun CourseCard(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(s(2.dp))
                     .clip(RoundedCornerShape(s(4.dp)))
                     .background(accent.copy(alpha = 0.16f))
                     .padding(horizontal = s(3.dp), vertical = s(0.5.dp)),
@@ -286,7 +283,6 @@ private fun CourseCard(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(s(2.dp))
                     .clip(RoundedCornerShape(s(4.dp)))
                     .background(accent.copy(alpha = 0.18f))
                     .padding(horizontal = s(3.dp), vertical = s(0.5.dp)),

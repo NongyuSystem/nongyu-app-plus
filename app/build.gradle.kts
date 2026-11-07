@@ -12,10 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v35：课表交互与视觉大改 —— 底部避让、滑动切周、卡片化、底部抽屉、
-        // 日历选周、今日高亮、切换动画、时间列收窄。
-        versionCode = 35
-        versionName = "0.1.5test"
+        // v36：修表头对齐、卡片圆角化+内容居中+去左侧色条、导航栏变形为标签胶囊、
+        // 返回按钮改为「收起」胶囊。
+        versionCode = 36
+        versionName = "0.1.6test"
     }
 
     buildTypes {
