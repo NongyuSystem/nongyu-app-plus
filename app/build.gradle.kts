@@ -12,9 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v22：输入栏与导航栏完全同步（高 74dp / 圆角 24dp / 左右 18dp / 同一套虚化边界）。
-        versionCode = 22
-        versionName = "0.0.21test"
+        // v23：尺寸自适应 —— 以 411dp（典型手机）为基准按屏宽缩放并夹在 0.85~1.55，
+        // 解决蓝叠 1280dp 宽画布与手机 411dp 宽画布上组件观感差异过大的问题。
+        versionCode = 23
+        versionName = "0.0.22test"
     }
 
     buildTypes {

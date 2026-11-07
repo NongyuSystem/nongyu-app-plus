@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +58,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.ai.NongyuOrb
@@ -141,24 +143,36 @@ fun MainShell() {
         animationSpec = tween(420),
         label = "inputScale",
     )
-    // 输入框与导航栏**完全同步**：高 74dp、圆角 24dp、左右 18dp。
-    // 收敛态（变形前）用接近胶囊的圆角，展开到位即与导航栏一致。
-    val inputHeight by animateDpAsState(
-        targetValue = 74.dp,
-        animationSpec = tween(420),
-        label = "inputHeight",
-    )
-    val inputCorner by animateDpAsState(
-        targetValue = if (mode == OrbMode.Input) 24.dp else 66.dp,
-        animationSpec = tween(420),
-        label = "inputCorner",
-    )
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.surface.colorBackground),
     ) {
+        // 尺寸自适应：固定 dp 在不同 dp 宽度的设备上观感差异极大
+        // （蓝叠 1920x1080@240dpi = 1280dp 宽，手机 1080x2400@420dpi ≈ 411dp 宽，
+        //   同一组固定 dp 在大屏上显得很小、在小屏上显得很大）。
+        // 这里以 411dp（典型手机）为基准，按屏宽缩放，并夹在合理区间内。
+        val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.55f)
+        fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+
+        val navHeight = s(74.dp)
+        val navPadding = s(18.dp)
+        val navCorner = s(24.dp)
+        // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
+        val inputHeight by animateDpAsState(
+            targetValue = navHeight,
+            animationSpec = tween(420),
+            label = "inputHeight",
+        )
+        val inputCorner by animateDpAsState(
+            targetValue = if (mode == OrbMode.Input) navCorner else s(66.dp),
+            animationSpec = tween(420),
+            label = "inputCorner",
+        )
+        val iconSize = s(36.dp)
+        val labelSize = (9f * uiScale).sp
+
         // 四个页面：全白留空
         Box(modifier = Modifier.fillMaxSize()) {
             // 仅作占位，无任何业务内容
@@ -168,20 +182,20 @@ fun MainShell() {
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 18.dp, vertical = 18.dp)
+                .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
-                .height(74.dp)
+                .height(navHeight)
                 .alpha(navAlpha)
-                .featheredEdge(colors.navBar.colorItem, 24.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .featheredEdge(colors.navBar.colorItem, navCorner)
+                .clip(RoundedCornerShape(navCorner))
                 .background(colors.navBar.colorContainer),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 0 }
-            NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 1 }
-            Spacer(modifier = Modifier.width(96.dp))
-            NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 2 }
-            NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 3 }
+            NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 0 }
+            NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 1 }
+            Spacer(modifier = Modifier.width(s(96.dp)))
+            NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 2 }
+            NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 3 }
         }
 
         // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
@@ -383,6 +397,8 @@ private fun NavItem(
     selected: Boolean,
     itemColor: Color,
     indicatorColor: Color,
+    iconSize: Dp,
+    labelSize: TextUnit,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -393,14 +409,14 @@ private fun NavItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Canvas(modifier = Modifier.size(36.dp)) {
+        Canvas(modifier = Modifier.size(iconSize)) {
             drawNavIcon(icon, tint)
         }
-        Spacer(modifier = Modifier.height(1.dp))
+        Spacer(modifier = Modifier.height((iconSize.value * 0.028f).dp))
         Text(
             text = label,
             color = tint,
-            fontSize = 9.sp,
+            fontSize = labelSize,
         )
     }
 }
