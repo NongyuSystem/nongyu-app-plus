@@ -158,9 +158,9 @@ fun MainShell() {
         val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
         fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
-        val navHeight = s(74.dp)
+        val navHeight = s(62.dp)
         val navPadding = s(18.dp)
-        val navCorner = s(24.dp)
+        val navCorner = s(20.dp)
         // 球体也必须参与缩放，否则其他元素变大、球固定 120dp 会显得变小
         val orbSize = s(120.dp)
         // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
@@ -174,8 +174,8 @@ fun MainShell() {
             animationSpec = tween(420),
             label = "inputCorner",
         )
-        val iconSize = s(36.dp)
-        val labelSize = (9f * uiScale).sp
+        val iconSize = s(30.dp)
+        val labelSize = (8f * uiScale).sp
 
         // 四个页面：全白留空
         Box(modifier = Modifier.fillMaxSize()) {
@@ -411,17 +411,27 @@ private fun NavItem(
         modifier = modifier
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
         horizontalAlignment = Alignment.CenterHorizontally,
+        // 整体下移：导航栏本身是垂直居中，加一点顶部内边距把图标+文字压向下方。
+        // 偏移量随图标尺寸等比，避免不同 uiScale 下偏得不一样。
         verticalArrangement = Arrangement.Center,
     ) {
-        Canvas(modifier = Modifier.size(iconSize)) {
-            drawNavIcon(icon, tint)
+        // 整体轻微下移；幅度取图标尺寸的 0.07（上一版 0.16 明显过头）
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.offset(y = (iconSize.value * 0.07f).dp),
+        ) {
+            Canvas(modifier = Modifier.size(iconSize)) {
+                drawNavIcon(icon, tint)
+            }
+            // 图标与文字继续靠近：不留 Spacer，用压缩行高让文字紧贴图标下缘
+            Text(
+                text = label,
+                color = tint,
+                fontSize = labelSize,
+                style = TextStyle(lineHeight = labelSize * 0.92f),
+            )
         }
-        Spacer(modifier = Modifier.height((iconSize.value * 0.028f).dp))
-        Text(
-            text = label,
-            color = tint,
-            fontSize = labelSize,
-        )
     }
 }
 

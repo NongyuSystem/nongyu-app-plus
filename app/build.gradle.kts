@@ -11,13 +11,15 @@ android {
         applicationId = "com.nongyu.appplus"
         minSdk = 26
         targetSdk = 36
-        // 每次打包都必须递增 versionCode / versionName，并 commit + push �?GitHub�?        // v23：尺寸自适应 —�?�?411dp（典型手机）为基准按屏宽缩放并夹�?0.85~1.55�?        // 解决蓝叠 1280dp 宽画布与手机 411dp 宽画布上组件观感差异过大的问题�?        versionCode = 24
-        versionName = "0.0.23test"
+        // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
+        // v27：上一版下移/压行高过头，回调：下移 0.16→0.07，行高恢复正常，间距 0.012。
+        versionCode = 27
+        versionName = "0.0.26test"
     }
 
     buildTypes {
         release {
-            // 骨架阶段不开启混淆，避免为占位代码维�?keep 规则
+            // 骨架阶段不开启混淆，避免为占位代码维护 keep 规则
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
