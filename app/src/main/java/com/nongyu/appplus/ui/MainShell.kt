@@ -158,9 +158,9 @@ fun MainShell() {
         val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
         fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
-        val navHeight = s(74.dp)
+        val navHeight = s(62.dp)
         val navPadding = s(18.dp)
-        val navCorner = s(24.dp)
+        val navCorner = s(20.dp)
         // 球体也必须参与缩放，否则其他元素变大、球固定 120dp 会显得变小
         val orbSize = s(120.dp)
         // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
@@ -174,8 +174,8 @@ fun MainShell() {
             animationSpec = tween(420),
             label = "inputCorner",
         )
-        val iconSize = s(36.dp)
-        val labelSize = (9f * uiScale).sp
+        val iconSize = s(30.dp)
+        val labelSize = (8f * uiScale).sp
 
         // 四个页面：全白留空
         Box(modifier = Modifier.fillMaxSize()) {
