@@ -153,12 +153,16 @@ fun MainShell() {
         // （蓝叠 1920x1080@240dpi = 1280dp 宽，手机 1080x2400@420dpi ≈ 411dp 宽，
         //   同一组固定 dp 在大屏上显得很小、在小屏上显得很大）。
         // 这里以 411dp（典型手机）为基准，按屏宽缩放，并夹在合理区间内。
-        val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.55f)
+        // 上限压到 1.25：手机上 1.0，720dp 的平板/模拟器上约 1.25，
+        // 避免大画布上整套 UI 被等比放大得过于笨重（之前 1.55 明显过大）。
+        val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
         fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
         val navHeight = s(74.dp)
         val navPadding = s(18.dp)
         val navCorner = s(24.dp)
+        // 球体也必须参与缩放，否则其他元素变大、球固定 120dp 会显得变小
+        val orbSize = s(120.dp)
         // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
         val inputHeight by animateDpAsState(
             targetValue = navHeight,
@@ -215,9 +219,9 @@ fun MainShell() {
             val pv = pulse.value
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
-                val cy = size.height - 26.dp.toPx() - 60.dp.toPx()
+                val cy = size.height - s(26.dp).toPx() - (orbSize / 2).toPx()
                 val maxR = kotlin.math.hypot(size.width.toDouble(), size.height.toDouble()).toFloat()
-                val r0 = 60.dp.toPx()                      // 球体边缘
+                val r0 = (orbSize / 2).toPx()              // 球体边缘
                 // 浅绿波纹：暗底上不能用深品牌绿，否则显得很脏很沉。
                 val ringColor = Color(0xFF7FD9A8)
 
@@ -258,8 +262,8 @@ fun MainShell() {
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = (-26).dp)
-                .size(120.dp)
+                .offset(y = s(-26.dp))
+                .size(orbSize)
                 .scale(orbScale)
                 .alpha(orbAlpha)
                 // 不 clip(CircleShape)：星云球边缘在渲染层已羽化到透明，
@@ -295,7 +299,7 @@ fun MainShell() {
             contentAlignment = Alignment.Center,
         ) {
             NongyuOrb(
-                diameter = 120.dp,
+                diameter = orbSize,
                 speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
                 // 激活态有全屏 dim，球边缘要消融进暗背景，不能留灰白亮边。
                 dimmed = active,
