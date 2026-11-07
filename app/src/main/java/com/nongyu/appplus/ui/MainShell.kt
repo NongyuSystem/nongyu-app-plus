@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.ai.NongyuOrb
+import com.nongyu.appplus.ui.course.CourseScreen
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
@@ -180,9 +181,17 @@ fun MainShell() {
         val iconSize = s(30.dp)
         val labelSize = (8f * uiScale).sp
 
-        // 四个页面：全白留空
+        // 页面内容：目前只有「课表」有实现，其余三页仍为留白占位。
         Box(modifier = Modifier.fillMaxSize()) {
-            // 仅作占位，无任何业务内容
+            when (selectedTab) {
+                1 -> CourseScreen(
+                    uiScale = uiScale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                else -> {
+                    // 全部 / 探索 / 个人：暂留空白，后续迭代补齐
+                }
+            }
         }
 
         // 底栏：贴底、2+2、中间留空。边界用 featheredEdge 虚化（无硬边框）。
