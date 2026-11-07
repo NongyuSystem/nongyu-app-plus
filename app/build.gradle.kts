@@ -12,9 +12,10 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v29：球体 96→78dp（光晕外扩使观感大于几何尺寸，需要再收一档）。
-        versionCode = 29
-        versionName = "0.0.28test"
+        // v32：修日视图崩溃 —— DayView 内层 verticalScroll 嵌在外层 verticalScroll 里，
+        // 导致无限高度约束；改为只由外层滚动。
+        versionCode = 32
+        versionName = "0.1.2test"
     }
 
     buildTypes {
