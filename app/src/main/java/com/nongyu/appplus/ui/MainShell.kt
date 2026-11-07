@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -148,7 +149,10 @@ fun MainShell() {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.surface.colorBackground),
+            .background(colors.surface.colorBackground)
+            // enableEdgeToEdge() 后内容会铺到状态栏/手势条下方，
+            // 必须显式避让安全区，否则页面顶部会和系统下拉栏糊在一起。
+            .statusBarsPadding(),
     ) {
         // 尺寸自适应：固定 dp 在不同 dp 宽度的设备上观感差异极大
         // （蓝叠 1920x1080@240dpi = 1280dp 宽，手机 1080x2400@420dpi ≈ 411dp 宽，
