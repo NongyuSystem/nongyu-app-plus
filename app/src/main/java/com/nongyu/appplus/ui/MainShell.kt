@@ -79,9 +79,12 @@ fun MainShell() {
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
 
-    // 雷达波：进入/退出激活态（变黑 / 变亮）时各发一圈快速扩散并淡出的圆环。
-    // pulseKey 每次自增就重新跑一遍动画；pulse 从 0→1 驱动半径与透明度。
+    // 雷达波：状态切换时的圆环反馈。
+    // - 进入激活态（变黑）：从球心**向外扩散**并淡出
+    // - 退出激活态（变亮）：从外侧**向内回收**到球体（呼应"能量收回"，不是再释放一次）
+    // pulseKey 每次自增重跑动画；pulseExpand 标记本轮方向。
     var pulseKey by remember { mutableIntStateOf(0) }
+    var pulseExpand by remember { mutableStateOf(true) }
     val pulse = remember { Animatable(0f) }
 
     val active = mode != OrbMode.Idle
@@ -89,11 +92,10 @@ fun MainShell() {
     // 退出激活态：返回键优先，其次再次点按。
     BackHandler(enabled = active) { mode = OrbMode.Idle }
 
-    // 激活态切换时触发一次雷达波（变黑与变亮都发）。
     LaunchedEffect(pulseKey) {
         if (pulseKey > 0) {
             pulse.snapTo(0f)
-            pulse.animateTo(1f, animationSpec = tween(520))
+            pulse.animateTo(1f, animationSpec = tween(if (pulseExpand) 520 else 460))
         }
     }
 
@@ -181,30 +183,44 @@ fun MainShell() {
             )
         }
 
-        // 全屏雷达波：从球心（屏幕底部中央）向外扩散到整屏并淡出。
+        // 全屏雷达波：进入时向外扩散、退出时向内回收。
         // 画在 dim 之后、球体之前 —— 压在暗色后景上、位于球体下层。
         if (pulse.value > 0f && pulse.value < 1f) {
             val pv = pulse.value
-            // 扩散半径：从球半径一直覆盖到整屏对角线，保证「全屏」。
-            val ease = 1f - (1f - pv) * (1f - pv)   // easeOut，前段冲得快
-            val ringAlpha = (1f - pv) * 0.55f        // 随扩散淡出
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
                 val cy = size.height - 26.dp.toPx() - 60.dp.toPx()
                 val maxR = kotlin.math.hypot(size.width.toDouble(), size.height.toDouble()).toFloat()
-                val r = 60.dp.toPx() + ease * maxR
+                val r0 = 60.dp.toPx()                      // 球体边缘
+                // 浅绿波纹：暗底上不能用深品牌绿，否则显得很脏很沉。
+                val ringColor = Color(0xFF7FD9A8)
+
+                val r: Float
+                val ringAlpha: Float
+                if (pulseExpand) {
+                    // 扩散：球 → 整屏，随扩散淡出
+                    val ease = 1f - (1f - pv) * (1f - pv)  // easeOut，前段冲得快
+                    r = r0 + ease * maxR
+                    ringAlpha = (1f - pv) * 0.34f
+                } else {
+                    // 回收：整屏 → 球，越靠近球体越亮，末段快速收敛
+                    val ease = pv * pv                     // easeIn，后段收得快
+                    r = r0 + (1f - ease) * maxR
+                    ringAlpha = pv * 0.34f
+                }
+
                 // 一圈亮环 + 一圈更宽更淡的伴随环，形成雷达波纹
                 drawCircle(
-                    color = colors.brand.colorBrand.copy(alpha = ringAlpha),
+                    color = ringColor.copy(alpha = ringAlpha),
                     radius = r,
                     center = Offset(cx, cy),
-                    style = Stroke(width = 3.dp.toPx()),
+                    style = Stroke(width = 2.5.dp.toPx()),
                 )
                 drawCircle(
-                    color = colors.brand.colorBrand.copy(alpha = ringAlpha * 0.45f),
+                    color = ringColor.copy(alpha = ringAlpha * 0.40f),
                     radius = r * 0.86f,
                     center = Offset(cx, cy),
-                    style = Stroke(width = 10.dp.toPx()),
+                    style = Stroke(width = 9.dp.toPx()),
                 )
             }
         }
@@ -233,13 +249,15 @@ fun MainShell() {
                             tryAwaitRelease()
                             if (longPressed) {
                                 mode = OrbMode.Idle
-                                pulseKey++   // 变亮时再发一圈雷达波
+                                pulseExpand = false   // 变亮：波向内回收
+                                pulseKey++
                             }
                         },
                         onLongPress = {
                             longPressed = true
                             mode = OrbMode.Listening
-                            pulseKey++       // 变黑时发一圈雷达波
+                            pulseExpand = true        // 变黑：波向外扩散
+                            pulseKey++
                         },
                         onTap = {
                             if (!longPressed) {
