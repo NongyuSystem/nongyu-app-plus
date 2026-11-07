@@ -12,10 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v19：导航栏加高 10dp、左右各缩 2dp；图标 20→26dp、文字 10→9sp；
-        // 用 Canvas 手绘 4 个真实矢量图标（四宫格/日历/指南针/人形），替换绿色占位方块。
-        versionCode = 19
-        versionName = "0.0.18test"
+        // v20：导航栏左右更窄（10→18dp）、图标 26→32dp、图标与文字间距 3→1dp。
+        versionCode = 20
+        versionName = "0.0.19test"
     }
 
     buildTypes {

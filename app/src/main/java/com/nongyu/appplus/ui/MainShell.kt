@@ -161,11 +161,11 @@ fun MainShell() {
         }
 
         // 底栏：贴底、2+2、中间留空。
-        // 尺寸：高 74.dp（比原来的 64 高 10dp）、左右各 10.dp（比原来的 12 各缩 2dp）。
+        // 尺寸：高 74.dp、左右各 18.dp（比上一版的 10.dp 各缩 8dp，整体更窄）。
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 10.dp, vertical = 18.dp)
+                .padding(horizontal = 18.dp, vertical = 18.dp)
                 .fillMaxWidth()
                 .height(74.dp)
                 .alpha(navAlpha)
@@ -285,7 +285,7 @@ fun MainShell() {
             )
         }
 
-        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=10.dp + fillMaxWidth）。
+        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=18.dp + fillMaxWidth）。
         // 关键：AnimatedVisibility 必须自己也 fillMaxWidth，否则它按内容测量，
         // 内部 Box 的 fillMaxWidth 会在收缩后的约束里再算一次，结果比导航栏窄。
         AnimatedVisibility(
@@ -293,7 +293,7 @@ fun MainShell() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 18.dp),
+                .padding(horizontal = 18.dp, vertical = 18.dp),
             enter = fadeIn(tween(260)),
             exit = fadeOut(tween(220)),
         ) {
@@ -364,10 +364,10 @@ private fun NavItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Canvas(modifier = Modifier.size(26.dp)) {
+        Canvas(modifier = Modifier.size(32.dp)) {
             drawNavIcon(icon, tint)
         }
-        Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(1.dp))
         Text(
             text = label,
             color = tint,
