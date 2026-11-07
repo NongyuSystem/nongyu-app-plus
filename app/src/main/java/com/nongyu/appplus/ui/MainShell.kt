@@ -44,7 +44,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
@@ -126,10 +128,11 @@ fun MainShell() {
         animationSpec = tween(280),
         label = "navAlpha",
     )
-    val inputWidth by animateDpAsState(
-        targetValue = if (mode == OrbMode.Input) 336.dp else 132.dp,
+    // 输入框展开：宽度交给父布局（与导航栏同宽），只用 scaleX 做展开动画。
+    val inputScale by animateFloatAsState(
+        targetValue = if (mode == OrbMode.Input) 1f else 0.18f,
         animationSpec = tween(420),
-        label = "inputWidth",
+        label = "inputScale",
     )
     val inputHeight by animateDpAsState(
         targetValue = 64.dp,
@@ -276,19 +279,26 @@ fun MainShell() {
             )
         }
 
-        // 点按态输入框：圆球扩开覆盖原导航栏后变形而来；无左侧圆点
+        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=12.dp + fillMaxWidth）。
+        // 关键：AnimatedVisibility 必须自己也 fillMaxWidth，否则它按内容测量，
+        // 内部 Box 的 fillMaxWidth 会在收缩后的约束里再算一次，结果比导航栏窄。
         AnimatedVisibility(
             visible = mode == OrbMode.Input,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 18.dp),
             enter = fadeIn(tween(260)),
             exit = fadeOut(tween(220)),
         ) {
             Box(
                 modifier = Modifier
-                    .width(inputWidth)
+                    .fillMaxWidth()
                     .height(inputHeight)
+                    .graphicsLayer {
+                        scaleX = inputScale
+                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                    }
                     .clip(RoundedCornerShape(inputCorner))
                     .background(colors.surface.colorCard)
                     .border(1.dp, colors.surface.colorOutline, RoundedCornerShape(inputCorner))
