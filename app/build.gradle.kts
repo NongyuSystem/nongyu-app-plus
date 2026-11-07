@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v9：绿色面积收窄、黄色保底可见、双层噪声锐化增强晕染丝缕（本次优化收口版）。
-        versionCode = 9
-        versionName = "0.0.8test"
+        // v15：新增全屏雷达波（长按变黑/松手变亮时各发一圈，从球心扩散到整屏并淡出）。
+        versionCode = 15
+        versionName = "0.0.14test"
     }
 
     buildTypes {
