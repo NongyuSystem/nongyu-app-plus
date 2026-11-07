@@ -41,10 +41,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -155,24 +160,25 @@ fun MainShell() {
             // 仅作占位，无任何业务内容
         }
 
-        // 底栏：贴底、2+2、中间留空
+        // 底栏：贴底、2+2、中间留空。
+        // 尺寸：高 74.dp（比原来的 64 高 10dp）、左右各 10.dp（比原来的 12 各缩 2dp）。
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 12.dp, vertical = 18.dp)
+                .padding(horizontal = 10.dp, vertical = 18.dp)
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(74.dp)
                 .alpha(navAlpha)
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .background(colors.navBar.colorContainer)
-                .border(1.dp, colors.surface.colorOutline, RoundedCornerShape(22.dp)),
+                .border(1.dp, colors.surface.colorOutline, RoundedCornerShape(24.dp)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavItem(TABS[0], selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 0 }
-            NavItem(TABS[1], selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 1 }
+            NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 0 }
+            NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 1 }
             Spacer(modifier = Modifier.width(96.dp))
-            NavItem(TABS[2], selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 2 }
-            NavItem(TABS[3], selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 3 }
+            NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 2 }
+            NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, Modifier.weight(1f)) { selectedTab = 3 }
         }
 
         // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
@@ -279,7 +285,7 @@ fun MainShell() {
             )
         }
 
-        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=12.dp + fillMaxWidth）。
+        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=10.dp + fillMaxWidth）。
         // 关键：AnimatedVisibility 必须自己也 fillMaxWidth，否则它按内容测量，
         // 内部 Box 的 fillMaxWidth 会在收缩后的约束里再算一次，结果比导航栏窄。
         AnimatedVisibility(
@@ -287,7 +293,7 @@ fun MainShell() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 18.dp),
+                .padding(horizontal = 10.dp, vertical = 18.dp),
             enter = fadeIn(tween(260)),
             exit = fadeOut(tween(220)),
         ) {
@@ -328,34 +334,120 @@ fun MainShell() {
     }
 }
 
-/** 单个导航项：图标占位 + 文案；选中态用品牌色（两套独立行为中的「导航项」那一套）。 */
+/**
+ * 导航图标的种类。
+ * 图标一律用 Canvas 手绘（零依赖、可随主题着色），不用 Material Icons
+ * （那需要额外依赖，且与「皮肤」抽象冲突）。
+ * 后续做皮肤时，替换这里各分支的绘制即可 —— 图标属于皮肤资源的一部分。
+ */
+private enum class NavIcon { Grid, Calendar, Compass, Person }
+
+/**
+ * 单个导航项：图标 + 文案。
+ * 尺寸：图标 26.dp（原 20.dp 偏小），文字 9.sp（原 10.sp 偏大）。
+ * 选中态：图标与文字都用品牌色，未选中用低透明度中性色。
+ */
 @Composable
 private fun NavItem(
     label: String,
+    icon: NavIcon,
     selected: Boolean,
     itemColor: Color,
     indicatorColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val tint = if (selected) indicatorColor else itemColor
     Column(
         modifier = modifier
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(20.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (selected) indicatorColor else itemColor.copy(alpha = 0.35f)),
-        )
-        Spacer(modifier = Modifier.height(4.dp))
+        Canvas(modifier = Modifier.size(26.dp)) {
+            drawNavIcon(icon, tint)
+        }
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = label,
-            color = if (selected) indicatorColor else itemColor,
-            fontSize = 10.sp,
+            color = tint,
+            fontSize = 9.sp,
         )
+    }
+}
+
+/**
+ * 绘制导航图标。全部按 26x26 的画布设计，用相对尺寸保证任意大小都清晰。
+ * 统一线性风格（stroke 1.8dp），与「白绿简洁」的主题一致。
+ */
+private fun DrawScope.drawNavIcon(icon: NavIcon, tint: Color) {
+    val s = size.minDimension
+    val sw = s * 0.085f                       // 线宽随画布缩放
+    val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+    when (icon) {
+        // 全部：四宫格（2x2 圆角方块）
+        NavIcon.Grid -> {
+            val gap = s * 0.12f
+            val cell = (s - gap * 3f) / 2f
+            val r = CornerRadius(cell * 0.28f, cell * 0.28f)
+            for (i in 0..1) for (j in 0..1) {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(gap + i * (cell + gap), gap + j * (cell + gap)),
+                    size = Size(cell, cell),
+                    cornerRadius = r,
+                    style = stroke,
+                )
+            }
+        }
+        // 课表：日历（外框 + 两条挂钉 + 一条横向分隔）
+        NavIcon.Calendar -> {
+            val l = s * 0.16f
+            val t = s * 0.22f
+            val w = s - l * 2f
+            val h = s - t - s * 0.16f
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(l, t),
+                size = Size(w, h),
+                cornerRadius = CornerRadius(s * 0.14f, s * 0.14f),
+                style = stroke,
+            )
+            // 顶部两个挂钉
+            drawLine(tint, Offset(s * 0.34f, s * 0.10f), Offset(s * 0.34f, s * 0.30f), sw, StrokeCap.Round)
+            drawLine(tint, Offset(s * 0.66f, s * 0.10f), Offset(s * 0.66f, s * 0.30f), sw, StrokeCap.Round)
+            // 横向分隔线
+            drawLine(tint, Offset(l, s * 0.44f), Offset(l + w, s * 0.44f), sw, StrokeCap.Round)
+        }
+        // 探索：指南针（外圆 + 内部指针菱形）
+        NavIcon.Compass -> {
+            val c = Offset(s / 2f, s / 2f)
+            val r = s * 0.34f
+            drawCircle(tint, r, c, style = stroke)
+            val d = s * 0.20f
+            drawLine(tint, Offset(c.x, c.y - d), Offset(c.x + d * 0.72f, c.y + d), sw, StrokeCap.Round)
+            drawLine(tint, Offset(c.x + d * 0.72f, c.y + d), Offset(c.x, c.y + d * 0.10f), sw, StrokeCap.Round)
+            drawLine(tint, Offset(c.x, c.y + d * 0.10f), Offset(c.x - d * 0.72f, c.y - d), sw, StrokeCap.Round)
+            drawLine(tint, Offset(c.x - d * 0.72f, c.y - d), Offset(c.x, c.y - d), sw, StrokeCap.Round)
+        }
+        // 个人：人形（圆头 + 肩部圆弧，用 drawArc 避免 Path/drawPath 的依赖问题）
+        NavIcon.Person -> {
+            val headR = s * 0.15f
+            drawCircle(tint, headR, Offset(s / 2f, s * 0.33f), style = stroke)
+            // 肩：以画布下半部为中心的半圆弧
+            val arcW = s * 0.62f
+            val arcH = s * 0.46f
+            drawArc(
+                color = tint,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = false,
+                topLeft = Offset((s - arcW) / 2f, s * 0.52f),
+                size = Size(arcW, arcH),
+                style = stroke,
+            )
+        }
     }
 }
 
