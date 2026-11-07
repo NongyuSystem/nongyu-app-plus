@@ -162,7 +162,10 @@ fun MainShell() {
         val navPadding = s(18.dp)
         val navCorner = s(20.dp)
         // 球体也必须参与缩放，否则其他元素变大、球固定 120dp 会显得变小
-        val orbSize = s(120.dp)
+        // 球体也要跟随导航栏一起缩：导航栏已从 74dp 降到 62dp，
+        // 球若仍保持 120dp 会接近导航栏高度的 2 倍，视觉上明显过大。
+        // 96dp 视觉上仍偏大（光晕外扩使观感大于几何尺寸），再收到 78dp。
+        val orbSize = s(78.dp)
         // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
         val inputHeight by animateDpAsState(
             targetValue = navHeight,
@@ -219,7 +222,8 @@ fun MainShell() {
             val pv = pulse.value
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
-                val cy = size.height - s(26.dp).toPx() - (orbSize / 2).toPx()
+                // 圆心与球心保持一致：用与球 Box 相同的偏移比例
+                val cy = size.height - (orbSize.value * 0.22f).dp.toPx() - (orbSize / 2).toPx()
                 val maxR = kotlin.math.hypot(size.width.toDouble(), size.height.toDouble()).toFloat()
                 val r0 = (orbSize / 2).toPx()              // 球体边缘
                 // 浅绿波纹：暗底上不能用深品牌绿，否则显得很脏很沉。
@@ -262,7 +266,8 @@ fun MainShell() {
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = s(-26.dp))
+                // 凸起偏移量按球径比例：球小则凸起少，避免球浮在导航栏之上脱节
+                .offset(y = (orbSize.value * -0.22f).dp)
                 .size(orbSize)
                 .scale(orbScale)
                 .alpha(orbAlpha)
