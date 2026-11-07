@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v16：雷达波改浅绿并降透明度（暗底不显脏）；退出时长按改为「向内回收」而非再扩散。
-        versionCode = 16
-        versionName = "0.0.15test"
+        // v18：修输入框比导航栏窄 —— AnimatedVisibility 未 fillMaxWidth 导致按内容测量。
+        versionCode = 18
+        versionName = "0.0.17test"
     }
 
     buildTypes {
