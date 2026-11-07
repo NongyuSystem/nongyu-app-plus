@@ -12,10 +12,11 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v36：修表头对齐、卡片圆角化+内容居中+去左侧色条、导航栏变形为标签胶囊、
-        // 返回按钮改为「收起」胶囊。
-        versionCode = 36
-        versionName = "0.1.6test"
+        // v37：回退课表 —— 恢复到引入课表之前的骨架（仅导航壳 + 星云球）。
+        // versionCode 必须大于已发布的 36，否则手机无法覆盖安装，
+        // 所以版本号继续递增，不用回旧号。
+        versionCode = 37
+        versionName = "0.0.29test"
     }
 
     buildTypes {
