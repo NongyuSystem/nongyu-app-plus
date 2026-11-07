@@ -12,9 +12,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v15：新增全屏雷达波（长按变黑/松手变亮时各发一圈，从球心扩散到整屏并淡出）。
-        versionCode = 15
-        versionName = "0.0.14test"
+        // v16：雷达波改浅绿并降透明度（暗底不显脏）；退出时长按改为「向内回收」而非再扩散。
+        versionCode = 16
+        versionName = "0.0.15test"
     }
 
     buildTypes {
