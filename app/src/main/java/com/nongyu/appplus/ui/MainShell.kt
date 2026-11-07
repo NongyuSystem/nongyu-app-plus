@@ -1,6 +1,7 @@
 package com.nongyu.appplus.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
@@ -8,6 +9,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +29,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
@@ -57,12 +63,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.ai.NongyuOrb
+import com.nongyu.appplus.ui.course.CourseDetailBar
 import com.nongyu.appplus.ui.course.CourseScreen
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 import com.nongyu.appplus.ui.theme.NongyuTheme
@@ -91,6 +100,14 @@ fun MainShell() {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
+
+    // 课表详情状态：非 null 时，底部导航栏原地变形为一排标签胶囊
+    var courseDetail by remember { mutableStateOf<CourseDetailBar?>(null) }
+    val detailProgress by animateFloatAsState(
+        targetValue = if (courseDetail != null) 1f else 0f,
+        animationSpec = tween(320),
+        label = "detailProgress",
+    )
 
     // 雷达波：状态切换时的圆环反馈。
     // - 进入激活态（变黑）：从球心**向外扩散**并淡出
@@ -194,6 +211,7 @@ fun MainShell() {
                 1 -> CourseScreen(
                     uiScale = uiScale,
                     bottomInset = navBottomInset,
+                    onDetailChange = { courseDetail = it },
                     modifier = Modifier.fillMaxSize(),
                 )
                 else -> {
@@ -203,23 +221,104 @@ fun MainShell() {
         }
 
         // 底栏：贴底、2+2、中间留空。边界用 featheredEdge 虚化（无硬边框）。
-        Row(
+        // 当课程详情打开时，这一整条**原地变形**为一排标签胶囊（而不是另开弹窗）。
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
-                .height(navHeight)
-                .alpha(navAlpha)
-                .featheredEdge(colors.navBar.colorItem, navCorner)
-                .clip(RoundedCornerShape(navCorner))
-                .background(colors.navBar.colorContainer),
-            verticalAlignment = Alignment.CenterVertically,
+                .alpha(navAlpha),
         ) {
-            NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 0 }
-            NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 1 }
-            Spacer(modifier = Modifier.width(s(96.dp)))
-            NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 2 }
-            NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 3 }
+            AnimatedContent(
+                targetState = courseDetail != null,
+                transitionSpec = {
+                    (fadeIn(tween(240)) + scaleIn(tween(280), initialScale = 0.96f))
+                        .togetherWith(fadeOut(tween(160)))
+                },
+                label = "navMorph",
+            ) { showingDetail ->
+                if (showingDetail && courseDetail != null) {
+                    // ---------- 形态 B：标签胶囊条 ----------
+                    val d = courseDetail!!
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .featheredEdge(colors.navBar.colorItem, navCorner)
+                            .clip(RoundedCornerShape(navCorner))
+                            .background(colors.navBar.colorContainer)
+                            .padding(horizontal = s(14.dp), vertical = s(10.dp)),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = d.title,
+                                fontSize = (14 * uiScale).sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.surface.colorText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(s(8.dp)))
+                            // 关闭：明确的胶囊按钮（带文字），比孤零零的 ✕ 更易点、位置更清楚
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(s(9.dp)))
+                                    .background(colors.surface.colorOutline.copy(alpha = 0.16f))
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(onTap = { courseDetail = null })
+                                    }
+                                    .padding(horizontal = s(10.dp), vertical = s(4.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "收起",
+                                    fontSize = (10 * uiScale).sp,
+                                    color = colors.surface.colorTextSecondary,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(s(6.dp)))
+                        // 标签胶囊：横向可滚动，避免挤成一行放不下
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(s(6.dp)),
+                        ) {
+                            d.pills.forEach { pill ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(s(10.dp)))
+                                        .background(colors.brand.colorBrand.copy(alpha = 0.10f))
+                                        .padding(horizontal = s(8.dp), vertical = s(4.dp)),
+                                ) {
+                                    Text(
+                                        text = pill,
+                                        fontSize = (10 * uiScale).sp,
+                                        color = colors.brand.colorBrand,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // ---------- 形态 A：常规导航栏 ----------
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(navHeight)
+                            .featheredEdge(colors.navBar.colorItem, navCorner)
+                            .clip(RoundedCornerShape(navCorner))
+                            .background(colors.navBar.colorContainer),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 0 }
+                        NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 1 }
+                        Spacer(modifier = Modifier.width(s(96.dp)))
+                        NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 2 }
+                        NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 3 }
+                    }
+                }
+            }
         }
 
         // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
