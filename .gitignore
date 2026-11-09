@@ -59,5 +59,14 @@ release/
 ### 本机构建辅助 ###
 # 沙箱/本机自签调试证书（如需入库请改为纳入密钥管理，勿提交明文口令）
 !debug.keystore.template
+
+### Agent/沙箱临时目录（不入库）###
+# .gradle-clean 是绕 init.d 用的干净 GRADLE_USER_HOME，
+# 内部含超长路径（Gradle accessors 的 class 文件名 + 中文包名），
+# 未忽略时 git stash -u 会因 "Filename too long" 整体失败。
+.gradle-clean/
+.dsh-tmp/
+.dsh-vision-router/
+
 ### IDE 本地配置 ###
 .idea/
