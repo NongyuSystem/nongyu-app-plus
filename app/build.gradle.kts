@@ -12,6 +12,7 @@ android {
     defaultConfig {
         applicationId = "com.nongyu.appplus"
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
         // v38：课表「布局」第 1 步（#15）—— 重新引入课表 Tab，含节次时间列、
@@ -93,11 +94,17 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     // 最小会话存储（Keystore + AES）。引入由维护者 2026-11-09 拍板，
     // 见 docs/specs/网络层.md §10.4；会拖 tink-android:1.8.0。
-    implementation(libs.androidx.security.crypto)
+    // DataStore：令牌密文的落盘层（票 #43/#44 后续；EncryptedSharedPreferences 已弃用）
+    implementation(libs.androidx.datastore.preferences)
 
     testImplementation(libs.junit)
     // MockWebServer：假服务端，纯 JVM 可跑（不编译 Android 运行时）。
     // testImplementation 不进 runtime classpath，R8 看不到，不会污染 release。
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // instrumented 测试：加密存储要真实 Keystore，只能在设备上验。
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

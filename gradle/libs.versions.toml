@@ -11,6 +11,8 @@ activityCompose = "1.11.0"
 lifecycle = "2.10.0"
 
 junit = "4.13.2"
+androidxTestRunner = "1.6.2"
+androidxTestExtJunit = "1.2.1"
 
 # 网络传输层（票 #48 spike 实测通过）。Retrofit 3.0.0 的 POM 自带 okhttp 4.12.0，
 # 必须显式钉 4.12.1，否则解析到 4.12.0（实测依赖树 `okhttp:4.12.0 -> 4.12.1` 证明钉子生效）。
@@ -25,7 +27,7 @@ coroutines = "1.9.0"
 # 最小会话存储：实测 minCompileSdk=34 / minAGP=8.1.1，本工程 36 / 9.2.1 均有余量。
 # 引入由维护者 2026-11-09 拍板（见 docs/specs/网络层.md §10.4）。
 # 注意：它会拖 tink-android:1.8.0。
-securityCrypto = "1.1.0"
+datastore = "1.1.7"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,6 +43,8 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
 
 # 网络传输层 + 转换器（票 #48）
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
@@ -52,7 +56,7 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # MockWebServer 必须与 okhttp 严格同版本（4.12.1 是纯 jar，无 minCompileSdk 门槛）
 okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 # 最小会话存储（Keystore + AES）。引入已由维护者拍板，见 docs/specs/网络层.md §10.4
-androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 # --- 仅测试 ---
 # testImplementation 不进 runtime classpath，R8 看不到它，不会污染 release
