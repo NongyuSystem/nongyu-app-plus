@@ -10,9 +10,11 @@
 ## 构建与验证
 
 ```bash
-./gradlew :app:assembleDebug          # 调试包
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleRelease        # 发布包（R8 + 资源收缩 + 不 debuggable）
+# 产物：app/build/outputs/apk/release/app-release.apk
 ```
+
+调试时仍可用 `./gradlew :app:assembleDebug`（不收缩、断点/堆栈可读），但**对外发布的产物必须是 release 包**。
 
 Windows 下用 `gradlew.bat`。详细版本约束与踩坑见 `README.md`（尤其 Compose BOM 版本锁定的原因）。
 
@@ -26,9 +28,11 @@ Windows 下用 `gradlew.bat`。详细版本约束与踩坑见 `README.md`（尤�
      建 blob → create tree（`base_tree` = 远端 HEAD 的 tree sha）→ create commit（`parents` = 远端 HEAD）→ PATCH `git/refs/heads/master`。
      文件用 `content=base64` + `encoding=base64`，必须经 `--input JSON 文件` 提交（`-f` 会把内容当字面量）。
    - 可复现命令见 `docs/research/build-0.0.1test.md`。
-3. **建 GitHub Release 并上传 APK**：`gh release create v<versionName> app/build/outputs/apk/debug/app-debug.apk --target master`，tag 用 `v<versionName>`。
+3. **建 GitHub Release 并上传 APK**：`gh release create v<versionName> app/build/outputs/apk/release/app-release.apk --target master`，tag 用 `v<versionName>`。
 
 版本号、Release tag、APK 三者必须一一对应。
+
+**切 release 后必须实装验证不崩**：R8 的风险不是「构建失败」（那会立刻报错），而是「构建成功但运行时某个入口崩」——只有装到设备上才发现。发版前至少手工过一遍：四个 Tab 切换、AI 球（长按/点按/返回）、输入框展开收起、返键退出。`proguard-rules.pro` 里已写明「将来引入反射 / 序列化 / JNI / XML 自定义 View 时必须回来补 keep」。
 
 ## Agent skills
 

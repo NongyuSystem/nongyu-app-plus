@@ -35,17 +35,19 @@ and applications that depend on it to compile against version 37 or later of the
 ## 构建
 
 ```bash
-# 调试包
-./gradlew :app:assembleDebug
+# 发布包（R8 + 资源收缩 + 不 debuggable）
+./gradlew :app:assembleRelease
 
 # 产物位置
-# app/build/outputs/apk/debug/app-debug.apk
+# app/build/outputs/apk/release/app-release.apk
 ```
+
+调试时用 `./gradlew :app:assembleDebug`（产物在 `app/build/outputs/apk/debug/app-debug.apk`）。
 
 Windows 下使用 `gradlew.bat`：
 
 ```powershell
-.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:assembleRelease
 ```
 
 ## 工程结构
