@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.nongyu.appplus.net.NetStartupProbe
 import com.nongyu.appplus.skin.FileSkinSource
 import com.nongyu.appplus.ui.NongyuApp
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
@@ -49,5 +50,15 @@ class MainActivity : ComponentActivity() {
                 NongyuApp()
             }
         }
+
+        // 首帧之后打一次健康探针（**不违反 ADR-0006**）。
+        //
+        // 为什么需要它：没有从入口点可达的网络调用时，R8 会把 okhttp3 / retrofit2 /
+        // kotlinx.serialization 整条链删光（mapping.txt 保留 0 个类），
+        // 「R8 需要什么 keep」与真机验收都无从验证。见 docs/specs/网络层-N6-实施记录.md §3。
+        //
+        // 为什么安全：schedule() 内部用 Choreographer.postFrameCallback 等首帧，
+        // 再切到协程里发请求；失败只记日志，绝不影响可用性。
+        NetStartupProbe.schedule(owner = this, context = applicationContext)
     }
 }

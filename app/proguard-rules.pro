@@ -17,3 +17,32 @@
 # 不保留 SourceFile 的真实文件名（用 SourceFile 占位），避免泄漏本机路径。
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# ---------------------------------------------------------------------------
+# 网络层（N7 实测补入，2026-11-09）
+#
+# 背景：在「网络层没有任何从入口点可达的调用」时，R8 会把 okhttp3 / retrofit2 /
+# kotlinx.serialization / tink 整条链删光（mapping.txt 保留 0 个类），
+# 那时 assembleRelease 一律成功，但**这不是 keep 规则够用的证据**。
+# 接上真实调用（NetStartupProbe → NetHolder → NongyuApi）之后，R8 立刻报出：
+#
+#   ERROR: R8: Missing class com.google.errorprone.annotations.CanIgnoreReturnValue
+#   (referenced from: com.google.crypto.tink.KeysetManager ...)
+#
+# 根因：tink-android 的编译期用了 errorprone 注解，但注解类不在运行时 classpath 上。
+# 这些注解**只在编译期起作用**，运行时不需要，所以 -dontwarn 是正确处置
+# （不是 keep）。规则由 AGP 生成在
+# app/build/outputs/mapping/release/missing_rules.txt。
+# ---------------------------------------------------------------------------
+-dontwarn com.google.errorprone.annotations.CanIgnoreReturnValue
+-dontwarn com.google.errorprone.annotations.CheckReturnValue
+-dontwarn com.google.errorprone.annotations.Immutable
+-dontwarn com.google.errorprone.annotations.RestrictedApi
+
+# kotlinx.serialization：自带 consumer rules 已覆盖常规 @Serializable 类。
+# 但**具名 companion object** 的 serializer 不被自动规则覆盖，需手工补。
+# 见 https://github.com/Kotlin/kotlinx.serialization/blob/master/README.md#android
+# 当前网络层 DTO 都无具名 companion，故本节暂不添加具体规则；
+# 一旦新增这类 DTO，必须回来补：
+#   -keep class com.nongyu.appplus.net.model.** { public static ** Companion; }
+
