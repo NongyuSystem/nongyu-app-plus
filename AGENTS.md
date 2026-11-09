@@ -34,6 +34,20 @@ Windows 下用 `gradlew.bat`。详细版本约束与踩坑见 `README.md`（尤�
 
 **切 release 后必须实装验证不崩**：R8 的风险不是「构建失败」（那会立刻报错），而是「构建成功但运行时某个入口崩」——只有装到设备上才发现。发版前至少手工过一遍：四个 Tab 切换、AI 球（长按/点按/返回）、输入框展开收起、返键退出。`proguard-rules.pro` 里已写明「将来引入反射 / 序列化 / JNI / XML 自定义 View 时必须回来补 keep」。
 
+## Kotlin 代码规则
+
+- **KDoc / 块注释里不得出现 `/*`。** Kotlin 的块注释**支持嵌套**（Java 不支持），
+  KDoc 里写路径通配（`/school/*`、`src/**/*.kt`）或任何含 `/*` 的文本，
+  都会新开一层注释并报 `Syntax error: Unclosed comment`，
+  且**报错行号指向文件末尾**，与真正的元凶相隔很远。
+  写法：改写成 `/school/` 或改用 `//` 行注释。
+
+## 网络层
+
+规格与实施记录在 `docs/specs/`（`网络层.md` 是唯一真源）。改网络层前先读它。
+纯逻辑层（`net/core`）**不得 import `android.*`** —— 否则纯 JVM 单测无法覆盖决策逻辑，
+详见 `docs/specs/网络层-N2-N5-实施记录.md` §3.1。
+
 ## Agent skills
 
 ### Issue tracker
