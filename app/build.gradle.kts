@@ -12,11 +12,11 @@ android {
         minSdk = 26
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v37：回退课表 —— 恢复到引入课表之前的骨架（仅导航壳 + 星云球）。
-        // versionCode 必须大于已发布的 36，否则手机无法覆盖安装，
-        // 所以版本号继续递增，不用回旧号。
-        versionCode = 37
-        versionName = "0.0.29test"
+        // v38：课表「布局」第 1 步（#15）—— 重新引入课表 Tab，含节次时间列、
+        // 星期表头与大课分组节奏；无表格线、格子无底色，课程卡片留待第 2 步（#13）。
+        // versionCode 必须大于已发布的 37，否则手机无法覆盖安装。
+        versionCode = 38
+        versionName = "0.0.30test"
     }
 
     buildTypes {
