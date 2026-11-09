@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,10 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -61,7 +59,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nongyu.appplus.skin.LocalSkinSource
+import com.nongyu.appplus.skin.NavIconKey
 import com.nongyu.appplus.ui.ai.NongyuOrb
+import com.nongyu.appplus.ui.icon.NavIconGeometry
+import com.nongyu.appplus.ui.icon.NavIconStrokes
+import com.nongyu.appplus.ui.icon.drawNavIcon
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
@@ -89,6 +92,18 @@ fun MainShell() {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
+
+    // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
+    // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
+    // 与改造前 drawNavIcon 里的 `s * 0.085f` 完全一致 —— 因此视觉不变。
+    // 只解析一次（ADR-0006：冷启动同步读本地，首帧即正确皮肤）。
+    val skin = LocalSkinSource.current
+    val iconStrokes = remember(skin) {
+        NavIconStrokes.resolve(
+            payload = skin.resolve().resourcePayload(),
+            builtIn = skin.builtIn.resources,
+        )
+    }
 
     // 雷达波：状态切换时的圆环反馈。
     // - 进入激活态（变黑）：从球心**向外扩散**并淡出
@@ -198,11 +213,11 @@ fun MainShell() {
                 .background(colors.navBar.colorContainer),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavItem(TABS[0], NavIcon.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 0 }
-            NavItem(TABS[1], NavIcon.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 1 }
+            NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
+            NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f)) { selectedTab = 1 }
             Spacer(modifier = Modifier.width(s(96.dp)))
-            NavItem(TABS[2], NavIcon.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 2 }
-            NavItem(TABS[3], NavIcon.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, Modifier.weight(1f)) { selectedTab = 3 }
+            NavItem(TABS[2], NavIconKey.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Compass), Modifier.weight(1f)) { selectedTab = 2 }
+            NavItem(TABS[3], NavIconKey.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Person), Modifier.weight(1f)) { selectedTab = 3 }
         }
 
         // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
@@ -363,11 +378,12 @@ fun MainShell() {
 
 /**
  * 导航图标的种类。
- * 图标一律用 Canvas 手绘（零依赖、可随主题着色），不用 Material Icons
- * （那需要额外依赖，且与「皮肤」抽象冲突）。
- * 后续做皮肤时，替换这里各分支的绘制即可 —— 图标属于皮肤资源的一部分。
+ *
+ * 改造前这里是 `private enum class NavIcon`，图标本体是一段 `DrawScope` 手绘代码。
+ * 现在图标身份改用皮肤契约里的稳定键 [NavIconKey]（字符串），几何变成
+ * [NavIconGeometry] 数据 —— 这样「换包 = 换参数」才成立（票 #38 / ADR-0005 Q1=A）。
+ * 改造前后的渲染结果逐像素一致（几何常量原样搬运，运算顺序保留）。
  */
-private enum class NavIcon { Grid, Calendar, Compass, Person }
 
 /**
  * 边界虚化 Modifier：在控件外侧画多层「逐圈外扩 + alpha 递减」的圆角描边，
@@ -402,12 +418,13 @@ private fun Modifier.featheredEdge(tint: Color, corner: Dp): Modifier = this.dra
 @Composable
 private fun NavItem(
     label: String,
-    icon: NavIcon,
+    icon: NavIconKey,
     selected: Boolean,
     itemColor: Color,
     indicatorColor: Color,
     iconSize: Dp,
     labelSize: TextUnit,
+    iconStroke: Float,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -427,7 +444,11 @@ private fun NavItem(
             modifier = Modifier.offset(y = (iconSize.value * 0.07f).dp),
         ) {
             Canvas(modifier = Modifier.size(iconSize)) {
-                drawNavIcon(icon, tint)
+                drawNavIcon(
+                    geometry = NavIconGeometry.builtInOf(icon),
+                    tint = tint,
+                    strokeScale = iconStroke,
+                )
             }
             // 图标与文字继续靠近：不留 Spacer，用压缩行高让文字紧贴图标下缘
             Text(
@@ -435,81 +456,6 @@ private fun NavItem(
                 color = tint,
                 fontSize = labelSize,
                 style = TextStyle(lineHeight = labelSize * 0.92f),
-            )
-        }
-    }
-}
-
-/**
- * 绘制导航图标。全部按 26x26 的画布设计，用相对尺寸保证任意大小都清晰。
- * 统一线性风格（stroke 1.8dp），与「白绿简洁」的主题一致。
- */
-private fun DrawScope.drawNavIcon(icon: NavIcon, tint: Color) {
-    val s = size.minDimension
-    val sw = s * 0.085f                       // 线宽随画布缩放
-    val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
-
-    when (icon) {
-        // 全部：四宫格（2x2 圆角方块）
-        NavIcon.Grid -> {
-            val gap = s * 0.12f
-            val cell = (s - gap * 3f) / 2f
-            val r = CornerRadius(cell * 0.28f, cell * 0.28f)
-            for (i in 0..1) for (j in 0..1) {
-                drawRoundRect(
-                    color = tint,
-                    topLeft = Offset(gap + i * (cell + gap), gap + j * (cell + gap)),
-                    size = Size(cell, cell),
-                    cornerRadius = r,
-                    style = stroke,
-                )
-            }
-        }
-        // 课表：日历（外框 + 两条挂钉 + 一条横向分隔）
-        NavIcon.Calendar -> {
-            val l = s * 0.16f
-            val t = s * 0.22f
-            val w = s - l * 2f
-            val h = s - t - s * 0.16f
-            drawRoundRect(
-                color = tint,
-                topLeft = Offset(l, t),
-                size = Size(w, h),
-                cornerRadius = CornerRadius(s * 0.14f, s * 0.14f),
-                style = stroke,
-            )
-            // 顶部两个挂钉
-            drawLine(tint, Offset(s * 0.34f, s * 0.10f), Offset(s * 0.34f, s * 0.30f), sw, StrokeCap.Round)
-            drawLine(tint, Offset(s * 0.66f, s * 0.10f), Offset(s * 0.66f, s * 0.30f), sw, StrokeCap.Round)
-            // 横向分隔线
-            drawLine(tint, Offset(l, s * 0.44f), Offset(l + w, s * 0.44f), sw, StrokeCap.Round)
-        }
-        // 探索：指南针（外圆 + 内部指针菱形）
-        NavIcon.Compass -> {
-            val c = Offset(s / 2f, s / 2f)
-            val r = s * 0.34f
-            drawCircle(tint, r, c, style = stroke)
-            val d = s * 0.20f
-            drawLine(tint, Offset(c.x, c.y - d), Offset(c.x + d * 0.72f, c.y + d), sw, StrokeCap.Round)
-            drawLine(tint, Offset(c.x + d * 0.72f, c.y + d), Offset(c.x, c.y + d * 0.10f), sw, StrokeCap.Round)
-            drawLine(tint, Offset(c.x, c.y + d * 0.10f), Offset(c.x - d * 0.72f, c.y - d), sw, StrokeCap.Round)
-            drawLine(tint, Offset(c.x - d * 0.72f, c.y - d), Offset(c.x, c.y - d), sw, StrokeCap.Round)
-        }
-        // 个人：人形（圆头 + 肩部圆弧，用 drawArc 避免 Path/drawPath 的依赖问题）
-        NavIcon.Person -> {
-            val headR = s * 0.15f
-            drawCircle(tint, headR, Offset(s / 2f, s * 0.33f), style = stroke)
-            // 肩：以画布下半部为中心的半圆弧
-            val arcW = s * 0.62f
-            val arcH = s * 0.46f
-            drawArc(
-                color = tint,
-                startAngle = 180f,
-                sweepAngle = 180f,
-                useCenter = false,
-                topLeft = Offset((s - arcW) / 2f, s * 0.52f),
-                size = Size(arcW, arcH),
-                style = stroke,
             )
         }
     }
