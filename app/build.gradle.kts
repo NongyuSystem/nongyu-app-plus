@@ -20,13 +20,24 @@ android {
     }
 
     buildTypes {
-        release {
-            // 骨架阶段不开启混淆，避免为占位代码维护 keep 规则
+        debug {
+            // 调试包保持不收缩，保证断点/堆栈可读
             isMinifyEnabled = false
+        }
+        release {
+            // 发布物形态是第一性能杠杆（ADR-0007）：探针实测 debug 冷启动 1164.0ms
+            // vs release 384.5ms（3.03 倍），APK 10.4MB vs 804KB（13.3 倍）。
+            // 因此 release 必须真的开启 R8 + 资源收缩，否则「发布包」等同于 debug 包。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // 尚未上架应用商店，沿用 debug 签名，让 release 包可以直接装到测试设备上验证；
+            // 将来上架时改为读取 keystore.properties（勿把密钥写入仓库）。
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
