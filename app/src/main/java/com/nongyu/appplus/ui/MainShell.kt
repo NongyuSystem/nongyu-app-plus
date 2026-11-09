@@ -35,7 +35,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,6 +52,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -199,22 +200,35 @@ fun MainShell() {
         val iconSize = s(30.dp)
         val labelSize = (8f * uiScale).sp
 
-        // 四个页面：全白留空
+        // 底栏顶边的实测位置（根坐标系像素），交给内容页做底部避让（需求 15）。
+        // 必须实测：底栏高度、内边距、球体凸起都乘了 uiScale，写死 dp 会随屏宽漂移。
+        var navTopY by remember { mutableStateOf<Float?>(null) }
+
+        // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
-            // 仅作占位，无任何业务内容
+            if (selectedTab == 1) {
+                com.nongyu.appplus.ui.timetable.TimetableScreen(navTopY = navTopY)
+            }
         }
 
         // 底栏：贴底、2+2、中间留空。边界用 featheredEdge 虚化（无硬边框）。
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                // 垂直内边距也走 s()：此前写死 18.dp，大屏上栏体本身缩了、边距没缩，比例失真。
                 .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
                 .height(navHeight)
                 .alpha(navAlpha)
                 .featheredEdge(colors.navBar.colorItem, navCorner)
                 .clip(RoundedCornerShape(navCorner))
-                .background(colors.navBar.colorContainer),
+                .background(colors.navBar.colorContainer)
+                // 上报栏体顶边：注意本 Row 自身已含竖直 padding，
+                // 取其顶层（含 padding 的外框）才能把导航栏占位一起让出去。
+                .onGloballyPositioned { coords ->
+                    val top = coords.positionInRoot().y
+                    if (top > 0f && top != navTopY) navTopY = top
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
