@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 源集：把 networkSecurityConfig 属性挂给应用。
+
+  release 结构性禁明文 —— 这个属性与上面的资源都只存在于 src/debug/，
+  release 包里两者都不存在，不依赖任何运行时判断。
+
+  tools:replace 在当前状态下**冗余但无害**：主清单（src/main/AndroidManifest.xml）
+  目前没有 android:networkSecurityConfig 属性。保留它可防将来主清单补该属性时
+  清单合并失败（构建期就会报错，而不是静默行为不符）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:replace="android:networkSecurityConfig" />
+
+</manifest>

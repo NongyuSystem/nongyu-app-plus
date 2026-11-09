@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 源集：本文件与 src/debug/AndroidManifest.xml 一起构成「debug 放明文、release 结构性禁明文」。
+
+  事实基线（票 #44，源码级结论）：
+  - targetSdk=36 下 127.0.0.1 / localhost / 10.0.2.2 **全部不被默认放行**。
+    localhost 的隐式豁免门槛是平台 API 37+（NetworkSecurityConfig.createLocalhostConfig()），
+    本工程区间 26-36，吃不到。
+  - debug-overrides **不能**开明文：XmlConfigSource.addDebugAnchorsIfNeeded() 只搬
+    CertificatesEntryRef，从不碰 cleartextTrafficPermitted。
+  - usesCleartextTraffic="true" 单独写会被网络安全配置覆盖（ManifestConfigSource 二选一分支）。
+  - adb reverse 绕不开：它只解决路由可达，应用侧地址仍是 127.0.0.1，判定链完全一样。
+
+  不写 base-config：范围最小，只放行联调地址，其余仍按平台默认（禁明文）。
+  IP 字面量写进 <domain> 有效 —— <domain> 匹配是纯字符串比较（Domain 只做 toLowerCase）。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

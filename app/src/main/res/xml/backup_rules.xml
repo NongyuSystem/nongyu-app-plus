@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  API <= 30 的全量备份规则。allowBackup=true 时，这一条是那批系统版本上的唯一防线。
+
+  文件名必须与 com.nongyu.appplus.net.auth.SecurePrefs.FILE_NAME 保持一致，
+  由 SecurePrefsNameConsistencyTest 断言。
+
+  注意：排除规则只是第一道防线，不可能穷举所有备份通道（ADB、厂商云、部分工具的
+  私有通道）。所以 MinimalSessionStore.readToken() 必须自己容错 ——
+  解不开 = 视为无 token 并清空。
+-->
 <full-backup-content>
-    <!-- 骨架阶段不做备份排除，接入账号体系后再按安全要求收口 -->
+    <exclude domain="sharedpref" path="nongyu_secure_session" />
 </full-backup-content>

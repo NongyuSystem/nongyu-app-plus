@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 网络权限必须显式声明：实测 retrofit / okhttp 的 AAR-free jar 都不会合并出 INTERNET
+         （票 #48 Q5：只声明依赖时合并清单里没有该权限，手写后 APK 才有）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

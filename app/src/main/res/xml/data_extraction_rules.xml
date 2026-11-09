@@ -1,6 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 31+ 的备份规则。**两个段都要写**，缺一不可：
+
+  - <cloud-backup>：云备份（Google Drive / 厂商云）。
+  - <device-transfer>：**换机直传（D2D）**。API 31+ 起走这个段。
+
+  ⚠️ 只排 <cloud-backup> 的后果：D2D 迁移仍会把加密存储带过去 → 新机 Keystore 里
+  没有对应 Key → 首次读取解密失败。虽然读取侧已做容错（MinimalSessionStore.readToken
+  把解不开当无 token），但**多一层防护更好，且避免用户换机后莫名被登出**。
+
+  文件名必须与 com.nongyu.appplus.net.auth.SecurePrefs.FILE_NAME 保持一致，
+  由 SecurePrefsNameConsistencyTest 断言。
+
+  为什么写字面量而不是 @string/：备份规则 XML 的 path 属性是否解析字符串资源引用
+  未取证（不同 API 上 XmlResourceParser 行为不一致），且资源不存在时会在运行期才暴露。
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- 骨架阶段不做备份排除，接入账号体系后再按安全要求收口 -->
+        <exclude domain="sharedpref" path="nongyu_secure_session" />
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="nongyu_secure_session" />
+    </device-transfer>
 </data-extraction-rules>

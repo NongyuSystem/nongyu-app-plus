@@ -12,6 +12,21 @@ lifecycle = "2.10.0"
 
 junit = "4.13.2"
 
+# 网络传输层（票 #48 spike 实测通过）。Retrofit 3.0.0 的 POM 自带 okhttp 4.12.0，
+# 必须显式钉 4.12.1，否则解析到 4.12.0（实测依赖树 `okhttp:4.12.0 -> 4.12.1` 证明钉子生效）。
+retrofit = "3.0.0"
+okhttp = "4.12.1"
+# 转换器选 kotlinx.serialization 路线（票 #48 三条路线实测结果见
+# docs/research/retrofit-okhttp-spike-result.md）。
+kotlinxSerializationJson = "1.10.0"
+# coroutines 显式声明：实测本工程实际解析到 1.9.0（来源 lifecycle-common 2.10.0），
+# 显式钉 1.9.0 不抬升任何版本、不增加 APK 体积（票 #48 附带结论，供 #50 Q3 使用）。
+coroutines = "1.9.0"
+# 最小会话存储：实测 minCompileSdk=34 / minAGP=8.1.1，本工程 36 / 9.2.1 均有余量。
+# 引入由维护者 2026-11-09 拍板（见 docs/specs/网络层.md §10.4）。
+# 注意：它会拖 tink-android:1.8.0。
+securityCrypto = "1.1.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -27,7 +42,27 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
+# 网络传输层 + 转换器（票 #48）
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+retrofit-converter-kotlinx-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+# MockWebServer 必须与 okhttp 严格同版本（4.12.1 是纯 jar，无 minCompileSdk 门槛）
+okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+# 最小会话存储（Keystore + AES）。引入已由维护者拍板，见 docs/specs/网络层.md §10.4
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+
+# --- 仅测试 ---
+# testImplementation 不进 runtime classpath，R8 看不到它，不会污染 release
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 # AGP 9 起内置 Kotlin 支持，无需再应用 org.jetbrains.kotlin.android，仅需 Compose 编译器插件
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+# serialization 插件：实测在 AGP 9.2.1 内置 Kotlin 下正常挂上（生成 `$$serializer`，
+# 产物落在 intermediates/built_in_kotlinc/），无需 buildscript classpath。
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
