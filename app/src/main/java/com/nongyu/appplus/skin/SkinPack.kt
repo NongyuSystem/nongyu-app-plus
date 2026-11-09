@@ -43,6 +43,8 @@ data class SkinPackEntry(
  * @property fontFileName 包内字体路径（相对包根）；`null` = 系统默认字体。
  * @property entries 完整性块里声明过的全部文件。
  * @property signature 整包签名（对 [entries] 的规范化摘要签名）。空 = 未签名 → 拒绝。
+ * @property warnings 解析期的非阻断问题（例如「旧扁平格式，建议迁移」）。
+ *   带默认值，既有构造处无需改动；由 [SkinPackPlanner.plan] 并入 [LoadedResources.warnings]。
  */
 data class SkinPackManifest(
     val packId: String,
@@ -53,7 +55,23 @@ data class SkinPackManifest(
     val fontFileName: String?,
     val entries: List<SkinPackEntry>,
     val signature: String,
-)
+    val warnings: List<String> = emptyList(),
+) {
+
+    companion object {
+        /**
+         * 客户端支持的**皮肤包**格式主版本（ADR-0003 第①层：主版本过高整包拒绝）。
+         *
+         * 这是皮肤包 `schemaVersion` 的**单一真源**：
+         * [SkinManifestParser] 与 [SkinPackIntegrity] 都引用它，不再各写一份字面量 1。
+         *
+         * 注意与 [ColorPayloadParser.COLOR_SEGMENT_SCHEMA_MAJOR] 的区别：后者是**色值段**
+         * （ADR-0004 数据库目录接口）的格式主版本，与皮肤包是两套独立演进的载荷，
+         * 语义不同、不能合并成同一个常量（见票 #57 ④）。
+         */
+        const val SUPPORTED_SCHEMA_MAJOR: Int = 1
+    }
+}
 
 /** 一次校验的输入：清单 + **实际拿到的**每个文件的字节。 */
 data class SkinPackVerifyInput(
@@ -105,8 +123,8 @@ data class PackVerification(
 
 object SkinPackIntegrity {
 
-    /** 客户端支持的**格式主版本**。更高 = 整包拒绝（ADR-0003 第①层）。 */
-    const val SUPPORTED_SCHEMA_MAJOR: Int = 1
+    // 皮肤包格式主版本的真源收敛到 SkinPackManifest.SUPPORTED_SCHEMA_MAJOR（票 #57 ④）。
+    // 这里不再自带一份字面量，避免三处常量漂移。
 
     /**
      * 允许出现在包内的扩展名**白名单**。
@@ -139,12 +157,12 @@ object SkinPackIntegrity {
     fun verify(input: SkinPackVerifyInput, verifier: PackSignatureVerifier): PackVerification {
         val manifest = input.manifest
 
-        // ① 格式主版本过高 → 整包拒绝。
-        if (manifest.schemaVersion > SUPPORTED_SCHEMA_MAJOR) {
+        // ① 格式主版本过高 → 整包拒绝（真源：SkinPackManifest.SUPPORTED_SCHEMA_MAJOR）。
+        if (manifest.schemaVersion > SkinPackManifest.SUPPORTED_SCHEMA_MAJOR) {
             return PackVerification(
                 ok = false,
                 origin = PayloadOrigin.SchemaTooNew,
-                reason = "皮肤包格式主版本 ${manifest.schemaVersion} 高于客户端支持的 $SUPPORTED_SCHEMA_MAJOR",
+                reason = "皮肤包格式主版本 ${manifest.schemaVersion} 高于客户端支持的 ${SkinPackManifest.SUPPORTED_SCHEMA_MAJOR}",
             )
         }
 
@@ -336,7 +354,9 @@ object SkinPackPlanner {
             )
         }
 
-        val warnings = verification.warnings.toMutableList()
+        // 解析期的非阻断问题（票 #57 ①：旧扁平清单的迁移提示）与校验期 warning 一并带出，
+        // 调用方（FileSkinSource）会把它们逐条写进日志。
+        val warnings = (manifest.warnings + verification.warnings).toMutableList()
 
         // 逐资源回落：只保留**合法**的线宽系数；不合法/缺失的项不进表，
         // 由渲染层（NavIconStrokes）回落到内置默认 —— 这就是 ADR-0005 Q5=A「只该项受影响」。
@@ -370,11 +390,12 @@ object SkinPackPlanner {
     }
 
     /**
-     * 线宽系数的合法性判据，与 [com.nongyu.appplus.ui.icon.NavIconStrokes.sanitize] **同义**。
+     * 线宽系数合法性判据的**唯一真源**（票 #57 ④）。
      *
-     * 之所以不直接复用后者：`skin/` 是数据层、`ui/icon/` 是渲染层，让数据层依赖渲染层
-     * 会把分层的方向搞反（而且渲染层那份将来可能被 Compose 相关类型污染）。
-     * 两份判据的一致性由单测锁住（`SkinPackPlannerTest` 断言两者对同一批输入结论相同）。
+     * `skin/` 是数据层、`ui/icon/` 是渲染层，方向应当是渲染层依赖数据层：
+     * [com.nongyu.appplus.ui.icon.NavIconStrokes.sanitize] 直接调用本函数，
+     * 不再自带一份阈值常量，避免两处 0f / 1f 漂移。
+     * 判据：有限（排除 NaN / Infinity）、严格落在 `(0, 1]` 内。
      */
     fun sanitizeStroke(value: Float): Float? {
         if (!value.isFinite()) return null

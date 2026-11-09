@@ -1,6 +1,7 @@
 package com.nongyu.appplus.skin
 
 import android.content.Context
+import android.content.res.Resources
 import android.util.Log
 import java.io.File
 
@@ -35,9 +36,22 @@ class FileSkinSource(
     private val appVersionCode: Int,
 ) : SkinSource {
 
-    /** 皮肤包本地存储（`filesDir` + 原子 rename + 当前指针）。 */
+    /**
+     * 宿主 [Resources]（票 #57 ③ / ADR-0005 Q3=B）。
+     *
+     * API 30+ 的 [ResourcesLoaderBinding.attach] 需要它才能挂 loader；
+     * 过去不传（默认 `null`）导致该分支在生产**永不执行**，此处补上。
+     * 只在 [MainActivity.onCreate]（UI 线程）被调用，因此 [SkinPackLoader.load]
+     * 的 `onUiThread` 保持 `true` 正确。
+     */
+    private val resources: Resources = context.resources
+
+    /**
+     * 皮肤包本地存储（票 #57 ②：路径已对齐 ADR-0003 的 `filesDir/skins/{packId}/{version}/`）。
+     * `skins/` 子目录由 [SkinStore] 内部管理，这里直接传 `filesDir`。
+     */
     private val store = SkinStore(
-        baseDir = File(context.filesDir, "skin"),
+        baseDir = context.filesDir,
         log = { Log.i(TAG, it) },
     )
 
@@ -109,6 +123,11 @@ class FileSkinSource(
                 appVersionCode = appVersionCode,
                 builtIn = builtIn.resources,
                 verifier = NO_OP_VERIFIER,
+                // 票 #57 ③：把宿主 Resources 传进去，API 30+ 的 ResourcesLoader
+                // 分支在生产才可达。启动路径在 MainActivity.onCreate（UI 线程），
+                // 因此 onUiThread = true 是正确语义（addLoaders 只能在 UI 线程）。
+                resources = resources,
+                onUiThread = true,
             )
         } catch (e: Exception) {
             // 包坏了也必须能启动。

@@ -4,94 +4,171 @@ import java.io.File
 import java.io.IOException
 
 /**
- * 皮肤包的**本地存储层**（票 #40 / 规格 #33，ADR-0003 Q4b）。
+ * 一套已安装皮肤包的身份：`{packId}/{version}`（ADR-0003 第 22 行）。
  *
- * 负责三件事，都是 ADR-0003 明确定下的：
- * 1. **`filesDir` 而非 `cacheDir`** —— 皮肤包是用户资产，不能被系统在低存储时清掉。
- * 2. **原子 rename** —— 新包先写到临时目录，完整校验后再 rename 就位；半成品永远不会被当成可用包。
- * 3. **当前指针** —— 一个独立小文件指向「现在生效的是哪一套」；回滚 = 把指针改回去，不删数据。
+ * 落盘路径是 `filesDir/skins/{packId}/{version}/`，当前指针内容就是这个二元组的 JSON。
+ * 用值对象而不是裸字符串，是为了让「指针解析 / 淘汰选择 / 回滚目标」这些纯函数
+ * 的入参可比较、可放进 Set，且测试能直接构造。
+ */
+data class PackRef(val packId: String, val version: String)
+
+/**
+ * 皮肤包存储层的**纯判定逻辑**（票 #57 ②，ADR-0003）。
  *
- * 磁盘上**最多并存两套**（ADR-0003）：当前 + 上一套（供回滚）。
+ * 与文件操作分开的理由和之前一样：指针损坏、目录被删、最多两套、回滚目标这些边界
+ * 必须能在纯 JVM 单测里覆盖，而真实磁盘 IO 不好造边界。本对象**不碰 `org.json`**：
+ * 指针是客户端自己写的固定二元组 JSON，用一对对称的手写编解码即可，既不引入新依赖，
+ * 也避开「org.json 在 :app:testDebugUnitTest 里是 stub」这个已入库的坑。
  *
- * ## 为什么把「选择逻辑」与「文件操作」分开
- *
- * 文件操作依赖真实磁盘、不好做边界测试（磁盘满、rename 失败、指针损坏）。
- * 所以「该保留哪几套、指针指向谁」被抽成纯函数 [selectSlotToEvict] / [resolvePointer]，
- * 可以在纯 JVM 单测里覆盖所有分支；[SkinStore] 只负责照做。
+ * 落盘结构（ADR-0003）：
+ * ```
+ * filesDir/
+ *   skins/{packId}/{version}/…   ← 包内容，最多并存两套（当前 + 上一套）
+ *   current-skin                  ← 指针，内容 {"packId":"…","version":"…"}
+ * ```
  */
 object SkinStoreLayout {
 
-    /** 指针文件名。独立小文件，内容就是当前生效的槽位名。 */
+    /** 指针文件名。独立小文件，内容是 [PackRef] 的 JSON。 */
     const val POINTER_FILE = "current-skin"
 
-    /** 两套槽位名（ADR-0003：磁盘最多并存两套）。 */
-    val SLOTS = listOf("slot-a", "slot-b")
+    /** 版本目录的根名（相对 `filesDir`）。 */
+    const val SKINS_DIR = "skins"
+
+    /** 相对 `filesDir` 的版本目录路径，供日志与测试断言（固定用 `/`，与平台无关）。 */
+    fun versionRelativePath(ref: PackRef): String = "$SKINS_DIR/${ref.packId}/${ref.version}"
 
     /**
-     * 解析指针内容 → 有效槽位。
-     *
-     * **指针损坏必须安全**：内容为空、乱码、指向不存在的槽位时返回 `null`，
-     * 调用方据此回落内置默认。绝不能因为一个坏指针让整个 App 打不开（ADR-0006）。
-     *
-     * @param pointerContent 指针文件的原始文本；`null` = 文件不存在。
-     * @param existingSlots 磁盘上真实存在且**已通过校验**的槽位集合。
+     * 路径段是否安全。packId / version 会成为磁盘目录名，必须挡住空、`..`、分隔符。
+     * 允许字母数字与 `-_.`（版本号常带点，如 `1.0.0`）。
      */
-    fun resolvePointer(pointerContent: String?, existingSlots: Set<String>): String? {
-        val name = pointerContent?.trim().orEmpty()
-        if (name.isEmpty()) return null
-        // 只接受已知槽位名；不信任任意字符串（防御指针被外部写入）。
-        if (name !in SLOTS) return null
-        if (name !in existingSlots) return null
-        return name
+    fun isSafeSegment(s: String): Boolean {
+        if (s.isEmpty() || s == "." || s == "..") return false
+        if (s.contains("..")) return false
+        return s.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
     }
 
     /**
-     * 选出「新包该写进哪个槽位」。
-     *
-     * 规则：优先选**不是当前生效**的那个槽位——这样即使写新包的过程中崩溃，
-     * 当前生效的那套仍然完好（这是原子性的关键：永远不原地覆盖正在用的包）。
+     * 把 [PackRef] 编成指针内容：`{"packId":"…","version":"…"}`。
+     * 与 [parsePointer] 严格对称（含转义），保证 round-trip。
      */
-    fun slotForNewInstall(currentSlot: String?): String {
-        val free = SLOTS.firstOrNull { it != currentSlot }
-        // currentSlot 为 null 或非法时，free 必为 SLOTS 第一个。
-        return free ?: SLOTS.first()
+    fun encodePointer(ref: PackRef): String =
+        """{"packId":"${escape(ref.packId)}","version":"${escape(ref.version)}"}"""
+
+    /**
+     * 解析指针内容 → [PackRef]。**损坏必须安全返回 `null`，绝不抛异常**（ADR-0006）。
+     *
+     * 用固定键名的手写扫描取值，容忍字段顺序与空白；缺失 / 空值 / 非法路径段一律 `null`。
+     * 手写而非 org.json（stub），也刻意不引正则四引号原始字符串那套易错的引号定界。
+     */
+    fun parsePointer(content: String?): PackRef? {
+        if (content == null) return null
+        val trimmed = content.trim()
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
+        val packId = extractField(trimmed, "packId")
+        val version = extractField(trimmed, "version")
+        if (packId.isNullOrEmpty() || version.isNullOrEmpty()) return null
+        if (!isSafeSegment(packId) || !isSafeSegment(version)) return null
+        return PackRef(packId, version)
     }
 
     /**
-     * 选出「装上新包后该淘汰哪一套」以维持最多两套。
-     *
-     * 装好新包后，磁盘上应只剩：新包（成为 current）+ 上一套 current（供回滚）。
-     * 其余槽位一律清掉。
-     *
-     * @return 要删除的槽位名列表（不含 newSlot 与 previousCurrent）。
+     * 从固定形状的 JSON 里取 `"key":"value"` 的 value（处理转义）。
+     * 找不到 / 没有闭合引号 → `null`。只认我们 [encodePointer] 写出的那一种形状。
      */
-    fun selectSlotToEvict(
-        newSlot: String,
-        previousCurrent: String?,
-        existingSlots: Set<String>,
-    ): List<String> = existingSlots
-        .filter { it != newSlot && it != previousCurrent }
-        .sorted()
+    private fun extractField(json: String, key: String): String? {
+        val marker = "\"$key\""
+        val keyStart = json.indexOf(marker)
+        if (keyStart < 0) return null
+        var i = keyStart + marker.length
+        while (i < json.length && json[i].isWhitespace()) i++
+        if (i >= json.length || json[i] != ':') return null
+        i++
+        while (i < json.length && json[i].isWhitespace()) i++
+        if (i >= json.length || json[i] != '"') return null
+        i++ // 跳过开引号
+        val sb = StringBuilder()
+        while (i < json.length) {
+            val c = json[i]
+            if (c == '"') return sb.toString() // 未转义的闭引号
+            if (c == '\\' && i + 1 < json.length) {
+                when (json[i + 1]) {
+                    '\\' -> sb.append('\\')
+                    '"' -> sb.append('"')
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    else -> sb.append(json[i + 1]) // 未知转义宽容；isSafeSegment 后面会挡
+                }
+                i += 2
+            } else {
+                sb.append(c)
+                i++
+            }
+        }
+        return null // 没有闭引号 = 半截内容
+    }
+
+    /**
+     * 解析指针 → 有效且**目录确实存在**的版本。
+     *
+     * 内容非法 / 指向的目录不在 [existingVersions] 里 → `null`，回落内置默认。
+     * 这是启动路径上「指针损坏不崩」的关键。
+     */
+    fun resolvePointer(content: String?, existingVersions: Set<PackRef>): PackRef? {
+        val ref = parsePointer(content) ?: return null
+        if (ref !in existingVersions) return null
+        return ref
+    }
+
+    /**
+     * 装上新包后该淘汰哪几套，以维持「最多并存两套」。
+     *
+     * 保留：新包（[newRef]）+ 上一套当前（[previousCurrent]，供回滚）；其余一律清掉。
+     * 这正是槽位版 `selectSlotToEvict` 的语义，只是 key 从槽位名换成 [PackRef]。
+     */
+    fun selectVersionsToEvict(
+        newRef: PackRef,
+        previousCurrent: PackRef?,
+        existingVersions: Set<PackRef>,
+    ): List<PackRef> = existingVersions
+        .filter { it != newRef && it != previousCurrent }
+        .sortedWith(REF_ORDER)
+
+    /**
+     * 回滚目标：磁盘上「不是当前」的那一套（最多两套时恰好一个）。
+     * 找不到（只有一套 / 全损坏）→ `null`，回滚失败但不抛异常。
+     */
+    fun rollbackTarget(current: PackRef, existingVersions: Set<PackRef>): PackRef? =
+        existingVersions.filter { it != current }.sortedWith(REF_ORDER).firstOrNull()
+
+    private val REF_ORDER = compareBy<PackRef> { it.packId }.thenBy { it.version }
+
+    private fun escape(s: String): String = buildString {
+        for (c in s) when (c) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> append(c)
+        }
+    }
 }
 
-/**
- * 一次安装尝试的结果。
- *
- * 明确区分「成功装了新包」与「原样保持」：安装失败**不得**影响当前生效的那套
- * ——这正是「新包写空闲槽位」的意义。
- */
+/** 一次安装尝试的结果。安装失败不得影响当前生效的那套。 */
 sealed interface InstallOutcome {
     /** 新包已就位并成为当前指针目标。 */
-    data class Installed(val slot: String, val evicted: List<String>) : InstallOutcome
+    data class Installed(val ref: PackRef, val evicted: List<PackRef>) : InstallOutcome
 
-    /** 没有做任何改动（校验失败 / IO 失败 / 包为空）。当前生效的仍是原来那套。 */
+    /** 没有做任何改动（校验失败 / IO 失败 / 参数非法）。当前生效的仍是原来那套。 */
     data class Unchanged(val reason: String) : InstallOutcome
 }
 
 /**
- * 基于真实文件系统的皮肤包存储。
+ * 基于真实文件系统的皮肤包存储（票 #57 ②，ADR-0003）。
  *
- * @param baseDir 应传入 `context.filesDir`（**不是** `cacheDir`）。
+ * @param baseDir 应传入 `context.filesDir`（**不是** `cacheDir`）。版本目录在其下的 `skins/`。
  * @param log 日志输出，测试里可注入收集器断言「失败被记下」。
  */
 class SkinStore(
@@ -99,83 +176,104 @@ class SkinStore(
     private val log: (String) -> Unit = { },
 ) {
 
+    private val skinsRoot: File get() = File(baseDir, SkinStoreLayout.SKINS_DIR)
     private val pointerFile: File get() = File(baseDir, SkinStoreLayout.POINTER_FILE)
 
-    private fun slotDir(slot: String): File = File(baseDir, slot)
+    private fun packDir(packId: String): File = File(skinsRoot, packId)
+    private fun versionDir(ref: PackRef): File = File(packDir(ref.packId), ref.version)
+
+    /** 枚举磁盘上真实存在的版本目录（两层级），排除安装过程的 `.tmp` / `.old` 半成品。 */
+    private fun installedVersions(): Set<PackRef> {
+        val result = LinkedHashSet<PackRef>()
+        val packDirs = skinsRoot.listFiles() ?: return result
+        for (p in packDirs) {
+            if (!p.isDirectory || !SkinStoreLayout.isSafeSegment(p.name)) continue
+            val versionDirs = p.listFiles() ?: continue
+            for (v in versionDirs) {
+                if (!v.isDirectory) continue
+                if (v.name.endsWith(".tmp") || v.name.endsWith(".old")) continue
+                if (!SkinStoreLayout.isSafeSegment(v.name)) continue
+                result += PackRef(p.name, v.name)
+            }
+        }
+        return result
+    }
+
+    private fun readPointerContent(): String? = runCatching {
+        if (pointerFile.isFile) pointerFile.readText() else null
+    }.getOrElse {
+        log("皮肤指针读取失败：${it.message}")
+        null
+    }
+
+    private fun currentRef(): PackRef? =
+        SkinStoreLayout.resolvePointer(readPointerContent(), installedVersions())
 
     /**
-     * 读当前生效的槽位目录。
+     * 读当前生效的包目录。
      *
      * **这是启动路径上唯一会碰磁盘的地方**（ADR-0006：只读本地、不碰网络）。
-     * 它刻意只做「读一个小文本 + 确认目录存在」，不做校验、不做版本比对
-     * ——校验在建包时就做过了（[install]）。
-     *
-     * @return 当前生效的包目录；`null` = 没有可用包，调用方回落内置默认。
+     * 指针内容非法 / 指向的目录被删 → `null`，回落内置默认（既有行为，不退化）。
      */
     fun currentPackDir(): File? {
-        val content = runCatching {
-            if (pointerFile.isFile) pointerFile.readText() else null
-        }.getOrElse {
-            log("皮肤指针读取失败：${it.message}")
-            null
-        }
-
-        val existing = SkinStoreLayout.SLOTS
-            .filter { slotDir(it).isDirectory }
-            .toSet()
-
-        val slot = SkinStoreLayout.resolvePointer(content, existing)
-        if (slot == null) {
+        val content = readPointerContent()
+        val ref = SkinStoreLayout.resolvePointer(content, installedVersions())
+        if (ref == null) {
             if (content != null) {
                 log("皮肤指针无效（'${content.trim()}'），回落内置默认")
             }
             return null
         }
-        return slotDir(slot)
+        return versionDir(ref)
     }
 
     /**
-     * 原子写指针：先写 `current-skin.tmp`，再 rename 覆盖正式文件。
-     *
-     * 直接 `writeText` 在崩溃/断电时会留下**半截内容**，下次启动读到垃圾指针
-     * —— 而 ADR-0003 明确要求「原子改写当前指针」。rename 在同一文件系统内是原子的，
-     * 所以读者要么看到旧的完整内容，要么看到新的完整内容，不会看到半截。
+     * 原子写指针：先写 `current-skin.tmp`，再 rename 覆盖正式文件（保留既有实现）。
+     * 崩溃时读者只会看到旧或新的完整 JSON，不会看到半截内容。
      */
-    private fun writePointerAtomically(slot: String) {
+    private fun writePointerAtomically(ref: PackRef) {
+        val encoded = SkinStoreLayout.encodePointer(ref)
         val tmp = File(baseDir, "${SkinStoreLayout.POINTER_FILE}.tmp")
-        tmp.writeText(slot)
+        tmp.writeText(encoded)
         if (!tmp.renameTo(pointerFile)) {
-            // rename 失败时退一步直接写（至少保证指针可用），并记录。
             log("指针 rename 失败，改用直接写入")
-            pointerFile.writeText(slot)
+            pointerFile.writeText(encoded)
             tmp.delete()
         }
     }
 
     /**
-     * 把一套**已通过校验**的包内容装进空闲槽位并切换指针。
+     * 把一套**已通过校验**的包内容装进 `skins/{packId}/{version}/` 并切换指针。
      *
-     * 调用方负责：解包到 [unpackedDir]、跑完 `SkinPackIntegrity.verify` 与 `SkinPackPlanner.plan`，
-     * 只在结论 OK 时才调这里。本方法只做搬运与切换，**不做校验**。
-     *
-     * 原子性保证：
-     * 1. 先复制到 `slot-x.tmp`；
-     * 2. 完整复制成功后再 `renameTo(slot-x)`；
-     * 3. 最后才写指针。
+     * 调用方负责解包与校验，本方法只做搬运与切换。原子性保证：
+     * 1. 复制到 `{version}.tmp`；
+     * 2. 完整复制成功后 rename 就位（先把同版本的旧目录挪到 `.old`）；
+     * 3. 最后才原子写指针。
      * 任何一步失败都不动当前指针 → 线上那套仍然可用。
+     *
+     * @param packId 来自清单；会做路径安全校验，非法则 [InstallOutcome.Unchanged]。
+     * @param version 版本目录名；同样校验。
      */
-    fun install(unpackedDir: File): InstallOutcome {
+    fun install(unpackedDir: File, packId: String, version: String): InstallOutcome {
         if (!unpackedDir.isDirectory) {
             return InstallOutcome.Unchanged("源目录不存在：${unpackedDir.path}")
         }
+        if (!SkinStoreLayout.isSafeSegment(packId) || !SkinStoreLayout.isSafeSegment(version)) {
+            return InstallOutcome.Unchanged("packId / version 非法：'$packId' / '$version'")
+        }
 
-        val previousSlot = currentPackDir()?.name
-        val newSlot = SkinStoreLayout.slotForNewInstall(previousSlot)
-        val target = slotDir(newSlot)
-        val staging = File(baseDir, "$newSlot.tmp")
+        val newRef = PackRef(packId, version)
+        val previousCurrent = currentRef()
+        val target = versionDir(newRef)
+        val parent = target.parentFile
+            ?: return InstallOutcome.Unchanged("无法解析版本根目录：$target")
+        val staging = File(parent, "$version.tmp")
 
         try {
-            // 1) 清掉可能残留的半成品。
+            // 1) 确保版本根目录存在，并清掉可能残留的半成品。
+            if (!parent.isDirectory && !parent.mkdirs() && !parent.isDirectory) {
+                return InstallOutcome.Unchanged("无法创建版本根目录：$parent")
+            }
             staging.deleteRecursively()
             if (!staging.mkdirs() && !staging.isDirectory) {
                 return InstallOutcome.Unchanged("无法创建暂存目录")
@@ -184,47 +282,60 @@ class SkinStore(
             // 2) 复制到暂存目录。
             unpackedDir.copyRecursively(staging, overwrite = true)
 
-            // 3) 就位。注意顺序：**先把旧槽位改名挪开，再 rename 新的进来**。
-            //    绝不能用「先 deleteRecursively 再 rename」——那中间崩溃会让新旧俱失，
-            //    而旧的那套可能正是当前生效的（虽然 slotForNewInstall 已避开它，
-            //    但槽位目录仍可能残留上一轮的同名半成品）。
-            val displaced = File(baseDir, "$newSlot.old")
+            // 3) 就位。先把同版本旧目录挪开，再 rename 新的进来；失败则挪回，保持现状。
+            val displaced = File(parent, "$version.old")
             if (target.exists()) {
                 displaced.deleteRecursively()
                 if (!target.renameTo(displaced)) {
-                    log("皮肤包旧槽位挪开失败：$target -> $displaced")
-                    return InstallOutcome.Unchanged("旧槽位无法挪开")
+                    log("皮肤包旧目录挪开失败：$target -> $displaced")
+                    return InstallOutcome.Unchanged("旧版本目录无法挪开")
                 }
             }
             if (!staging.renameTo(target)) {
-                // 新包没能就位 → 把旧的挪回去，保持现状不变。
                 displaced.renameTo(target)
-                log("皮肤包 rename 失败：$staging -> $target（已回滚旧槽位）")
+                log("皮肤包 rename 失败：$staging -> $target（已回滚旧目录）")
                 return InstallOutcome.Unchanged("rename 失败")
             }
-            // 新包已就位，旧槽位才算可以丢。
             displaced.deleteRecursively()
 
-            // 4) 指针最后写，且**自身也要原子**：先写临时文件再 rename 覆盖。
-            //    ADR-0003 要求「原子改写当前指针」；直接 writeText 会在崩溃时留下半截内容。
-            writePointerAtomically(newSlot)
+            // 4) 指针最后写，且自身原子。
+            writePointerAtomically(newRef)
 
-            val evicted = SkinStoreLayout.selectSlotToEvict(
-                newSlot = newSlot,
-                previousCurrent = previousSlot,
-                existingSlots = SkinStoreLayout.SLOTS.filter { slotDir(it).isDirectory }.toSet(),
+            // 5) 最多两套：淘汰既非新版本、也非上一版本的目录。
+            val evicted = SkinStoreLayout.selectVersionsToEvict(
+                newRef = newRef,
+                previousCurrent = previousCurrent,
+                existingVersions = installedVersions(),
             )
-            evicted.forEach { slot ->
-                slotDir(slot).deleteRecursively()
-                log("皮肤槽位已淘汰：$slot")
+            evicted.forEach { ref ->
+                versionDir(ref).deleteRecursively()
+                log("皮肤版本已淘汰：${SkinStoreLayout.versionRelativePath(ref)}")
             }
 
-            log("皮肤包已安装：$newSlot（上一套：${previousSlot ?: "无"}）")
-            return InstallOutcome.Installed(newSlot, evicted)
+            val prevLabel = previousCurrent?.let { SkinStoreLayout.versionRelativePath(it) } ?: "无"
+            log("皮肤包已安装：${SkinStoreLayout.versionRelativePath(newRef)}（上一套：$prevLabel）")
+            return InstallOutcome.Installed(newRef, evicted)
         } catch (e: IOException) {
             log("皮肤包安装失败（IO）：${e.message}")
             runCatching { staging.deleteRecursively() }
             return InstallOutcome.Unchanged("IO 失败：${e.message}")
         }
+    }
+
+    /**
+     * 回滚：把指针改回磁盘上「不是当前」的那一套（user story 17 的明确 API）。
+     *
+     * 调用方不需要自己拼路径；回滚不删数据、不重新下载，两套目录都还在，
+     * 因此可再次回滚切回去。指针损坏 / 只有一套 → 返回 `false`，不抛异常。
+     */
+    fun rollback(): Boolean = try {
+        val current = currentRef() ?: return false
+        val target = SkinStoreLayout.rollbackTarget(current, installedVersions()) ?: return false
+        writePointerAtomically(target)
+        log("皮肤包已回滚：${SkinStoreLayout.versionRelativePath(current)} -> ${SkinStoreLayout.versionRelativePath(target)}")
+        true
+    } catch (e: Exception) {
+        log("皮肤包回滚失败：${e.message}")
+        false
     }
 }

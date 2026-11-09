@@ -162,6 +162,59 @@ object PackFontProbe {
 object SkinPackLoader {
 
     /**
+     * 「取字节 → 校验 → 装配」的公共实现（票 #57 ③）。
+     *
+     * 两条加载路径、以及**真实的两路径一致性契约测试**都走这里：只要给同一个
+     * [PackByteSource] 语义喂同一份字节，就必然产出同一个 [LoadedResources]。
+     *
+     * 刻意做成纯 JVM 可测：只依赖 [PackByteSource] 接口与纯数据类，
+     * **不调用 Android `Log`、不碰 `Resources`/`Typeface`**（那些留在 [load] 的生产外壳里）。
+     * 于是「同一份包、同一份期望产物」可以用两个不同的 `PackByteSource` 实现
+     * 在 `:app:testDebugUnitTest` 里直接断言相等，而不必起 instrumented 测试。
+     *
+     * @param source 取字节的实现：生产里是 [FilePackByteSource] 或 [ResourcesLoaderPackByteSource]，
+     *   测试里可注入任意等价实现。
+     * @param fontReadable 平台侧字体可读性探针；两条路径各自传入，这里只消费结论。
+     */
+    fun assemble(
+        source: PackByteSource,
+        manifest: SkinPackManifest,
+        appVersionCode: Int,
+        builtIn: ResourcePayload,
+        verifier: PackSignatureVerifier,
+        fontReadable: (String) -> Boolean = { false },
+    ): LoadedResources {
+        // 先按清单声明的路径取全字节（缺失的留空，交给校验判 IntegrityFailed）。
+        val bytes = HashMap<String, ByteArray>(manifest.entries.size)
+        for (entry in manifest.entries) {
+            source.read(entry.path)?.let { bytes[entry.path] = it }
+        }
+
+        val verification = SkinPackIntegrity.verify(
+            SkinPackVerifyInput(
+                manifest = manifest,
+                actualBytes = bytes,
+                appVersionCode = appVersionCode,
+            ),
+            verifier,
+        )
+
+        // 字体可读性只有在清单真的声明了字体时才需要探。
+        val fontOk = manifest.fontFileName?.takeIf { it.isNotBlank() }
+            ?.let { path ->
+                // 校验没过时不浪费一次解码 —— 整体回落时这个值无关紧要。
+                verification.ok && fontReadable(path)
+            } ?: false
+
+        return SkinPackPlanner.plan(
+            manifest = manifest,
+            verification = verification,
+            fontReadable = fontOk,
+            builtIn = builtIn,
+        )
+    }
+
+    /**
      * 加载一个已解包到 [packDir] 的皮肤包。
      *
      * @param manifest 已解析的清单；`null` = 没有包（直接回落）。
@@ -207,33 +260,13 @@ object SkinPackLoader {
         }
 
         return try {
-            // 先按清单声明的路径取全字节（缺失的留空，交给校验判 IntegrityFailed）。
-            val bytes = HashMap<String, ByteArray>(manifest.entries.size)
-            for (entry in manifest.entries) {
-                source.read(entry.path)?.let { bytes[entry.path] = it }
-            }
-
-            val verification = SkinPackIntegrity.verify(
-                SkinPackVerifyInput(
-                    manifest = manifest,
-                    actualBytes = bytes,
-                    appVersionCode = appVersionCode,
-                ),
-                verifier,
-            )
-
-            // 字体可读性只有在清单真的声明了字体时才需要探。
-            val fontOk = manifest.fontFileName?.takeIf { it.isNotBlank() }
-                ?.let { path ->
-                    // 注意：校验没过时不浪费一次解码 —— 整体回落时这个值无关紧要。
-                    verification.ok && fontReadable(path)
-                } ?: false
-
-            val planned = SkinPackPlanner.plan(
+            val planned = assemble(
+                source = source,
                 manifest = manifest,
-                verification = verification,
-                fontReadable = fontOk,
+                appVersionCode = appVersionCode,
                 builtIn = builtIn,
+                verifier = verifier,
+                fontReadable = fontReadable,
             )
             Log.i(TAG, "皮肤包加载完成: ${planned.meta.describe("resources")}")
             planned

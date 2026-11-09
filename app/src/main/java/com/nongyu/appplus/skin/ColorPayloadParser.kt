@@ -71,8 +71,14 @@ data class ColorParseResult(
 
 object ColorPayloadParser {
 
-    /** 客户端支持的色值段格式主版本。更高 = 整段拒绝（ADR-0003 第①层）。 */
-    const val SUPPORTED_SCHEMA_MAJOR: Int = 1
+    /**
+     * 客户端支持的**色值段**格式主版本。更高 = 整段拒绝（ADR-0003 第①层）。
+     *
+     * 与 [SkinPackManifest.SUPPORTED_SCHEMA_MAJOR]（皮肤包格式主版本）是**两套独立演进的
+     * 载荷版本**：色值段走 ADR-0004 数据库目录接口，皮肤包走资源载荷。刻意分开命名，
+     * 不合并成同一个常量（票 #57 ④：格式版本与最低 App 版本必须分开，两载体各自版本亦然）。
+     */
+    const val COLOR_SEGMENT_SCHEMA_MAJOR: Int = 1
 
     /**
      * 解析色值段。**纯函数，不碰 JSON API、不碰 Android、可全量单测。**
@@ -92,10 +98,10 @@ object ColorPayloadParser {
     ): ColorParseResult {
         // ① 格式主版本过高 → 整段拒绝。
         val schemaMajor = input.schemaMajor
-        if (schemaMajor != null && schemaMajor > SUPPORTED_SCHEMA_MAJOR) {
+        if (schemaMajor != null && schemaMajor > COLOR_SEGMENT_SCHEMA_MAJOR) {
             return fail(
                 PayloadOrigin.SchemaTooNew,
-                "色值段格式主版本 $schemaMajor 高于客户端支持的 $SUPPORTED_SCHEMA_MAJOR",
+                "色值段格式主版本 $schemaMajor 高于客户端支持的 $COLOR_SEGMENT_SCHEMA_MAJOR",
             )
         }
 

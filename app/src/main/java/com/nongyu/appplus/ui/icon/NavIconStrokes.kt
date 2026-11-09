@@ -3,6 +3,7 @@ package com.nongyu.appplus.ui.icon
 import com.nongyu.appplus.skin.BuiltInSkin
 import com.nongyu.appplus.skin.NavIconKey
 import com.nongyu.appplus.skin.ResourcePayload
+import com.nongyu.appplus.skin.SkinPackPlanner
 
 /**
  * 把「皮肤包的资源段」与「内置默认资源段」合成为**每个图标一定有值**的线宽表
@@ -21,18 +22,9 @@ import com.nongyu.appplus.skin.ResourcePayload
  */
 object NavIconStrokes {
 
-    /**
-     * 线宽系数的合法区间（开区间下界）。
-     *
-     * 为什么要有上界：系数相对画布最小边，`1.0f` 意味着线宽等于整个图标 —— 一定是坏数据。
-     * 为什么下界不能是 `0f`：`strokeWidth = 0` 的 `Stroke` 在 Skia 里画不出任何东西，
-     * 图标会**静默消失**，比回落内置默认糟得多。所以非有限值 / ≤0 / >[MAX_SCALE]
-     * 一律视为非法 → 回落，而不是"照用坏值"。
-     */
-    const val MIN_SCALE: Float = 0f
-
-    /** 见 [MIN_SCALE] 的说明。 */
-    const val MAX_SCALE: Float = 1f
+    // 线宽合法性判据的唯一真源是 SkinPackPlanner.sanitizeStroke（票 #57 ④）。
+    // 这里不再自带 MIN_SCALE / MAX_SCALE 两份阈值，避免与数据层判据漂移。
+    // 判据语义见 SkinPackPlanner.sanitizeStroke 的 KDoc：有限且严格落在 (0, 1] 内。
 
     /**
      * 合成最终线宽表。
@@ -58,14 +50,12 @@ object NavIconStrokes {
     /**
      * 只保留**可用**的线宽系数，非法值返回 `null` 交给上层继续回落。
      *
-     * 判据：有限（排除 `NaN` / `Infinity`，它们会让所有 `draw*` 得到空绘制）
-     * 且严格落在 `(MIN_SCALE, MAX_SCALE]` 内。
+     * 判据的**唯一真源**是 [SkinPackPlanner.sanitizeStroke]（票 #57 ④）：
+     * 有限（排除 NaN / Infinity）且严格落在 `(0, 1]` 内。
+     * 方向是渲染层依赖数据层，不再是两份复制粘贴的阈值。
      */
     fun sanitize(value: Float?): Float? {
         if (value == null) return null
-        if (!value.isFinite()) return null
-        if (value <= MIN_SCALE) return null
-        if (value > MAX_SCALE) return null
-        return value
+        return SkinPackPlanner.sanitizeStroke(value)
     }
 }
