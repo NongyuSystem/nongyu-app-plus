@@ -135,6 +135,24 @@ class SkinStore(
     }
 
     /**
+     * 原子写指针：先写 `current-skin.tmp`，再 rename 覆盖正式文件。
+     *
+     * 直接 `writeText` 在崩溃/断电时会留下**半截内容**，下次启动读到垃圾指针
+     * —— 而 ADR-0003 明确要求「原子改写当前指针」。rename 在同一文件系统内是原子的，
+     * 所以读者要么看到旧的完整内容，要么看到新的完整内容，不会看到半截。
+     */
+    private fun writePointerAtomically(slot: String) {
+        val tmp = File(baseDir, "${SkinStoreLayout.POINTER_FILE}.tmp")
+        tmp.writeText(slot)
+        if (!tmp.renameTo(pointerFile)) {
+            // rename 失败时退一步直接写（至少保证指针可用），并记录。
+            log("指针 rename 失败，改用直接写入")
+            pointerFile.writeText(slot)
+            tmp.delete()
+        }
+    }
+
+    /**
      * 把一套**已通过校验**的包内容装进空闲槽位并切换指针。
      *
      * 调用方负责：解包到 [unpackedDir]、跑完 `SkinPackIntegrity.verify` 与 `SkinPackPlanner.plan`，
@@ -166,15 +184,30 @@ class SkinStore(
             // 2) 复制到暂存目录。
             unpackedDir.copyRecursively(staging, overwrite = true)
 
-            // 3) 原子就位：rename 而非「删了再拷」。
-            target.deleteRecursively()
+            // 3) 就位。注意顺序：**先把旧槽位改名挪开，再 rename 新的进来**。
+            //    绝不能用「先 deleteRecursively 再 rename」——那中间崩溃会让新旧俱失，
+            //    而旧的那套可能正是当前生效的（虽然 slotForNewInstall 已避开它，
+            //    但槽位目录仍可能残留上一轮的同名半成品）。
+            val displaced = File(baseDir, "$newSlot.old")
+            if (target.exists()) {
+                displaced.deleteRecursively()
+                if (!target.renameTo(displaced)) {
+                    log("皮肤包旧槽位挪开失败：$target -> $displaced")
+                    return InstallOutcome.Unchanged("旧槽位无法挪开")
+                }
+            }
             if (!staging.renameTo(target)) {
-                log("皮肤包 rename 失败：$staging -> $target")
+                // 新包没能就位 → 把旧的挪回去，保持现状不变。
+                displaced.renameTo(target)
+                log("皮肤包 rename 失败：$staging -> $target（已回滚旧槽位）")
                 return InstallOutcome.Unchanged("rename 失败")
             }
+            // 新包已就位，旧槽位才算可以丢。
+            displaced.deleteRecursively()
 
-            // 4) 指针最后写 —— 在此之前任何崩溃都不会影响线上那套。
-            pointerFile.writeText(newSlot)
+            // 4) 指针最后写，且**自身也要原子**：先写临时文件再 rename 覆盖。
+            //    ADR-0003 要求「原子改写当前指针」；直接 writeText 会在崩溃时留下半截内容。
+            writePointerAtomically(newSlot)
 
             val evicted = SkinStoreLayout.selectSlotToEvict(
                 newSlot = newSlot,

@@ -74,6 +74,21 @@ interface SkinSource {
 val LocalSkinSource = staticCompositionLocalOf<SkinSource> { SkinSource.BuiltIn }
 
 /**
+ * 启动时**已解析好**的皮肤结果。
+ *
+ * 存在的理由只有一个：**解析必须只发生一次**。
+ *
+ * 冷启动的解析（读指针 + 读清单 + 校验）是全链路最贵的一步，
+ * ADR-0006 明确要求把它限制在启动路径上同步做一次。如果让 UI 层自己再调
+ * `SkinSource.resolve()`，就会多付一遍磁盘读与一遍日志。
+ *
+ * 所以 `MainActivity` 解析一次，把结果放进这个 Local；UI 层只读不解析。
+ */
+val LocalSkinResolution = staticCompositionLocalOf<SkinResolution> {
+    SkinSource.BuiltIn.resolve()
+}
+
+/**
  * 内置默认皮肤实现（[SkinSource] 的本期唯一实现）。
  *
  * 它**没有**任何 IO：色板是编译期常量 [NongyuColors.Green]，

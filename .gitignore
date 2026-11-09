@@ -68,8 +68,8 @@ release/
 .dsh-tmp/
 .dsh-vision-router/
 
+### 临时截图（像素比对用，不入库）###
+shots/
+
 ### IDE 本地配置 ###
 .idea/
-
-### ��ʱ��ͼ�����رȶ��ã�����⣩###
-shots/

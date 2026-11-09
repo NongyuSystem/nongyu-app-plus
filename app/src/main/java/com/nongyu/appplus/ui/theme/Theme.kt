@@ -7,6 +7,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import com.nongyu.appplus.skin.SkinResolution
 import com.nongyu.appplus.skin.SkinSource
 
 /**
@@ -145,20 +146,27 @@ private fun NongyuColors.toColorScheme() = lightColorScheme(
  * 所以不传 [colors] 时渲染结果与换接口之前完全一致；
  * 外部色值段就绪后由 T5 在启动路径上 `resolve()` 后经 [colors] 传入。
  *
- * @param colors 显式指定色板；`null`（缺省）= 用 [source] 的内置默认色板。
+ * @param colors 显式指定色板；`null`（缺省）= 用 [resolution] 或 [source] 的解析结果。
  * @param source 皮肤数据源；缺省为 [SkinSource.BuiltIn]。
+ * @param resolution **启动路径上已解析好的**皮肤结果。传入后不再重复解析
+ *   （ADR-0006：解析只发生一次）；不传则回落到内置默认。
  */
 @Composable
 fun NongyuAppPlusTheme(
     colors: NongyuColors? = null,
     source: SkinSource = SkinSource.BuiltIn,
+    resolution: SkinResolution? = null,
     content: @Composable () -> Unit,
 ) {
-    val resolved = colors ?: source.builtIn.colors
+    // 已解析结果优先；没传就造一个「全回落」的结果，语义等价于内置默认。
+    val effective = resolution ?: SkinResolution(null, null, source.builtIn)
+    val resolved = colors ?: effective.palette()
     val colorScheme = remember(resolved) { resolved.toColorScheme() }
     androidx.compose.runtime.CompositionLocalProvider(
         LocalNongyuColors provides resolved,
         com.nongyu.appplus.skin.LocalSkinSource provides source,
+        // 下发同一个对象，UI 层只读不解析（避免冷启动重复磁盘读）。
+        com.nongyu.appplus.skin.LocalSkinResolution provides effective,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

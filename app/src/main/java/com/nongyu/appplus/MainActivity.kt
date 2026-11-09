@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
             NongyuAppPlusTheme(
                 colors = resolution.palette(),
                 source = skin,
+                resolution = resolution,
             ) {
                 NongyuApp()
             }

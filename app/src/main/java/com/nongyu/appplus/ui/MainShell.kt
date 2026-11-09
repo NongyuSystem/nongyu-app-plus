@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nongyu.appplus.skin.LocalSkinResolution
 import com.nongyu.appplus.skin.LocalSkinSource
 import com.nongyu.appplus.skin.NavIconKey
 import com.nongyu.appplus.ui.ai.NongyuOrb
@@ -96,11 +97,14 @@ fun MainShell() {
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
     // 与改造前 drawNavIcon 里的 `s * 0.085f` 完全一致 —— 因此视觉不变。
-    // 只解析一次（ADR-0006：冷启动同步读本地，首帧即正确皮肤）。
+    // 注意：这里**不再调用** skin.resolve()。启动路径上的解析只发生一次
+    // （MainActivity 在 setContent 前完成，ADR-0006），此处只读取已解析好的结果。
+    // 曾在此处再 resolve 一次，导致冷启动多做一遍磁盘读 + 一遍日志。
     val skin = LocalSkinSource.current
-    val iconStrokes = remember(skin) {
+    val resolution = LocalSkinResolution.current
+    val iconStrokes = remember(skin, resolution) {
         NavIconStrokes.resolve(
-            payload = skin.resolve().resourcePayload(),
+            payload = resolution.resourcePayload(),
             builtIn = skin.builtIn.resources,
         )
     }
@@ -375,15 +379,6 @@ fun MainShell() {
         }
     }
 }
-
-/**
- * 导航图标的种类。
- *
- * 改造前这里是 `private enum class NavIcon`，图标本体是一段 `DrawScope` 手绘代码。
- * 现在图标身份改用皮肤契约里的稳定键 [NavIconKey]（字符串），几何变成
- * [NavIconGeometry] 数据 —— 这样「换包 = 换参数」才成立（票 #38 / ADR-0005 Q1=A）。
- * 改造前后的渲染结果逐像素一致（几何常量原样搬运，运算顺序保留）。
- */
 
 /**
  * 边界虚化 Modifier：在控件外侧画多层「逐圈外扩 + alpha 递减」的圆角描边，

@@ -35,10 +35,21 @@ class FileSkinSource(
     private val appVersionCode: Int,
 ) : SkinSource {
 
+    /** 皮肤包本地存储（`filesDir` + 原子 rename + 当前指针）。 */
     private val store = SkinStore(
         baseDir = File(context.filesDir, "skin"),
         log = { Log.i(TAG, it) },
     )
+
+    /**
+     * 资源段的最近一次解析结论（含失败原因），供日志与诊断用。
+     *
+     * 单独存一份是因为：`SkinResolution.resources` 为 `null` 时，它的
+     * `describe()` 只会写「无资源段」，把「校验失败 / schema 过高 / 版本过低」
+     * 这些真正有用的成因吞掉。ADR-0006 明确要求日志能区分这四种。
+     */
+    var lastResourceMeta: PayloadMeta? = null
+        private set
 
     override val builtIn: BuiltInSkin get() = BuiltInSkinSource.builtIn
 
@@ -46,7 +57,8 @@ class FileSkinSource(
      * 解析当前生效的皮肤。**这是启动路径上的唯一入口。**
      */
     override fun resolve(): SkinResolution {
-        val resources = resolveResources()
+        val (resources, resourceMeta) = resolveResources()
+        lastResourceMeta = resourceMeta
         val colors = resolveColors()
 
         val resolution = SkinResolution(
@@ -54,27 +66,33 @@ class FileSkinSource(
             resources = resources,
             builtIn = builtIn,
         )
-        Log.i(TAG, "皮肤解析完成：${resolution.describe()}")
+        // 用带真实成因的 meta 打日志，而不是让 describe() 猜。
+        Log.i(TAG, "皮肤解析完成：${resolution.describe()} | ${resourceMeta.describe("resources")}")
         return resolution
     }
 
-    /** 资源段：读指针 → 载包；任何失败都回落内置默认并记下原因。 */
-    private fun resolveResources(): ResourcePayload? {
+    /**
+     * 资源段：读指针 → 载包。
+     *
+     * 返回值是「载荷 + 结论元信息」两个：失败时载荷为 `null`，但 [PayloadMeta]
+     * 一定带上真实原因，上层据此写日志（ADR-0006）。
+     */
+    private fun resolveResources(): Pair<ResourcePayload?, PayloadMeta> {
         val packDir = try {
             store.currentPackDir()
         } catch (e: Exception) {
             Log.w(TAG, "读皮肤指针异常，回落内置默认：${e.message}")
-            return null
+            return null to PayloadMeta.fallback(PayloadOrigin.Absent, "读指针异常：${e.message}")
         }
 
         if (packDir == null) {
             // 无包是正常状态（绝大多数用户），不必告警。
             Log.i(TAG, "无本地皮肤包，使用内置默认")
-            return null
+            return null to PayloadMeta.fallback(PayloadOrigin.Absent, "无本地皮肤包")
         }
 
         val loaded = try {
-            // 清单是包根下的 manifest.json；读不出就按「无包」处理（不阻断启动）。
+            // 清单是包根下的 manifest.json；读不出就按「无可用清单」处理（不阻断启动）。
             val manifestJson = File(packDir, MANIFEST_FILE)
                 .takeIf { it.isFile }
                 ?.readText()
@@ -82,7 +100,7 @@ class FileSkinSource(
 
             if (manifest == null) {
                 Log.w(TAG, "皮肤包缺少可用清单（$MANIFEST_FILE），回落内置默认")
-                return null
+                return null to PayloadMeta.fallback(PayloadOrigin.Invalid, "包内无可用清单")
             }
 
             SkinPackLoader.load(
@@ -95,12 +113,18 @@ class FileSkinSource(
         } catch (e: Exception) {
             // 包坏了也必须能启动。
             Log.w(TAG, "皮肤包加载异常，回落内置默认：${e.message}")
-            return null
+            return null to PayloadMeta.fallback(PayloadOrigin.Invalid, "加载异常：${e.message}")
         }
 
         val payload = loaded.toPayload()
+        // 记录完整元信息：无论最终是否采用，都要能说清「这一环到底怎么了」。
+        // ADR-0006 要求日志写明是无包 / 校验失败 / schema 过高 / minAppVersion 过高，
+        // 所以这里打的是已经带上原因的 meta，而不是笼统写「无资源段」。
         Log.i(TAG, "资源段：${payload.meta.describe("resources")}")
-        return if (payload.meta.origin.isLoaded) payload else null
+        loaded.warnings.forEach { Log.i(TAG, "资源段警告：$it") }
+
+        // 未采用时把真实原因一并带回，而不是丢弃后让上层误报成「无资源段」。
+        return if (payload.meta.origin.isLoaded) payload to payload.meta else null to payload.meta
     }
 
     /**
@@ -122,13 +146,23 @@ class FileSkinSource(
         const val MANIFEST_FILE = "manifest.json"
 
         /**
-         * 本期签名校验器：放行。
+         * 本期签名校验器：**显式放行，但把事实记进日志**。
          *
          * ADR-0005 要求「整包签名」，但未定算法与公钥（属部署期决策）。
-         * 在它定下来之前，[SkinPackIntegrity] 的**其余所有校验**（逐文件 sha256、
-         * 白名单扩展名、目录穿越、禁可执行文件）仍然全部生效——签名只是最后一道。
-         * 这个选择是显式的、有注释的，不是遗漏。
+         * 在它定下来之前有两条路：
+         * - 恒返回 `false`（拒绝一切包）：安全，但等于本期资源通道完全不可用，
+         *   与「本期做资源通道」的票面要求冲突；
+         * - 恒返回 `true`（本选择）：让其余校验承担安全职责。
+         *
+         * 选了后者，但**必须明确记录**：这是当前唯一的已知安全缺口。
+         * [SkinPackIntegrity] 的其余所有校验（逐文件 sha256、白名单扩展名、
+         * 目录穿越、禁可执行文件）仍然全部生效 —— 签名缺位不等于无校验。
+         *
+         * ⇒ 待办：公钥与算法一旦确定，把这里换成真实实现即可，调用方无需改动。
          */
-        private val NO_OP_VERIFIER = PackSignatureVerifier { _, _ -> true }
+        private val NO_OP_VERIFIER = PackSignatureVerifier { _, _ ->
+            Log.w(TAG, "签名校验未实现（ADR-0005 未定算法/公钥），本次按放行处理")
+            true
+        }
     }
 }
