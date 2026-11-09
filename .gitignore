@@ -73,3 +73,8 @@ shots/
 
 ### IDE 本地配置 ###
 .idea/
+
+### wayfinder / 并行会话的独立 worktree（不入库）
+# 这些目录由 git worktree add 生成，是另一份工作副本，
+# 若不入 gitignore，换机器后会被 git 当成上千个待提交文件。
+.worktrees/
