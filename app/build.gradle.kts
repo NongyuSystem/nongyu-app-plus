@@ -48,6 +48,9 @@ android {
 
     buildFeatures {
         compose = true
+        // 皮肤包要判定 minAppVersion（ADR-0003：判定权在客户端），
+        // 启动路径上需要读到当前 versionCode，故开启 BuildConfig。
+        buildConfig = true
     }
 }
 
