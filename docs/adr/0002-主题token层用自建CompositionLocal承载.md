@@ -6,6 +6,8 @@
 
 accepted（2026-11-06，维护者在 wayfinder #4 拍板）
 
+> **部分被 ADR 0004 取代（2026-11-08）**：本 ADR 选的 `compositionLocalOf` 已改为 `staticCompositionLocalOf`（维护者在 wayfinder #24 拍板 Q3=B）。理由：本期无运行时换肤入口，色板只在冷启动定一次，正合官方「值几乎不会变就用 static」的口径。其余结论（色板为唯一真源、`ColorScheme` 只是投影、Composable 零改动）**仍然成立**。见 `docs/adr/0004-色值通道走数据库目录接口.md`。
+
 ## 决策内容
 
 | 项 | 结论 |
