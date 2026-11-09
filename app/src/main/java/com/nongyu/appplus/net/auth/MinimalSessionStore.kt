@@ -155,19 +155,16 @@ class MinimalSessionStore(
     private fun encrypt(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, obtainKey())
-        val iv = cipher.iv
-        val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(iv + body, Base64.NO_WRAP)
+        val packed = TokenCipherLayout.pack(cipher.iv, cipher.doFinal(plain.toByteArray(Charsets.UTF_8)))
+        return Base64.encodeToString(packed, Base64.NO_WRAP)
     }
 
     /** 解密 base64(iv + ciphertext)；失败抛 `GeneralSecurityException`（由调用方兜住）。 */
     private fun decrypt(stored: String): String {
         val raw = Base64.decode(stored, Base64.NO_WRAP)
-        require(raw.size > IV_SIZE) { "密文长度异常" }
-        val iv = raw.copyOfRange(0, IV_SIZE)
-        val body = raw.copyOfRange(IV_SIZE, raw.size)
+        val (iv, body) = TokenCipherLayout.unpack(raw)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(TokenCipherLayout.GCM_TAG_BITS, iv))
         return String(cipher.doFinal(body), Charsets.UTF_8)
     }
 
@@ -178,8 +175,6 @@ class MinimalSessionStore(
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val IV_SIZE = 12
-        const val GCM_TAG_BITS = 128
     }
 }
 
