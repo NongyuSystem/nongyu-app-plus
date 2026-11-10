@@ -422,12 +422,17 @@ fun MainShell() {
                 // 改为直接上报**底栏自身在外层 Box 中的高度**：
                 // 它就是「内容区底部必须让出的像素数」，无需任何坐标换算。
                 .onGloballyPositioned { coords ->
-                    // 只在**常态**下上报占位高度。
+                    // 只在**常态、且高度动画已经稳定**时上报占位高度。
                     //
-                    // 之前无条件上报当前高度，导致点开详情卡（62dp->128dp）时
-                    // 内容区底部让位量同步变大，整张课程表被挤压变形（维护者反馈）。
-                    // 课程表只需要知道「常态底栏会占多高」，变形是浮层行为，不该推动内容。
-                    if (barMode == BarMode.Normal) {
+                    // 两个条件缺一不可：
+                    // 1. barMode == Normal：点开详情卡（62->128dp）时不该推动课表
+                    //    （弹出版挤压，之前已修）。
+                    // 2. barHeight == navHeight：退出详情卡时 barMode **立刻**回到 Normal，
+                    //    但 barHeight 还在 128->62dp 的 340ms 动画途中。
+                    //    若此时无条件上报，会逐帧把中间高度传给课表，
+                    //    整张课表跟着一帧一帧改大小 —— 就是「退回时瞬间变大小、弹一下」。
+                    //    等动画落回 navHeight 再上报，值与此前一致，不会触发重组。
+                    if (barMode == BarMode.Normal && barHeight == navHeight) {
                         val h = coords.size.height.toFloat()
                         if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
                     }
