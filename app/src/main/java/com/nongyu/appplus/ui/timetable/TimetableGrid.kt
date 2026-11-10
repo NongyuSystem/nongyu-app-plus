@@ -51,10 +51,10 @@ import java.time.temporal.ChronoUnit
  * 表头行与网格行都必须用「固定左侧列 + 7 × weight(1f)」同一基准，左侧占位宽度必须完全相等，
  * 否则表头会与每天的列整体错位一位。
  */
-private const val PERIOD_COUNT = 10
-
-/** 学期总周数（需求 9 的「共几周」）。 */
-private const val TOTAL_WEEKS = 16
+/*
+ * 节次 / 周数 / 作息 / 星期名的**唯一真源**在 TimetableData.kt。
+ * 这里不再重复定义 —— 之前两处各写一份，改一处就得记得改另一处，迟早不同步。
+ */
 
 /**
  * 节次列宽度。
@@ -93,38 +93,26 @@ private val GAP_NORMAL = 3.dp
 private val GAP_LONG = 6.dp
 private val GAP_MEAL = 10.dp
 
-/** 第 [period] 节**之后**的纵向间距。period 是前一节编号（1..9 才有意义）。 */
-private fun gapAfter(period: Int): Dp = when (period) {
-    // 午休 4→5、晚饭 8→9：最长
-    4, 8 -> GAP_MEAL
-    // 20 分的大课间：2→3、6→7
-    2, 6 -> GAP_LONG
-    // 其余都是 10 分的常规课间
-    else -> GAP_NORMAL
+/**
+ * 第 [period] 节**之后**的纵向间距（period 是前一节编号，1..9 才有意义）。
+ *
+ * 判定「哪一档」交给数据层 [gapKindAfter]（唯一真源，可单测）；
+ * 这里只负责把档位映射成 dp。之前是两边各写一份 when，
+ * 改一处就会不同步。
+ */
+private fun gapAfter(period: Int): Dp = when (gapKindAfter(period)) {
+    RowGapKind.Meal -> GAP_MEAL
+    RowGapKind.Long -> GAP_LONG
+    RowGapKind.Normal -> GAP_NORMAL
 }
 
 /** 圆角（维护者第 6 条要圆角矩形）。 */
 private val CELL_CORNER = 10.dp
 private val HEADER_CORNER = 12.dp
 
-/**
- * 节次作息，照抄旧农屿 `apps/nongyu-rn-app/src/modules/course/model/courseTimes.ts`（川农常见作息）。
- * 索引 0 对应第 1 节。
+/*
+ * COURSE_TIMES / WEEKDAY_LABELS 见 TimetableData.kt（唯一真源）。
  */
-private val COURSE_TIMES = listOf(
-    "08:10" to "08:55",
-    "09:05" to "09:50",
-    "10:10" to "10:55",
-    "11:05" to "11:50",
-    "14:20" to "15:05",
-    "15:15" to "16:00",
-    "16:20" to "17:05",
-    "17:15" to "18:00",
-    "19:30" to "20:15",
-    "20:25" to "21:10",
-)
-
-private val WEEKDAY_LABELS = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 /**
  * @param uiScale 屏宽自适应系数，由 MainShell 以 411dp 为基准算出（与导航栏同一套）。
