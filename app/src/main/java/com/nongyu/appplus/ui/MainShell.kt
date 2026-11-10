@@ -107,6 +107,12 @@ private enum class OrbMode { Idle, Listening, Input }
  */
 private enum class BarMode { Normal, Input, Detail }
 
+/**
+ * 课程详情卡的两个形态（维护者 2026-11-10 要求）。
+ * 拖动顶部横杠在两者之间吸附；继续下拉到底则退出卡片。
+ */
+private enum class DetailStage { Brief, Full }
+
 @Composable
 fun MainShell() {
     val colors = NongyuTheme.colors
@@ -120,6 +126,18 @@ fun MainShell() {
     // 所以选中态必须提升到 Shell，子页面只负责上报点击。
     // 这与既有「导航栏变形为标签胶囊 / 输入条」是同一套做法。
     var detailCourse by remember { mutableStateOf<CourseEntry?>(null) }
+
+    // 详情卡形态（简介 / 详情），拖横杠在两者间吸附。每次打开卡片回到简介态。
+    var detailStage by remember { mutableStateOf(DetailStage.Brief) }
+    // 拖拽中的实时高度偏移（dp，正值=往上拉高）。松手后清零，由动画接管。
+    var detailDragDp by remember { mutableStateOf(0f) }
+    // 打开课程时复位到简介态
+    LaunchedEffect(detailCourse?.id) {
+        if (detailCourse != null) {
+            detailStage = DetailStage.Brief
+            detailDragDp = 0f
+        }
+    }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
@@ -360,18 +378,24 @@ fun MainShell() {
         val orbDissolveAlpha = 1f - dissolve.value
         val orbDissolveScale = 1f + dissolve.value * 0.55f
 
-        // 详情卡高度：必须能容纳内容，否则 AnimatedContent 内部会把内容压没
-        // （实测 96dp 时卡片变成一片空白）。
-        // 内容实测约 62dp（横杠 4 + 课名 18 + 时间行 14 + 胶囊 22 + 间距），
-        // 加上容器上下 padding 与留白，128dp 是刚好不空、也不裁的高度。
-        val detailHeight = s(128.dp)
+        // 详情卡两个形态的高度（维护者拍板：简介 128dp / 详情 260dp）。
+        val briefHeight = s(128.dp)
+        val fullHeight = s(260.dp)
+        val detailHeight = when (detailStage) {
+            DetailStage.Brief -> briefHeight
+            DetailStage.Full -> fullHeight
+        }
+        // 拖拽时把实时偏移叠加到目标高度上（往下拖 = 负值 = 变矮）。
+        // 下限 navHeight：拖到底就不再变矮，松手时判定为退出。
+        val draggedDetailHeight = (detailHeight + detailDragDp.dp).coerceAtLeast(navHeight)
         val barHeight by animateDpAsState(
             targetValue = when (barMode) {
-                BarMode.Detail -> detailHeight
+                BarMode.Detail -> draggedDetailHeight
                 BarMode.Input -> navHeight
                 BarMode.Normal -> navHeight
             },
-            animationSpec = tween(340),
+            // 拖拽中不要动画（否则跟手延迟），只在吸附/切换形态时动画
+            animationSpec = tween(if (detailDragDp == 0f) 300 else 0),
             label = "barHeight",
         )
         val barCorner by animateDpAsState(
@@ -453,10 +477,37 @@ fun MainShell() {
                         com.nongyu.appplus.ui.timetable.CourseDetailContent(
                             course = course,
                             uiScale = uiScale,
+                            fullStage = detailStage == DetailStage.Full,
                             // 同一门课在本学期的其他时段（同课不同天/不同节次）
                             otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
+                            onHandleDrag = { deltaDp ->
+                                // 累计拖拽位移；上不封顶（详情态之上不再拉高），
+                                // 下限由 draggedDetailHeight 的 coerceAtLeast 兜住。
+                                detailDragDp += deltaDp
+                            },
+                            onHandleDragEnd = {
+                                // 以「当前形态高度 + 累计偏移」判定吸附：
+                                // - 低于简介态一半 -> 退出（拖到底）
+                                // - 高于简介态与详情态的中点 -> 详情态
+                                // - 否则 -> 简介态
+                                // 用纯 Float 的 dp 数值比较，避开 Dp.compareTo 的泛型推断问题
+                                val briefDp = briefHeight.value
+                                val fullDp = fullHeight.value
+                                val base = when (detailStage) {
+                                    DetailStage.Brief -> briefDp
+                                    DetailStage.Full -> fullDp
+                                }
+                                val current = base + detailDragDp
+                                when {
+                                    current < briefDp * 0.55f -> detailCourse = null
+                                    current > (briefDp + fullDp) / 2f ->
+                                        detailStage = DetailStage.Full
+                                    else -> detailStage = DetailStage.Brief
+                                }
+                                detailDragDp = 0f
+                            },
                             // 详情卡属于「不退出」白名单，但必须**消费掉点击**：
                             // 若这里没有任何 pointerInput，事件会穿透到内容区下方的收起层，
                             // 点卡片自己也会退出（实测 b3 那种情况）。

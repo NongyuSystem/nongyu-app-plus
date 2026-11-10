@@ -1,6 +1,10 @@
 package com.nongyu.appplus.ui.timetable
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -16,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -25,58 +32,74 @@ import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
 /**
- * 课程详情卡内容（占据导航栏变形后的位置）。
+ * 课程详情卡内容。
  *
- * ## 为什么是「导航栏变形」而不是 BottomSheet
- * 票 #16 已拍板：**采纳需求原文**，导航栏原地拉高成卡片，
- * 中间农小屿星云球溶解淡出。不跟旧农屿的 BottomSheet、也不跟它的全屏宽。
+ * ## 两个形态（维护者 2026-11-10 要求）
+ * - **简介态**：课名 / 时间 / 地点·教师·周次 / 其他时段
+ * - **详情态**：在简介态基础上多出「考勤 / 评论 / 备注」三块分区
  *
- * 外框（圆角、虚化边界、拉高动画）由 [com.nongyu.appplus.ui.MainShell] 负责，
- * 本组件只画内容——这样卡片与导航栏共用同一套视觉，不会割裂。
+ * 顶部横杠是**真的可拖**：上拖吸附到详情态、下拖吸附回简介态、
+ * 继续下拉到底则退出。手势只在横杠区域生效（避免与卡片内部抢手势）。
  *
- * ## 信息量（维护者反馈「很多信息都没显示」后补全）
- * 现在展示 **9 项**，分三层：
- *
- * 1. 标题行：课程名（加粗大字号）
- * 2. 时间行：星期 + 起止节次 + **具体时刻**（如 `08:10 - 09:50`）——这是之前漏掉的
- * 3. 胶囊行：地点 / 教师 / 周次
- * 4. 底部：**该课程本学期其他时段**（同课不同天/不同节次），这条最能解释"信息量不够"
- *
- * ## 顶部横杠
- * 票 #17 查清它是 BottomSheet 的拖动抓手条（`40×4`/圆角 2）。
- * 这里沿用其尺寸与居中对齐，作为「可下拉收起」的视觉提示。
+ * ## 布局口径
+ * 不用 emoji（维护者明确要求）。信息用「标签 + 值」两列对齐，
+ * 而不是挤在一行胶囊里——窄卡片里胶囊会换行、显得零碎。
  */
 @Composable
 fun CourseDetailContent(
     course: CourseEntry,
     uiScale: Float,
     onDismiss: () -> Unit,
-    /** 同一门课在本学期的其他时段（由调用方从全量课表里筛出来）。 */
+    /** 是否为详情态（由 Shell 根据拖拽吸附结果传入）。 */
+    fullStage: Boolean,
+    /** 横杠拖拽：deltaDp 为本帧位移（dp，正=上拖）。 */
+    onHandleDrag: (deltaDp: Float) -> Unit,
+    /** 松手：由 Shell 决定吸附到哪个形态或退出。 */
+    onHandleDragEnd: () -> Unit,
     otherSlots: List<CourseEntry> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
+    val density = LocalDensity.current
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
     fun t(size: Float): androidx.compose.ui.unit.TextUnit = (size * uiScale).sp
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = s(16.dp), vertical = s(5.dp)),
+            .padding(horizontal = s(18.dp), vertical = s(4.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 顶部横杠（沿用旧农屿 40×4/圆角2）
+        // ---- 可拖拽的横杠 ----
+        // 命中区域比视觉横杠大（44dp 高），方便手指抓；视觉仍是 40×4。
         Box(
             modifier = Modifier
-                .width(s(40.dp))
-                .height(s(4.dp))
-                .clip(RoundedCornerShape(s(2.dp)))
-                .background(colors.surface.colorOutline.copy(alpha = 0.55f)),
-        )
+                .width(s(56.dp))
+                .height(s(18.dp))
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { _, dy ->
+                            // dy 为像素，负=向上；转成 dp 并取反（正=拉高）
+                            onHandleDrag(-dy / density.density)
+                        },
+                        onDragEnd = onHandleDragEnd,
+                        onDragCancel = onHandleDragEnd,
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(s(40.dp))
+                    .height(s(4.dp))
+                    .clip(RoundedCornerShape(s(2.dp)))
+                    .background(colors.surface.colorOutline.copy(alpha = 0.55f)),
+            )
+        }
 
-        Spacer(Modifier.height(s(6.dp)))
+        Spacer(Modifier.height(s(4.dp)))
 
-        // ---- 第一层：课程名 ----
+        // ---- 课程名 ----
         Text(
             text = course.name,
             color = colors.surface.colorText,
@@ -88,66 +111,112 @@ fun CourseDetailContent(
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(s(3.dp)))
+        Spacer(Modifier.height(s(2.dp)))
 
-        // ---- 第二层：时间（星期 + 节次 + 具体时刻）----
-        // 具体时刻是之前漏掉的关键信息：光看「1-2 节」不知道几点上课。
+        // ---- 时间行 ----
         Text(
             text = timeLine(course),
             color = colors.brand.colorBrand,
             fontSize = t(9.5f),
+            lineHeight = t(12f),
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(s(5.dp)))
+        Spacer(Modifier.height(s(8.dp)))
 
-        // ---- 第三层：地点 / 教师 / 周次 ----
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(s(6.dp)),
-            verticalAlignment = Alignment.CenterVertically,
+        // ---- 信息两列：标签 + 值（不用 emoji）----
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(s(3.dp)),
         ) {
-            InfoChip("📍 " + course.room, uiScale)
-            InfoChip("👤 " + course.teacher, uiScale)
-            InfoChip(weeksLabel(course), uiScale)
+            InfoRow("地点", course.room, uiScale)
+            InfoRow("教师", course.teacher, uiScale)
+            InfoRow("周次", weeksLabel(course), uiScale)
+            if (otherSlots.isNotEmpty()) {
+                InfoRow(
+                    "其他时段",
+                    otherSlots.take(3).joinToString("、") { slotBrief(it) },
+                    uiScale,
+                )
+            }
         }
 
-        // ---- 第四层：该课程本学期其他时段 ----
-        if (otherSlots.isNotEmpty()) {
-            Spacer(Modifier.height(s(6.dp)))
-            Text(
-                text = "本学期还有：" + otherSlots.take(3).joinToString("、") { slotBrief(it) },
-                color = colors.surface.colorTextSecondary.copy(alpha = 0.75f),
-                fontSize = t(8f),
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
+        // ---- 详情态：考勤 / 评论 / 备注 ----
+        // AnimatedVisibility 让两块形态切换有淡入淡出（维护者要求「同时有动画」）。
+        AnimatedVisibility(
+            visible = fullStage,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(s(10.dp)))
+                DetailSection("考勤", "本节 · 第 ${course.weeks.start} 周 · 未标记", uiScale)
+                Spacer(Modifier.height(s(8.dp)))
+                DetailSection("评论", "暂无评论", uiScale)
+                Spacer(Modifier.height(s(8.dp)))
+                DetailSection("备注", "暂无备注", uiScale)
+            }
         }
     }
 }
 
-/** 一个小胶囊标签（地点 / 教师 / 周次共用）。 */
+/** 一行「标签 : 值」，左标签右值，无 emoji。 */
 @Composable
-private fun InfoChip(text: String, uiScale: Float) {
-    if (text.isBlank()) return
+private fun InfoRow(label: String, value: String, uiScale: Float) {
+    if (value.isBlank()) return
     val colors = NongyuTheme.colors
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(s(8.dp)))
-            .background(colors.brand.colorBrandMuted.copy(alpha = 0.55f))
-            .padding(horizontal = s(6.dp), vertical = s(2.5f.dp)),
-    ) {
+    Row(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = text,
-            color = colors.surface.colorTextSecondary,
-            fontSize = (7.5f * uiScale).sp,
+            text = label,
+            color = colors.surface.colorTextSecondary.copy(alpha = 0.65f),
+            fontSize = (8f * uiScale).sp,
+            lineHeight = (11f * uiScale).sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(s(48.dp)),
+        )
+        Text(
+            text = value,
+            color = colors.surface.colorText,
+            fontSize = (8.5f * uiScale).sp,
+            lineHeight = (11f * uiScale).sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
-            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** 详情态的一块分区：分隔线 + 标题 + 占位内容（本期 mock，不接真实数据源）。 */
+@Composable
+private fun DetailSection(title: String, placeholder: String, uiScale: Float) {
+    val colors = NongyuTheme.colors
+    fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(s(1.dp))
+                .background(colors.surface.colorOutline.copy(alpha = 0.35f)),
+        )
+        Spacer(Modifier.height(s(6.dp)))
+        Text(
+            text = title,
+            color = colors.surface.colorText,
+            fontSize = (10f * uiScale).sp,
+            lineHeight = (13f * uiScale).sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(s(3.dp)))
+        Text(
+            text = placeholder,
+            color = colors.surface.colorTextSecondary.copy(alpha = 0.7f),
+            fontSize = (8f * uiScale).sp,
+            lineHeight = (11f * uiScale).sp,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -189,8 +258,8 @@ private fun weeksLabel(course: CourseEntry): String {
     }
     val base = "${course.weeks.start}-${course.weeks.end}周"
     return when {
-        course.odd && !course.even -> "$base·单"
-        !course.odd && course.even -> "$base·双"
+        course.odd && !course.even -> "$base · 单周"
+        !course.odd && course.even -> "$base · 双周"
         else -> base
     }
 }

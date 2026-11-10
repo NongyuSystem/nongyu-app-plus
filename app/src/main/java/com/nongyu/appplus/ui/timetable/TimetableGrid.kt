@@ -313,6 +313,11 @@ fun TimetableGrid(
                             softWrap = false,
                             textAlign = TextAlign.Center,
                         )
+                        // 两行之间加一点空隙：与左上角「第N周/共N周」、以及
+                        // 周一/周二之间的水平间隔取同一个 GRID_GAP，
+                        // 看起来像同一套网格排出来的。
+                        // 之前两行边界完全相接（实测 272/272），视觉上挤成一团。
+                        Spacer(modifier = Modifier.height(gap))
                         Text(
                             text = "${date.monthValue}/${date.dayOfMonth}",
                             color = if (isToday) colors.brand.colorBrand
