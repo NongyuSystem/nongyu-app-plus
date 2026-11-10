@@ -1,6 +1,7 @@
 package com.nongyu.appplus.ui.timetable
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
@@ -62,10 +63,21 @@ fun CourseDetailContent(
     expandProgress: Float,
     /** 是否正在收拢退出：此时两种形态都应淡出，不让胶囊重新浮现。 */
     collapsing: Boolean = false,
+    /** 第四态标志：最底部显示「删除这天的这节课」。 */
+    showDelete: Boolean = false,
+    onDelete: () -> Unit = {},
     onHandleDrag: (deltaDp: Float) -> Unit,
     onHandleDragEnd: () -> Unit,
     /** 地点覆盖值（已解析后的显示值）。 */
     location: String,
+    /** 教师显示值（可被覆盖）。 */
+    teacher: String,
+    /** 教师行内编辑确认回调。 */
+    onTeacherChange: (String) -> Unit,
+    /** 周次显示值。 */
+    weekText: String,
+    /** 打开周次编辑子窗体（日历 + 固定周 + 例外天）。 */
+    onWeekEdit: () -> Unit,
     /** 考勤状态：period -> 是否已考勤。 */
     attendance: Map<Int, Boolean>,
     onAttendanceToggle: (Int) -> Unit,
@@ -172,8 +184,8 @@ fun CourseDetailContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BriefChip(location, uiScale)
-                    BriefChip(course.teacher, uiScale)
-                    BriefChip(weeksLabel(course), uiScale)
+                    BriefChip(teacher, uiScale)
+                    BriefChip(weekText, uiScale)
                 }
             }
         }
@@ -182,6 +194,9 @@ fun CourseDetailContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // 占满剩余高度但不强制撑高：否则内容按全高测量，
+                    // 会把后面第四态的删除按钮挤出卡片可视区（实测看不到）。
+                    .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState())
                     .graphicsLayer {
                         alpha = detailProgress
@@ -192,8 +207,8 @@ fun CourseDetailContent(
                 KeyValueRow("地点", location, uiScale, onClick = onLocationEdit) {
                     LocationNavButton(uiScale, onLocationNav)
                 }
-                KeyValueRow("教师", course.teacher, uiScale)
-                KeyValueRow("周次", weeksLabel(course), uiScale)
+                TeacherRow(teacher, uiScale, onTeacherChange)
+                KeyValueRow("周次", weekText, uiScale, onClick = onWeekEdit)
                 if (otherSlots.isNotEmpty()) {
                     KeyValueRow(
                         "其他时段",
@@ -223,6 +238,96 @@ fun CourseDetailContent(
                     NoteSection(note, onNoteChange, uiScale)
                 }
             }
+        }
+
+        // 第四态删除按钮放在**滚动区之外**、卡片最底部固定位置。
+        // 放进 verticalScroll 的 Column 里会被裁在可视区外（实测第四态看不到按钮），
+        // 因为详情态内容本就超出容器高度、靠滚动查看。
+        if (showDelete) {
+            Spacer(Modifier.height(s(8.dp)))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(s(10.dp)))
+                    .background(colors.brand.colorBrandMuted.copy(alpha = 0.45f))
+                    .clickable(onClick = onDelete)
+                    .padding(vertical = s(9.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "删除这天的这节课",
+                    color = Color(0xFFB3261E),
+                    fontSize = (9.5f * uiScale).sp,
+                    lineHeight = (13f * uiScale).sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 教师行内输入：点值原地变输入框，回车 / 失焦确认（维护者选「行内输入」，
+ * 不做子窗体、不做三档范围，与地点/周次的编辑形态刻意区分）。
+ */
+@Composable
+private fun TeacherRow(value: String, uiScale: Float, onConfirm: (String) -> Unit) {
+    val colors = NongyuTheme.colors
+    fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember(value) { mutableStateOf(value) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = s(2.dp)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "教师",
+            color = colors.surface.colorTextSecondary.copy(alpha = 0.65f),
+            fontSize = (8f * uiScale).sp,
+            lineHeight = (11f * uiScale).sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(s(48.dp)),
+        )
+        if (editing) {
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                textStyle = TextStyle(
+                    color = colors.brand.colorBrand,
+                    fontSize = (8.5f * uiScale).sp,
+                ),
+                singleLine = true,
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onDone = {
+                        editing = false
+                        onConfirm(draft)
+                    },
+                ),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(s(6.dp)))
+                    .background(colors.surface.colorBackground)
+                    .padding(horizontal = s(6.dp), vertical = s(3.dp)),
+            )
+        } else {
+            Text(
+                text = value,
+                color = colors.surface.colorText,
+                fontSize = (8.5f * uiScale).sp,
+                lineHeight = (11f * uiScale).sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { draft = value; editing = true },
+            )
         }
     }
 }
@@ -513,7 +618,8 @@ private fun slotBrief(course: CourseEntry): String {
     return "$day$periods"
 }
 
-private fun weeksLabel(course: CourseEntry): String {
+/** 周次描述：不规则周次优先，其次区间 + 单双周。供详情卡与周次子窗体共用。 */
+fun weeksLabelOf(course: CourseEntry): String {
     val list = course.weeksList
     if (!list.isNullOrEmpty()) {
         return if (list.size <= 4) {

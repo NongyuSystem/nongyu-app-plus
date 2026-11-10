@@ -45,6 +45,8 @@ import com.nongyu.appplus.ui.theme.NongyuTheme
 fun TimetableScreen(
     navOccupiedPx: Float?,
     modifier: Modifier = Modifier,
+    /** 已删除的课程 id 集合：贯穿切周链路过滤，避免切周后「复活」。 */
+    deletedIds: Set<String> = emptySet(),
     onCourseClick: (CourseEntry) -> Unit = {},
 ) {
     val colors = NongyuTheme.colors
@@ -95,8 +97,11 @@ fun TimetableScreen(
             // 学期首日目前是 mock 常量，将来从教务/设置注入时只需换这一处入参。
             val today = remember { LocalDate.now() }
             val currentWeek = remember(today) { weekOfTerm(today) }
-            val weekCourses = remember(currentWeek) {
-                MOCK_COURSES.coursesInWeek(currentWeek).mergeAdjacent()
+            val weekCourses = remember(currentWeek, deletedIds) {
+                MOCK_COURSES
+                    .filter { it.id !in deletedIds }
+                    .coursesInWeek(currentWeek)
+                    .mergeAdjacent()
             }
 
             TimetableGrid(

@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
@@ -130,10 +131,15 @@ private enum class OrbMode { Idle, Listening, Input }
 private enum class BarMode { Normal, Input, Detail }
 
 /**
- * 课程详情卡的两个形态（维护者 2026-11-10 要求）。
- * 拖动顶部横杠在两者之间吸附；继续下拉到底则退出卡片。
+ * 课程详情卡的四态（维护者 2026-11-10 拍板）：
+ * - [BarMode.Normal] = 无详情卡（常态导航栏）
+ * - [Brief] = 简介态（三胶囊）
+ * - [Full] = 详情态（K-V + 考勤/评论/备注）
+ * - [FullDelete] = 详情态再上划一档，最底部出现「删除这天的这节课」
+ *
+ * 拖拽横杠在四档之间逐档吸附；拖到最底退出回到 Normal。
  */
-private enum class DetailStage { Brief, Full }
+private enum class DetailStage { Brief, Full, FullDelete }
 
 @Composable
 fun MainShell() {
@@ -177,12 +183,15 @@ fun MainShell() {
         if (detailCourse != null && !isCollapsing) isCollapsing = true
     }
 
-    // ---- 详情卡的可修改数据（方案已批准）----
-    // 地点覆盖 / 考勤 / 备注走 CourseUserStore（本地持久层）；
-    // 评论走 CourseComments 的 mock 后端。
+    // ---- 详情卡的可修改数据 ----
     val courseId = detailCourse?.id
-    // 地点覆盖：Flow 用 remember 固定，避免每次重组都新建 Flow 导致订阅抖动。
-    val locationFlow = remember(courseId) {
+
+    // 地点显示值：优先「按天覆盖」（今天），否则「通用覆盖」，否则原始 room。
+    val todayIso = remember { java.time.LocalDate.now().toString() }
+    val locDayFlow = remember(courseId, todayIso) {
+        if (courseId != null) courseUserStore.locationForDay(courseId, todayIso) else null
+    }
+    val locGeneralFlow = remember(courseId) {
         if (courseId != null) {
             courseUserStore.locationOverride(
                 courseId,
@@ -190,8 +199,28 @@ fun MainShell() {
             )
         } else null
     }
-    val locationOverride by (locationFlow ?: kotlinx.coroutines.flow.flowOf(null))
+    val locDay by (locDayFlow ?: kotlinx.coroutines.flow.flowOf(null))
         .collectAsState(initial = null)
+    val locGeneral by (locGeneralFlow ?: kotlinx.coroutines.flow.flowOf(null))
+        .collectAsState(initial = null)
+
+    // 教师覆盖（行内输入）
+    val teacherFlow = remember(courseId) {
+        if (courseId != null) courseUserStore.teacherOverride(courseId) else null
+    }
+    val teacherOverride by (teacherFlow ?: kotlinx.coroutines.flow.flowOf(null))
+        .collectAsState(initial = null)
+
+    // 周次复杂态：例外天（不上）
+    var exceptionIsoDays by remember(courseId) { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(courseId) {
+        exceptionIsoDays = if (courseId != null) {
+            courseUserStore.exceptionDays(courseId).first()
+        } else emptySet()
+    }
+
+    // 已删除课程 id：贯穿切周链路过滤，防止切周后「复活」
+    val deletedIds by courseUserStore.deletedIds().collectAsState(initial = emptySet())
 
     // 备注：**不用 collectAsState 直接喂给 TextField**。
     // 那样每次输入都要等 DataStore 回读，写入与回读会打架（实测重启后丢值）。
@@ -240,9 +269,10 @@ fun MainShell() {
         )
     }
 
-    // 两个子窗体的开关
+    // 三个子窗体的开关
     var showLocationEdit by remember { mutableStateOf(false) }
     var showLocationNav by remember { mutableStateOf(false) }
+    var showWeekEdit by remember { mutableStateOf(false) }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
@@ -407,6 +437,7 @@ fun MainShell() {
             if (selectedTab == 1) {
                 com.nongyu.appplus.ui.timetable.TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
+                    deletedIds = deletedIds,
                     onCourseClick = { detailCourse = it },
                 )
             }
@@ -478,12 +509,14 @@ fun MainShell() {
         val orbDissolveAlpha = 1f - dissolve.value
         val orbDissolveScale = 1f + dissolve.value * 0.55f
 
-        // 详情卡两个形态的高度：简介 128dp / 详情 340dp（340 才装得下全部内容）。
+        // 详情卡三档高度：简介 128 / 详情 340 / 详情+删除 384（多出删除按钮一行 44dp）。
         val briefHeight = s(128.dp)
         val fullHeight = s(340.dp)
+        val fullDeleteHeight = s(384.dp)
         val detailHeight = when (detailStage) {
             DetailStage.Brief -> briefHeight
             DetailStage.Full -> fullHeight
+            DetailStage.FullDelete -> fullDeleteHeight
         }
         val draggedDetailHeight = (detailHeight + detailDragDp.dp).coerceAtLeast(navHeight)
 
@@ -605,16 +638,31 @@ fun MainShell() {
                         com.nongyu.appplus.ui.timetable.CourseDetailContent(
                             course = course,
                             uiScale = uiScale,
-                            fullStage = detailStage == DetailStage.Full,
+                            fullStage = detailStage != DetailStage.Brief,
                             // 高度进度 0..1，内容层据此做「胶囊 -> K-V 移动」与
                             // 「评论/备注从盒底滑出」的分帧动画
                             expandProgress = expandProgress,
                             collapsing = isCollapsing,
+                            showDelete = detailStage == DetailStage.FullDelete,
+                            onDelete = {
+                                coroutineScope.launch {
+                                    courseUserStore.setDeletedIds(deletedIds + course.id)
+                                }
+                                collapseDetail()
+                            },
                             otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
-                            // 地点：显示覆盖值，没有覆盖就用原始 room
-                            location = locationOverride ?: course.room,
+                            // 地点：优先今日按天覆盖，其次通用覆盖，最后原始 room
+                            location = locDay ?: locGeneral ?: course.room,
+                            teacher = teacherOverride ?: course.teacher,
+                            onTeacherChange = { v ->
+                                coroutineScope.launch {
+                                    courseUserStore.setTeacherOverride(course.id, v)
+                                }
+                            },
+                            weekText = com.nongyu.appplus.ui.timetable.weeksLabelOf(course),
+                            onWeekEdit = { showWeekEdit = true },
                             attendance = effectiveAttendance,
                             onAttendanceToggle = { p ->
                                 val next = !(effectiveAttendance[p] ?: false)
@@ -645,37 +693,39 @@ fun MainShell() {
                                 detailDragDp += deltaDp
                             },
                             onHandleDragEnd = {
+                                // 三档吸附：以「当前形态高度 + 累计偏移」落在哪个区间判定。
+                                // 阈值取相邻两档的中点；最低档之下拖到底则退出。
                                 val briefDp = briefHeight.value
                                 val fullDp = fullHeight.value
+                                val delDp = fullDeleteHeight.value
                                 val base = when (detailStage) {
                                     DetailStage.Brief -> briefDp
                                     DetailStage.Full -> fullDp
+                                    DetailStage.FullDelete -> delDp
                                 }
                                 val current = base + detailDragDp
+                                val midBriefFull = (briefDp + fullDp) / 2f
+                                val midFullDel = (fullDp + delDp) / 2f
                                 when {
                                     current < briefDp * 0.55f -> {
                                         // 拖到底：不立刻清 detailCourse，否则 AnimatedContent
                                         // 当帧就把内容换成导航栏、收拢动画根本来不及跑。
-                                        // 改为触发「收拢」：高度先弹回 navHeight，走完再切内容。
                                         isCollapsing = true
                                     }
-                                    current > (briefDp + fullDp) / 2f ->
-                                        detailStage = DetailStage.Full
+                                    current > midFullDel -> detailStage = DetailStage.FullDelete
+                                    current > midBriefFull -> detailStage = DetailStage.Full
                                     else -> detailStage = DetailStage.Brief
                                 }
                                 detailDragDp = 0f
                                 isDragging = false
                             },
-                            // 详情卡属于「不退出」白名单，但必须**消费掉点击**：
-                            // 若这里没有任何 pointerInput，事件会穿透到内容区下方的收起层，
-                            // 点卡片自己也会退出（实测 b3 那种情况）。
-                            // 所以挂一个只消费、不动作的 clickable —— 白名单的正确实现。
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                ) { /* 点详情卡：不退出 */ },
+                            // 不再挂「消费点击」的 clickable：
+                            // 当初是为了防止点详情卡穿透到内容区的收起层，
+                            // 但收起层现在放在课表**之下**（白名单分层方案），
+                            // 与底栏里的详情卡根本不在同一命中链上，这层已多余。
+                            // 而且它会吃掉横杠的 pointerInput，导致第二次上划
+                            // （进第四态）手势完全收不到（实测日志无 end 回调）。
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
@@ -872,27 +922,59 @@ fun MainShell() {
             )
         }
 
-        // ---- 地点修改 / 导航占位 两个子窗体 ----
-        // 放在 MainShell 根 Box 的最后：Dialog 是独立 Window，
-        // 但它读的 CourseEntry / location / uiScale 都在这里，就近接线最清楚。
+        // ---- 地点 / 周次 / 导航 三个子窗体 ----
+        // 地点与周次共用 CourseCalendar：都先选「生效天」，再改值；
+        // 需上课的天由 classDaysOf(course) 算出并标主题色。
         val dlgCourse = detailCourse
+        val dlgClassDays = remember(dlgCourse?.id) {
+            if (dlgCourse != null) {
+                com.nongyu.appplus.ui.timetable.classDaysOf(dlgCourse)
+            } else emptySet()
+        }
         if (showLocationEdit && dlgCourse != null) {
             com.nongyu.appplus.ui.timetable.LocationEditDialog(
                 courseName = dlgCourse.name,
-                currentLocation = locationOverride ?: dlgCourse.room,
+                currentLocation = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,
-                onConfirm = { scope, newLocation ->
+                classDays = dlgClassDays,
+                onConfirm = { newLocation, days ->
                     coroutineScope.launch {
-                        courseUserStore.setLocationOverride(dlgCourse.id, scope, newLocation)
+                        courseUserStore.setLocationForDays(dlgCourse.id, days, newLocation)
+                        // 未选天时退回通用覆盖，保证至少有值生效
+                        if (days.isEmpty()) {
+                            courseUserStore.setLocationOverride(
+                                dlgCourse.id,
+                                com.nongyu.appplus.ui.timetable.LocationScope.Once,
+                                newLocation,
+                            )
+                        }
                     }
                 },
                 onDismiss = { showLocationEdit = false },
             )
         }
+        if (showWeekEdit && dlgCourse != null) {
+            com.nongyu.appplus.ui.timetable.WeekEditDialog(
+                courseName = dlgCourse.name,
+                weekSummary = com.nongyu.appplus.ui.timetable.weeksLabelOf(dlgCourse),
+                uiScale = uiScale,
+                classDays = dlgClassDays,
+                initialExceptions = exceptionIsoDays.mapNotNull {
+                    runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+                }.toSet(),
+                onConfirm = { days ->
+                    exceptionIsoDays = days
+                    coroutineScope.launch {
+                        courseUserStore.setExceptionDays(dlgCourse.id, days)
+                    }
+                },
+                onDismiss = { showWeekEdit = false },
+            )
+        }
         if (showLocationNav && dlgCourse != null) {
             com.nongyu.appplus.ui.timetable.LocationNavDialog(
                 courseName = dlgCourse.name,
-                location = locationOverride ?: dlgCourse.room,
+                location = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,
                 onDismiss = { showLocationNav = false },
             )

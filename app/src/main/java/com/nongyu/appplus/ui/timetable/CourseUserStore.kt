@@ -99,6 +99,70 @@ class CourseUserStore(private val context: Context) {
         }
     }
 
+    // ---- 四态/编辑扩展（维护者 2026-11-10 批准方案）----
+
+    /** 已删除的课程 id 集合（逗号分隔存储）。删除「这天的这节课」用。 */
+    fun deletedIds(): Flow<Set<String>> =
+        context.courseUserDataStore.data
+            .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+            .map { prefs ->
+                (prefs[stringPreferencesKey("deleted_ids")] ?: "")
+                    .split(",").filter { it.isNotBlank() }.toSet()
+            }
+
+    suspend fun setDeletedIds(ids: Set<String>) {
+        context.courseUserDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("deleted_ids")] = ids.sorted().joinToString(",")
+        }
+    }
+
+    /**
+     * 周次复杂态的「例外天（不上）」：ISO 日期字符串集合（逗号分隔）。
+     * 语义：默认按固定周上课，这些天不上。
+     */
+    fun exceptionDays(courseId: String): Flow<Set<String>> =
+        context.courseUserDataStore.data
+            .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+            .map { prefs ->
+                (prefs[stringPreferencesKey("exc_$courseId")] ?: "")
+                    .split(",").filter { it.isNotBlank() }.toSet()
+            }
+
+    suspend fun setExceptionDays(courseId: String, days: Set<String>) {
+        context.courseUserDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("exc_$courseId")] = days.sorted().joinToString(",")
+        }
+    }
+
+    /** 教师覆盖值（行内输入，null = 用原始 teacher）。 */
+    fun teacherOverride(courseId: String): Flow<String?> =
+        context.courseUserDataStore.data
+            .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+            .map { prefs -> prefs[stringPreferencesKey("teacher_$courseId")] }
+
+    suspend fun setTeacherOverride(courseId: String, value: String) {
+        context.courseUserDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("teacher_$courseId")] = value
+        }
+    }
+
+    /**
+     * 按天生效的地点覆盖：key = `locday_<courseId>_<ISO日期>`。
+     * 地点编辑用日历选「生效天」后，只对选中的天生效。
+     */
+    fun locationForDay(courseId: String, isoDate: String): Flow<String?> =
+        context.courseUserDataStore.data
+            .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+            .map { prefs -> prefs[stringPreferencesKey("locday_${courseId}_$isoDate")] }
+
+    suspend fun setLocationForDays(courseId: String, days: Set<String>, value: String) {
+        context.courseUserDataStore.edit { prefs ->
+            days.forEach { d ->
+                prefs[stringPreferencesKey("locday_${courseId}_$d")] = value
+            }
+        }
+    }
+
     /** 一次性读取（供 LaunchedEffect 里初始化用）。 */
     suspend fun noteOnce(courseId: String): String =
         runCatching {
