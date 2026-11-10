@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -106,6 +107,16 @@ private fun gapAfter(period: Int): Dp = when (gapKindAfter(period)) {
     RowGapKind.Normal -> GAP_NORMAL
 }
 
+/**
+ * 时间列三行之间的固定行距。
+ *
+ * 用固定 dp 而不是 `Arrangement.Center` 的自然堆叠：
+ * 自然堆叠下三行的行高由各自字号决定（6.5 / 11 / 6.5sp），
+ * 块的重心会偏移，表现为「首行离盒顶远、末行离盒底近」。
+ * 固定行距 + 显式 lineHeight 后，上下留白严格对称。
+ */
+private val TIME_LINE_GAP = 1.dp
+
 /** 圆角（维护者第 6 条要圆角矩形）。 */
 private val CELL_CORNER = 10.dp
 private val HEADER_CORNER = 12.dp
@@ -132,6 +143,21 @@ fun TimetableGrid(
     val leftColumnWidth = s(PERIOD_COLUMN_WIDTH)
     val headerRowHeight = s(HEADER_ROW_HEIGHT)
     val gap = s(GRID_GAP)
+    val timeLineGap = s(TIME_LINE_GAP)
+
+    // 时间列三行共用同一份「行高裁切」策略。
+    //
+    // 为什么需要它：Text 默认行高 = 字号 × 字体默认倍数，且会在字形上下留白。
+    // 三行字号不同（6.5 / 11 / 6.5sp），留白量也不同，实测 11sp 的节次号
+    // 节点高 33px 而 6.5sp 的时间行只有 19px —— 结果三行的视觉间距里外不均
+    // （首行→节次号 22px，节次号→末行仅 3px），看上去就是「上下不对称」。
+    // Trim.Both 会把行高裁到字形边界，配合显式 lineHeight 让三行真正等高。
+    val timeTextStyle = androidx.compose.ui.text.TextStyle(
+        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+        ),
+    )
     val outerPadding = s(OUTER_PADDING)
     val cellCorner = s(CELL_CORNER)
     val headerCorner = s(HEADER_CORNER)
@@ -262,6 +288,12 @@ fun TimetableGrid(
 
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     // 节次时间列：起始时间 / 节次号 / 结束时间，竖排（照抄旧农屿 timeSlot 结构）
+                    //
+                    // 为什么三行都要显式 lineHeight：
+                    // Text 的默认行高 = 字号 × 字体默认倍数，三行字号不同（6.5 / 11 / 6.5sp），
+                    // 行高就各不相同，视觉块上下不对称 —— 实测出现过
+                    // 「首行到盒顶 24px、末行到盒底 3px」这种肉眼可见的偏斜。
+                    // 统一用 lineHeight = 字号的 1.15 倍（贴近紧凑排版），三行等高、重心居中。
                     Box(
                         modifier = Modifier
                             .width(leftColumnWidth)
@@ -273,34 +305,56 @@ fun TimetableGrid(
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
+                            // 三行"各占一份等高槽位"：这是让上下留白对称的关键。
+                            //
+                            // 为什么不用 Arrangement.Center / spacedBy：
+                            // Text 的布局盒高由字号与字体度量决定，三行字号不同
+                            // （6.5 / 11 / 6.5sp），实测节次号盒高 33px、时间行 19px。
+                            // 自然堆叠时盒子内部的间隔是「首行→节次号 22px、节次号→末行 3px」，
+                            // 看上去就是上松下紧、与盒子边缘的距离不相等。
+                            // 用 weight 均分后每行独占一份高度，三行间距由布局确定，不再受字体度量影响。
                         ) {
                             Text(
                                 text = startTime,
                                 color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
                                 fontSize = (6.5f * uiScale).sp,
+                                lineHeight = (7.5f * uiScale).sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false,
                                 textAlign = TextAlign.Center,
+                                style = timeTextStyle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .wrapContentHeight(Alignment.CenterVertically),
                             )
                             Text(
                                 text = period.toString(),
                                 color = colors.surface.colorText,
                                 fontSize = (11f * uiScale).sp,
+                                lineHeight = (11f * uiScale).sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
                                 softWrap = false,
                                 textAlign = TextAlign.Center,
+                                style = timeTextStyle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .wrapContentHeight(Alignment.CenterVertically),
                             )
                             Text(
                                 text = endTime,
                                 color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
                                 fontSize = (6.5f * uiScale).sp,
+                                lineHeight = (7.5f * uiScale).sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false,
                                 textAlign = TextAlign.Center,
+                                style = timeTextStyle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .wrapContentHeight(Alignment.CenterVertically),
                             )
                         }
                     }
