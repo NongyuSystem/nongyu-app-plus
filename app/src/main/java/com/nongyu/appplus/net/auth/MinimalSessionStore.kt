@@ -5,7 +5,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -28,7 +30,7 @@ import javax.crypto.spec.GCMParameterSpec
  * 整体标为 `@Deprecated`，且**库内没有替代 API**（已核对 1.1.0 的 aar 类清单）。
  * 官方口径是改用 DataStore + 自己管 Keystore。本实现即按此重写。
  *
- * ## 两条硬约束（与旧实现一致，不得退化）
+ * ## 三条硬约束（前两条与旧实现一致，第三条是 DataStore 特有的，不得退化）
  *
  * ### 1. 惰性打开
  * 构造时**只保存 context**，首次 [readToken] / [writeToken] / [clear] 才真正碰 Keystore 与磁盘。
@@ -38,6 +40,15 @@ import javax.crypto.spec.GCMParameterSpec
  * 备份恢复 / 换设备后，密文带过来了但 Keystore 里的 Key 不在，解密必然失败。
  * 这是**必然发生的情形**，不是异常。所以 [readToken] 必须把解密失败当作
  * 「没有 token」并清空，不得抛出去。
+ *
+ * ### 3. DataStore 文件损坏也必须容错（真机实测踩到）
+ * DataStore 的落盘文件被截断 / 写坏时，读取会抛
+ * `androidx.datastore.core.CorruptionException`（**它是 `IOException` 的子类**，
+ * 不属于 `RuntimeException`，所以早期只 catch `RuntimeException` 的写法会漏掉它，
+ * 造成崩溃）。两层防护：
+ * - DataStore 侧挂 [ReplaceFileCorruptionHandler]：文件坏掉时用空 prefs 替换；
+ * - [readToken] 侧再 catch `IOException`：即使 handler 之外还有别的 IO 故障也不冒泡。
+ * 真机上正是这条被 instrumented 测试抓出来的 —— 只靠编译和纯 JVM 测试发现不了。
  *
  * ## 存储格式
  * DataStore 里存的是**base64(iv + ciphertext)** 的密文，不是明文令牌。
@@ -85,6 +96,12 @@ class MinimalSessionStore(
             logged("令牌解密失败，视为无 token 并清空", e)
             clearQuietly()
             null
+        } catch (e: IOException) {
+            // 磁盘读失败 / CorruptionException（IOException 子类）都在这里兜住。
+            // 真机实测踩过：只 catch RuntimeException 会漏掉 CorruptionException 导致崩溃。
+            logged("会话存储读取失败（IO/文件损坏），视为无 token", e)
+            clearQuietly()
+            null
         } catch (e: RuntimeException) {
             // 密钥失效时底层可能把 AEADBadTagException 包装成 RuntimeException
             logged("令牌解密失败（运行时），视为无 token 并清空", e)
@@ -107,6 +124,8 @@ class MinimalSessionStore(
             }
         } catch (e: GeneralSecurityException) {
             logged("令牌加密失败，未写入", e)
+        } catch (e: IOException) {
+            logged("令牌写入失败（IO），未写入", e)
         } catch (e: RuntimeException) {
             logged("令牌加密失败（运行时），未写入", e)
         }
@@ -125,6 +144,8 @@ class MinimalSessionStore(
                     prefs.remove(stringPreferencesKey(SecurePrefs.KEY_TOKEN))
                 }
             }
+        } catch (e: IOException) {
+            logged("清空会话存储失败（IO）", e)
         } catch (e: RuntimeException) {
             logged("清空会话存储失败", e)
         }
@@ -178,7 +199,15 @@ class MinimalSessionStore(
     }
 }
 
-/** DataStore 实例必须全局唯一（同一名字重复创建会抛异常），故放在文件级。 */
+/**
+ * DataStore 实例必须全局唯一（同一名字重复创建会抛异常），故放在文件级。
+ *
+ * [ReplaceFileCorruptionHandler] 是**必须的**：落盘文件被截断/写坏时，
+ * DataStore 读取会抛 `CorruptionException`（`IOException` 子类）。没有 handler 时
+ * 这个异常会一路冒到调用方。会话令牌属于「丢了就重新登录」的数据，
+ * 用空 prefs 替换是正确取舍 —— 总比崩溃好。
+ */
 private val Context.secureSessionDataStore: DataStore<Preferences> by preferencesDataStore(
     name = SecurePrefs.DATASTORE_NAME,
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
