@@ -20,23 +20,27 @@ android {
         // versionCode 必须大于已发布的 37，否则手机无法覆盖安装。
         versionCode = 38
         versionName = "0.0.30test"
+
+        // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
+        // 默认空串：设了才有值，避免把真实 token 写进仓库。
+        // 用法：./gradlew :app:assembleDebug -PdevToken=<你的 token>
+        //      或写入 ~/.gradle/gradle.properties 的 devToken=（不进仓库）
+        //
+        // ⚠️ 这里放在 defaultConfig（两个变体都注入）而**不是** debug{}，原因是：
+        // DefaultTokenProvider.kt 已合并进 src/main 单一真源，主代码会引用该符号；
+        // 若 release 变体没有它，assembleRelease 会直接编译失败。
+        // release 侧注入空串 —— 即使 BuildConfig.DEBUG 分支被改坏也拿不到真实 token。
+        buildConfigField(
+            "String",
+            "DEV_TOKEN",
+            "\"${providers.gradleProperty("devToken").orNull ?: ""}\"",
+        )
     }
 
     buildTypes {
         debug {
             // 调试包保持不收缩，保证断点/栈可读
             isMinifyEnabled = false
-            // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
-            // 只在 debug 变体声明 → release 里连这个符号都不存在，是结构性隔离，
-            // 不依赖任何运行时 if (BuildConfig.DEBUG) 判断。
-            // 默认空串：设了才有值，避免把真实 token 写进仓库。
-            // 用法：./gradlew :app:assembleDebug -PdevToken=<你的 token>
-            //      或写入 ~/.gradle/gradle.properties 的 devToken=（不进仓库）
-            buildConfigField(
-                "String",
-                "DEV_TOKEN",
-                "\"${providers.gradleProperty("devToken").orNull ?: ""}\"",
-            )
         }
         release {
             // 发布物形态是第一性能杠杆（ADR-0007）：探针实测 debug 冷启动 1164.0ms
