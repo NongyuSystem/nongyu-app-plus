@@ -1,6 +1,7 @@
 package com.nongyu.appplus.ui.timetable
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -117,6 +118,62 @@ class TimetableDataTest {
         assertNull(weekdayIndexOrNull(7))
         assertNull(weekdayIndexOrNull(100))
         assertNotNull(weekdayIndexOrNull(2))
+    }
+
+    @Test
+    fun `weekLabelCn_个位数直接对应汉字`() {
+        assertEquals("第一周", weekLabelCn(1))
+        assertEquals("第二周", weekLabelCn(2))
+        assertEquals("第九周", weekLabelCn(9))
+    }
+
+    @Test
+    fun `weekLabelCn_十到十九用十开头`() {
+        assertEquals("第十周", weekLabelCn(10))
+        assertEquals("第十一周", weekLabelCn(11))
+        assertEquals("第十六周", weekLabelCn(16))
+        assertEquals("第十九周", weekLabelCn(19))
+    }
+
+    @Test
+    fun `weekLabelCn_二十以上带十位`() {
+        assertEquals("第二十周", weekLabelCn(20))
+        assertEquals("第二十一周", weekLabelCn(21))
+        assertEquals("第九十九周", weekLabelCn(99))
+    }
+
+    @Test
+    fun `weekLabelCn_十不说一十`() {
+        // 常见错误是把 10 写成「一十周」
+        assertEquals("第十周", weekLabelCn(10))
+        assertNotEquals("第十周", weekLabelCn(1))
+    }
+
+    @Test
+    fun `weekLabelCn_超出范围回退成阿拉伯数字`() {
+        assertEquals("第0周", weekLabelCn(0))
+        assertEquals("第100周", weekLabelCn(100))
+        assertEquals("第-1周", weekLabelCn(-1))
+    }
+
+    @Test
+    fun `totalWeeksLabelCn 用中文数字`() {
+        assertEquals("共16周", totalWeeksLabelCn(16))
+        assertEquals("共1周", totalWeeksLabelCn(1))
+        assertEquals("共20周", totalWeeksLabelCn(20))
+    }
+
+    @Test
+    fun `totalWeeksLabelCn_超出范围回退`() {
+        assertEquals("共0周", totalWeeksLabelCn(0))
+        assertEquals("共100周", totalWeeksLabelCn(100))
+    }
+
+    @Test
+    fun `表头默认显示第一周共16周`() {
+        // 维护者要求表头从 `1/16` + `周` 改成「第一周 / 共16周」
+        assertEquals("第一周", weekLabelCn(1))
+        assertEquals("共16周", totalWeeksLabelCn(TOTAL_WEEKS))
     }
 
     private fun toMinutes(hhmm: String): Int {

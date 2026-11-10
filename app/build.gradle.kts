@@ -15,11 +15,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v40：修「时间列文字贴底」与「底部被导航栏遮挡」两个真机问题；
+        // v45：表头周次两行微调（第一行缩小到 8.5sp、两行间距 3dp）。
         // 底部避让改为让 Shell 直接上报底栏占位高度（不再做坐标换算）。
-        // versionCode 必须大于已发布的 38，否则手机无法覆盖安装。
-        versionCode = 40
-        versionName = "0.0.32test"
+        // versionCode 必须大于已发布的 45，否则手机无法覆盖安装。
+        versionCode = 46
+        versionName = "0.0.38test"
 
         // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
         // 默认空串：设了才有值，避免把真实 token 写进仓库。

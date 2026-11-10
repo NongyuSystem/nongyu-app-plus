@@ -1,15 +1,22 @@
 package com.nongyu.appplus.ui.timetable
 
 import androidx.compose.foundation.background
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,8 +29,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +72,21 @@ import java.time.temporal.ChronoUnit
  * 维护者第 2 条要「加宽一点」，且要能竖排放下「08:10 / 1 / 08:55」三行。
  */
 private val PERIOD_COLUMN_WIDTH = 40.dp
+
+/**
+ * 左侧**节次时间列可见盒子**相对列宽的比例（表头不受影响）。
+ *
+ * 维护者要求「第一列的课表时间变窄，表头不变，且定住左侧的头」——
+ * 即只往右收、左边缘与表头盒严格对齐、7 个课程列起点不动。
+ *
+ * 实现用 `padding(end = leftColumnWidth * (1 - 该比例))` 收窄可见盒子，
+ * 而不是改 Column 的基准宽度：那个宽度是右侧课程区的起点基准，
+ * 真改会让课程列整体左移（就是上一轮修好的 13px 错位）。
+ *
+ * 0.82 = 时间盒可见宽度取列宽的 82%（收窄约 7dp，40dp → 32.8dp），
+ * 仍能竖排放下「08:10 / 1 / 08:55」三行（最宽的 08:10 用 6.5sp）。
+ */
+private const val PERIOD_BOX_WIDTH_RATIO = 0.82f
 
 /** 表头（星期）行高。 */
 private val HEADER_ROW_HEIGHT = 42.dp
@@ -128,15 +152,20 @@ private val HEADER_CORNER = 12.dp
 /**
  * @param uiScale 屏宽自适应系数，由 MainShell 以 411dp 为基准算出（与导航栏同一套）。
  * @param currentWeek 当前显示第几周。**暂固定为 1**：学期起始日属于课表数据模型（票 #12 未拍板）。
- * @param cellContent 格子内容槽位。第 2 步（#13）往这里放课程卡片。
+ * @param courses 要渲染的课程块列表（已按天分组前的原始列表）。
+ *   第 2 步（#13）起由这里接收数据；缺省为空，表格骨架仍可单独使用。
  */
 @Composable
 fun TimetableGrid(
     uiScale: Float,
     modifier: Modifier = Modifier,
     currentWeek: Int = 1,
-    cellContent: @Composable (day: Int, period: Int) -> Unit = { _, _ -> },
+    courses: List<CourseEntry> = emptyList(),
 ) {
+    val coursesByDay = remember(courses) { courses.groupedByDay() }
+    // 课程名 → 色槽：保证**同屏课程必然不同色**（撞槽自动顺延），
+    // 且结果只取决于课程名集合，与渲染顺序无关。
+    val hueSlots = remember(courses) { CoursePalette.assignHueSlots(courses.map { it.name }) }
     val colors = NongyuTheme.colors
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
@@ -194,6 +223,9 @@ fun TimetableGrid(
             horizontalArrangement = Arrangement.spacedBy(gap),
         ) {
             // 左上角：第 N 周 / 共 M 周。宽度与网格节次列完全相等（不加间隔，靠 Row 的 spacedBy 统一给）。
+            //
+            // 注意：维护者要求「变窄的是下面的时间列，表头保持不变」，
+            // 所以这里**不做任何收窄**，保持与时间列的基准宽度一致。
             Box(
                 modifier = Modifier
                     .width(leftColumnWidth)
@@ -206,20 +238,32 @@ fun TimetableGrid(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
+                    // 第一行「第N周」加粗、字号略大；第二行「共N周」小字号弱化。
+                    // 层级靠字号与字重表达，不靠把文字调浅到看不清（对比度会掉）。
+                    //
+                    // 字号从 9.5sp 收到 8.5sp：维护者反馈第一行偏大。
+                    // 两行之间显式留 spacingBetween，不能再让它们紧贴——
+                    // 之前 lineHeight 恰好抵掉，两行边界完全相接（实测 271/271），
+                    // 视觉上挤成一团。
                     Text(
-                        text = "$currentWeek/$TOTAL_WEEKS",
+                        text = weekLabelCn(currentWeek),
                         color = colors.brand.colorBrand,
-                        fontSize = (9f * uiScale).sp,
+                        fontSize = (8.5f * uiScale).sp,
+                        lineHeight = (10f * uiScale).sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
                         textAlign = TextAlign.Center,
                     )
+                    // 行间距与「周一/周二」之间的水平间隔取同一个值（GRID_GAP），
+                    // 这样两行看起来像同一套网格排出来的，而不是随手定的间距。
+                    Spacer(modifier = Modifier.height(gap))
                     Text(
-                        text = "周",
-                        color = colors.surface.colorTextSecondary.copy(alpha = 0.75f),
-                        fontSize = (7f * uiScale).sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = totalWeeksLabelCn(TOTAL_WEEKS),
+                        color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
+                        fontSize = (6.5f * uiScale).sp,
+                        lineHeight = (8f * uiScale).sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
                         textAlign = TextAlign.Center,
@@ -270,126 +314,98 @@ fun TimetableGrid(
         // 表头与网格之间也留一道缝（维护者第 3、6 条）
         Box(modifier = Modifier.height(gap))
 
-        // ---------- 网格主体：10 节逐行排布，行间用三档间距 ----------
-        // 间距节奏（维护者 hotfix）：组内最紧 < 普通组界 < 午休/晚饭。
-        // 旧农屿 `courseTimes.ts` 的 `MAJOR_SLOT_COUNT = 5` 提供了分组口径。
+        // ---------- 网格主体 ----------
+        //
+        // 结构上分左右两块，各自负责不同的东西：
+        // - 左侧时间列：逐行渲染，行高与行间距决定「整张表的时间标尺」；
+        // - 右侧课程区：**按天分列**，每列内部按课程块垂直排布。
+        //
+        // 为什么右侧不能继续逐行渲染：
+        // 需求 14 要求大课（如 123456 连堂）的卡片「一整个连在一起」。
+        // 逐行渲染时每个格子互相独立，跨节只能靠横向合并格子实现，
+        // 而 Compose 的 Row 里没有「跨行」概念 —— 必须换成「每列一个 Column，
+        // 块用 weight(spanRows) 占多份高度」的排法，块天然跨行。
+        //
+        // 两侧如何对齐：课程区用与时间列**完全相同的行结构**（10 个 weight(1f)
+        // + 同样的三档间距），所以第 n 行的上下边界在两侧一致，卡片才能正对节次。
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(start = outerPadding, end = outerPadding),
         ) {
-            for (period in 1..PERIOD_COUNT) {
-                val (startTime, endTime) = COURSE_TIMES[period - 1]
-                // 时间列每格一个纯色：在「淡绿 → 绿黄」之间按节次位置取色，
-                // 整列形成渐变，但单格内部是纯色（维护者第 6 条「一个圆角矩形用一个色」）。
-                val rowRatio = (period - 1).toFloat() / (PERIOD_COUNT - 1).toFloat()
-                val timeCellColor = blend(timeColStart, timeColEnd, rowRatio)
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                // -------- 左：节次时间列（逐行）--------
+                Column(modifier = Modifier.width(leftColumnWidth)) {
+                    for (period in 1..PERIOD_COUNT) {
+                        val time = COURSE_TIMES[period - 1]
+                        val rowRatio = (period - 1).toFloat() / (PERIOD_COUNT - 1).toFloat()
+                        val timeCellColor = blend(timeColStart, timeColEnd, rowRatio)
 
-                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    // 节次时间列：起始时间 / 节次号 / 结束时间，竖排（照抄旧农屿 timeSlot 结构）
-                    //
-                    // 为什么三行都要显式 lineHeight：
-                    // Text 的默认行高 = 字号 × 字体默认倍数，三行字号不同（6.5 / 11 / 6.5sp），
-                    // 行高就各不相同，视觉块上下不对称 —— 实测出现过
-                    // 「首行到盒顶 24px、末行到盒底 3px」这种肉眼可见的偏斜。
-                    // 统一用 lineHeight = 字号的 1.15 倍（贴近紧凑排版），三行等高、重心居中。
-                    Box(
-                        modifier = Modifier
-                            .width(leftColumnWidth)
-                            .fillMaxHeight()
-                            .padding(end = gap)
-                            .clip(RoundedCornerShape(cellCorner))
-                            .background(timeCellColor),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            // 三行「各占一份等高槽位」：让上下留白对称。
-                            //
-                            // 为什么不用 Arrangement.Center / spacedBy：
-                            // Text 的布局盒高由字号与字体度量决定，三行字号不同
-                            // （6.5 / 11 / 6.5sp），实测节次号盒高 33px、时间行 19px。
-                            // 自然堆叠时盒子内部的间隔是「首行→节次号 22px、节次号→末行 3px」，
-                            // 看上去上松下紧、与盒子边缘距离不相等。
-                            //
-                            // 为什么用外层 Box 承担 weight（而不是直接给 Text）：
-                            // weight 会把 Text 自身撑到槽高，而 Text 内部字形是**顶部对齐**，
-                            // 于是文字贴着槽底显示（维护者在真机上看到的就是这个）。
-                            // 把 weight 交给 Box、Box 用 contentAlignment 居中，字形才会真的居中。
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                // 时间列**可见盒子**单独收窄，但左侧边缘定住、7 个课程列起点不变。
+                                //
+                                // 用 end padding 而不是改 Column 的宽度：
+                                // 时间列的宽度是右侧课程区的起点基准，真改宽度会让课程列整体左移
+                                // （就是上一轮修好的那个错位）。
+                                // 收窄后外层占用不变，只在视觉上让时间盒变窄、课程往左多一点空间。
+                                .padding(end = leftColumnWidth * (1f - PERIOD_BOX_WIDTH_RATIO))
+                                .clip(RoundedCornerShape(cellCorner))
+                                .background(timeCellColor),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Box(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = startTime,
-                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
-                                    fontSize = (6.5f * uiScale).sp,
-                                    lineHeight = (7.5f * uiScale).sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    textAlign = TextAlign.Center,
-                                    style = timeTextStyle,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = period.toString(),
-                                    color = colors.surface.colorText,
-                                    fontSize = (11f * uiScale).sp,
-                                    lineHeight = (11f * uiScale).sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    textAlign = TextAlign.Center,
-                                    style = timeTextStyle,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = endTime,
-                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
-                                    fontSize = (6.5f * uiScale).sp,
-                                    lineHeight = (7.5f * uiScale).sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    textAlign = TextAlign.Center,
-                                    style = timeTextStyle,
-                                )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                TimeRowText(time.start, 6.5f, uiScale, colors.surface.colorTextSecondary,
+                                    timeTextStyle, Modifier.weight(1f))
+                                TimeRowText(period.toString(), 11f, uiScale, colors.surface.colorText,
+                                    timeTextStyle, Modifier.weight(1f), extraBold = true)
+                                TimeRowText(time.end, 6.5f, uiScale, colors.surface.colorTextSecondary,
+                                    timeTextStyle, Modifier.weight(1f))
                             }
                         }
-                    }
 
-                    // 7 天格子：透明占位，无底色、无表格线（维护者第 4 条）
-                    Row(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        horizontalArrangement = Arrangement.spacedBy(gap),
-                    ) {
-                        for (day in 0..WEEKDAY_LABELS.lastIndex) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                            ) {
-                                // 第 1 步这里为空；第 2 步（#13）由调用方填课程卡片。
-                                cellContent(day, period)
-                            }
+                        if (period < PERIOD_COUNT) {
+                            Box(modifier = Modifier.height(s(gapAfter(period))))
                         }
                     }
                 }
 
-                // 行与行之间：按「第 period 节**之后**」的真实空档取间距。
-                if (period < PERIOD_COUNT) {
-                    Box(modifier = Modifier.height(s(gapAfter(period))))
+                // -------- 右：课程区（按天分列）--------
+                //
+                // 这里必须补一个 `padding(start = gap)`，否则课程列会比表头列
+                // 整体左移一个 gap、且每列宽一点。
+                //
+                // 原因是两行的「子节点数」不同，而 spacedBy 只在子节点之间插缝：
+                // - 表头行有 8 个子节点（左上角 + 7 天）→ 7 个缝，第一天从 leftColumnWidth + gap 开始；
+                // - 网格行只有 2 个子节点（时间列 + 课程区），课程区内部的 Row 只有 7 个列 → 6 个缝，
+                //   第一天从 leftColumnWidth 开始。
+                // 少掉的那一个缝就是把课程整体往左推出去了。补在这里，两边缝数一致，列宽与起点才相同。
+                //
+                // 时间列单元格**不再**加 `padding(end = gap)`：间距统一由这里给出，
+                // 避免出现「时间列与第一天 = 2×gap、天与天之间 = gap」的不均匀。
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(start = gap),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                ) {
+                    for (day in WEEKDAY_LABELS.indices) {
+                        CourseDayColumn(
+                            courses = coursesByDay[day],
+                            uiScale = uiScale,
+                            gapOf = { gapAfter(it) },
+                            gap = gap,
+                            cardCorner = cellCorner,
+                            slotOf = { name ->
+                                hueSlots[name] ?: CoursePalette.preferredSlot(name)
+                            },
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
                 }
             }
         }
@@ -408,4 +424,186 @@ private fun blend(from: Color, to: Color, ratio: Float): Color {
         blue = from.blue + (to.blue - from.blue) * r,
         alpha = 1f,
     )
+}
+
+/**
+ * 时间列里的一行文字（起始时间 / 节次号 / 结束时间共用）。
+ *
+ * 为什么传 weight 修饰符进来而不是在这里写死：
+ * 三行要各占 1/3 槽高，但 weight 只能在 Column 的直接子项上生效，
+ * 所以由调用方把 `Modifier.weight(1f)` 传进来；居中仍由外层 Box 的
+ * contentAlignment 负责（直接给 Text 加 weight 会让字形贴槽底）。
+ */
+@Composable
+private fun TimeRowText(
+    text: String,
+    sizeSp: Float,
+    uiScale: Float,
+    color: Color,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    extraBold: Boolean = false,
+) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = (sizeSp * uiScale).sp,
+            lineHeight = (sizeSp * 1.15f * uiScale).sp,
+            fontWeight = if (extraBold) FontWeight.ExtraBold else FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.Center,
+            style = style,
+        )
+    }
+}
+
+/**
+ * 一天的课程列：**按课程块垂直排布**，块可跨多行。
+ *
+ * ## 为什么不是逐格画
+ * 需求 14：大课（如 123456 连堂）的卡片要「一整个连在一起」。
+ * 逐格画时每个格子互相独立，无法跨行；这里改成「一天一个 Column，
+ * 每个课程块占多份高度」，块天然跨行、天然连成一片。
+ *
+ * ## 怎么保证与左侧节次对齐（这里踩过两次坑）
+ *
+ * 左侧时间列结构是：`10 × 行(weight 1) + 9 × 间距(固定 dp)`。
+ * 因此每天这一列的**纵向内容**必须严格复刻同一个骨架，
+ * 否则第 n 行在两侧的 y 范围会逐步漂移。
+ *
+ * 做法：**不合并行**，而是逐行生成 10 个 `weight(1f)` 槽位（与左侧一一对应），
+ * 相邻槽位之间插入与左侧**同一个** `gapOf(p)` 固定间距。
+ * 课程卡片不在槽位内画，而是作为一个**覆盖层**叠在对应的若干槽位上：
+ * - 用 `Modifier.weight(spanRows)` 在**独立的 Column** 里占高度是不行的（间距算不准）；
+ * - 正确做法是用 `Layout`/`Box` 把卡片按「首节槽位顶边」到「末节槽位底边」定位。
+ *
+ * 这里采用最简单的可靠写法：先按骨架依次排出「行槽位 + 间距」作为占位，
+ * 再用一个 `Box` 覆盖层，靠 `onGloballyPositioned` 记录每个节次槽位的 y 范围，
+ * 把卡片绝对定位到 `[首节顶, 末节底]`。骨架与左侧完全一致 ⇒ 永不漂移。
+ */
+@Composable
+private fun CourseDayColumn(
+    courses: List<CourseEntry>,
+    uiScale: Float,
+    gapOf: (Int) -> Dp,
+    gap: Dp,
+    cardCorner: Dp,
+    slotOf: (String) -> Int,
+    modifier: Modifier = Modifier,
+) {
+    val colors = NongyuTheme.colors
+
+    // 记录每个节次槽位在**本列内**的 y 顶/底（像素），用于把卡片精确定位
+    val slotTops = remember { FloatArray(PERIOD_COUNT + 1) }
+    val slotBottoms = remember { FloatArray(PERIOD_COUNT + 1) }
+    var layoutVersion by remember { mutableIntStateOf(0) }
+
+    Box(modifier = modifier) {
+        // ---- 骨架：与左侧时间列逐行一一对应 ----
+        Column(modifier = Modifier.fillMaxSize()) {
+            for (period in 1..PERIOD_COUNT) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            val b = coords.boundsInParent()
+                            slotTops[period] = b.top
+                            slotBottoms[period] = b.bottom
+                            // 最后一节测完后触发一次覆盖层重算
+                            if (period == PERIOD_COUNT) layoutVersion++
+                        },
+                )
+                if (period < PERIOD_COUNT) {
+                    Box(modifier = Modifier.height(gapOf(period)))
+                }
+            }
+        }
+
+        // ---- 覆盖层：把每张卡片放到它覆盖的节次范围内 ----
+        // layoutVersion 变化时重组，保证用上最新的槽位坐标
+        if (layoutVersion >= 0) {
+            courses.forEach { block ->
+                val top = slotTops[block.startPeriod]
+                val bottom = slotBottoms[block.endPeriod]
+                if (bottom > top) {
+                    CourseCard(
+                        block = block,
+                        slot = slotOf(block.name),
+                        uiScale = uiScale,
+                        corner = cardCorner,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(LocalDensity.current) { (bottom - top).toDp() })
+                            // 用 offset 而非 padding：偏移量是像素算出来的绝对位置
+                            .offset(y = with(LocalDensity.current) { top.toDp() }),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 课程卡片：整卡单色、明显圆角、内容居中，显示课程名 + 地点（需求 3 / 4）。
+ *
+ * ## 颜色
+ * 颜色**由课程名哈希决定**（[CoursePalette]），不是固定色板：
+ * 同名课永远同色，加课删课、换周次都不会让已有课程换色。
+ * 色相随名字变，饱和度与亮度全表统一，所以整体仍是一套糖果色而非随机取色。
+ * 跨节大课的底色比单节稍深（同一色相），让连堂一眼可辨。
+ *
+ * ## 视觉口径
+ * 来自本项目已验证过的经验：
+ * - **不要左侧竖色条**（会让窄格显得零碎），整卡一个底色；
+ * - 内容**居中**而不是顶部对齐，否则块一高就头重脚轻；
+ * - 圆角要够大（12dp 量级）才看得出是「卡片」而不是「一块色」。
+ */
+@Composable
+private fun CourseCard(
+    block: CourseEntry,
+    slot: Int,
+    uiScale: Float,
+    corner: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val bg = Color(CoursePalette.backgroundArgb(slot, block.isSpanning))
+    val fg = Color(CoursePalette.textArgb(slot))
+    val fgSecondary = Color(CoursePalette.secondaryTextArgb(slot))
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(corner))
+            .background(bg)
+            .padding(horizontal = (4f * uiScale).dp, vertical = (3f * uiScale).dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = block.name,
+                color = fg,
+                fontSize = (8.5f * uiScale).sp,
+                lineHeight = (10f * uiScale).sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = if (block.isSpanning) 3 else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = block.room,
+                color = fgSecondary,
+                fontSize = (6.5f * uiScale).sp,
+                lineHeight = (8f * uiScale).sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }

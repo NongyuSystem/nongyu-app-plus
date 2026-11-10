@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
+import java.time.LocalDate
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -85,8 +87,21 @@ fun TimetableScreen(
                 .padding(top = statusBarPadding)
                 .height(gridHeight),
         ) {
+            // 切周链路（票 #12 第 3/5/6 条）：
+            //   今天 → 学期第几周 → 按周过滤 → 合并连堂 → 按天分组渲染。
+            //
+            // 每个环节都是纯函数、各自有单测，所以这里只做组装，不写逻辑。
+            // 学期首日目前是 mock 常量，将来从教务/设置注入时只需换这一处入参。
+            val today = remember { LocalDate.now() }
+            val currentWeek = remember(today) { weekOfTerm(today) }
+            val weekCourses = remember(currentWeek) {
+                MOCK_COURSES.coursesInWeek(currentWeek).mergeAdjacent()
+            }
+
             TimetableGrid(
                 uiScale = uiScale,
+                currentWeek = currentWeek,
+                courses = weekCourses,
                 modifier = Modifier.fillMaxSize(),
             )
         }

@@ -92,3 +92,51 @@ fun gapKindAfter(period: Int): RowGapKind = when (period) {
  */
 fun weekdayIndexOrNull(mondayOffset: Long): Int? =
     mondayOffset.takeIf { it in 0..6 }?.toInt()
+
+/**
+ * 周次的中文写法：「第一周」「第十二周」「第二十周」。
+ *
+ * 表头左上角按维护者要求显示中文而不是 `1/16`，
+ * 因为那个格子只有约 40dp 宽，`1/16` 这种写法要靠读者自己解析，
+ * 而「第一周」一眼就知道是什么。
+ *
+ * 只覆盖 1..99：学期周次不会超出这个范围，
+ * 超出时回退成阿拉伯数字，避免悄悄给出错误的汉字。
+ */
+fun weekLabelCn(week: Int): String {
+    if (week !in 1..99) return "第${week}周"
+    return "第${numberToCn(week)}周"
+}
+
+/**
+ * 「共 N 周」的写法。
+ *
+ * 刻意**用阿拉伯数字**而不是中文：维护者原话就是「共16周」，
+ * 且这一行字号很小（6.5sp）、格子只有约 40dp 宽，
+ * 「共十六周」四个汉字会挤到换行或缩得很小，可读性反而差。
+ * 第一行「第一周」用中文是因为那是主信息，字数少、有节奏感。
+ */
+fun totalWeeksLabelCn(total: Int): String = "共${total}周"
+
+/**
+ * 1..99 → 中文数字（「一」「十」「十二」「二十」「九十九」）。
+ *
+ * 规则与日常读数一致：
+ * - 1..9：直接对应的汉字；
+ * - 10：十（不说「一十」）；
+ * - 11..19：十X；
+ * - 20..99：X十 / X十Y。
+ */
+private fun numberToCn(n: Int): String {
+    val digits = listOf("零", "一", "二", "三", "四", "五", "六", "七", "八", "九")
+    return when {
+        n < 10 -> digits[n]
+        n == 10 -> "十"
+        n < 20 -> "十" + digits[n % 10]
+        else -> {
+            val tens = digits[n / 10] + "十"
+            val ones = n % 10
+            if (ones == 0) tens else tens + digits[ones]
+        }
+    }
+}
