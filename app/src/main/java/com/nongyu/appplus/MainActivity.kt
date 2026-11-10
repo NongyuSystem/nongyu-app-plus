@@ -30,8 +30,17 @@ import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // 键盘不许推动整页（维护者要求「只用输入框上移」）。
+        // 必须在 super.onCreate + enableEdgeToEdge 之后设：这两步都会重算窗口 flag，
+        // 只写在 AndroidManifest 里会被覆盖（实测键盘弹出时整页仍上移 63px）。
+        // 真正的「输入条上移」由 MainShell 里底栏的 imePadding() 负责。
+        window.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED,
+        )
 
         // 同步解析皮肤：只读本地，不碰网络（ADR-0006）。
         // 任何异常都在 FileSkinSource 内部被兜住并回落内置默认，这里不需要 try/catch。

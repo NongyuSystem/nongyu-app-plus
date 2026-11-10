@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -587,6 +589,10 @@ fun MainShell() {
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                // 输入态才让键盘顶起底栏；其它形态不跟随（整页不动，只输入条上移）。
+                // 配合 AndroidManifest 的 adjustNothing：窗口不 resize，页面整体不上移，
+                // 只有这条底栏被 imePadding 推上去。
+                .then(if (barMode == BarMode.Input) Modifier.imePadding() else Modifier)
                 .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
                 .height(barHeight)
@@ -753,7 +759,9 @@ fun MainShell() {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = s(20.dp)),
+                            // 内边距左右 20dp + 上下 8dp：输入框不再贴住容器边缘，
+                            // 白色圆角与文字不会被容器的 clip/featheredEdge 裁掉一截。
+                            .padding(horizontal = s(20.dp), vertical = s(8.dp)),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         // 占位提示必须画在 EditText**之上或同层但不可交互**，
@@ -765,6 +773,14 @@ fun MainShell() {
                                 onValueChange = { inputText = it },
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    // 输入框自己必须有可点的命中区：AnimatedContent 切换时
+                                    // 旧内容可能仍在树上抢点击，给它在垂直方向留出整块可点区域，
+                                    // 避免点边缘时落到外层容器、表现为「点了没反应」。
+                                    .heightIn(min = s(24.dp))
+                                    .clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() },
+                                    ) { focusRequester.requestFocus() }
                                     .focusRequester(focusRequester),
                                 textStyle = TextStyle(
                                     color = colors.surface.colorText,
