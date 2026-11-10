@@ -250,37 +250,65 @@ fun MainShell() {
         // 顶边还要再做坐标系换算，历史上两次都算错（一次少让出被遮、一次多让出留白过大）。
         var navOccupiedHeight by remember { mutableStateOf<Float?>(null) }
 
+        // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
+        // （原先定义在底栏段落里，那里太晚，内容区拿不到。）
+        val barMode = when {
+            detailCourse != null -> BarMode.Detail
+            mode == OrbMode.Input -> BarMode.Input
+            else -> BarMode.Normal
+        }
+
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
+            // 【详情卡态】空白收起层放在**课表之下**。
+            //
+            // 维护者 2026-11-10 给的精确定义：
+            //   空白区域 = 除「详情卡 / 课表上有的课程盒子 / 日程盒子」之外的所有区域。
+            //
+            // 为什么放底层：Compose 命中测试按「后声明的先命中」。
+            // 课程盒子（课表覆盖层里、带 clickable）是更上层的命中节点，
+            // 会先消费掉 down，事件就落不到这层 —— 点盒子不会退出。
+            // 而课表的空白槽位没有任何 pointerInput，事件自然落到这里 —— 退出。
+            //
+            // 反过来（原来那版）把收起层盖在课表**之上**，
+            // 它先命中并消费，点课程盒子也被强行收起 —— 正是这次要修的 bug。
+            //
+            // 日程盒子本期未渲染到网格（MOCK_SCHEDULES 留给 #18），
+            // 将来接入时它自带 clickable，同样会被这层放行，无需改这里。
+            if (barMode == BarMode.Detail) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { detailCourse = null },
+                )
+            }
+
             if (selectedTab == 1) {
                 com.nongyu.appplus.ui.timetable.TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
                     onCourseClick = { detailCourse = it },
                 )
             }
-        }
 
-        // 点课表空白处收起详情卡 / 退出输入态（维护者要求 2）。
-        //
-        // 为什么用一层透明点击层而不是给课表本身加手势：
-        // 课表格子里已经有自己的点击（点课卡片开详情），若把「收起」也塞进课表手势，
-        // 会出现「点课程同时也收起了详情」的冲突。这里叠一层只占位不拦截子内容的点击层：
-        // 它铺满内容区、`clickable` 只处理「没被下面控件消费掉」的点击。
-        if (detailCourse != null || mode == OrbMode.Input) {
-            // 只在已经展开时铺这层，否则它会把「点课程卡片」的点击也吃掉。
-            // 注意它铺在课表**之上**：既是遮罩（视觉上略微压暗），也是收起的判定区。
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x14000000))   // 约 8% 黑，提示"下面不可点"
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ) {
-                        detailCourse = null
-                        mode = OrbMode.Idle
-                    },
-            )
+            // 【输入态】维护者定义「除输入框外所有区域都是空白」。
+            // 所以这层必须盖在课表**之上**，连课程盒子一起覆盖 —— 点哪都退出。
+            // 输入框在底栏里、声明更靠后，它自己的 BasicTextField 会消费点击，不受影响。
+            if (barMode == BarMode.Input) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x14000000))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) {
+                            mode = OrbMode.Idle
+                        },
+                )
+            }
         }
 
         // 全屏 dim：**必须画在底栏之前**。
@@ -311,12 +339,7 @@ fun MainShell() {
         //   所以是**真的拉高**，不是淡入一个新卡片；
         // - 两种形态用 `AnimatedContent` 交叉淡入，避免内容跳变；
         // - 圆角、虚化边界、背景色两种形态共用，视觉上才像同一个东西变形。
-        // 三形态共用同一容器的目标尺寸
-        val barMode = when {
-            detailCourse != null -> BarMode.Detail
-            mode == OrbMode.Input -> BarMode.Input
-            else -> BarMode.Normal
-        }
+        // barMode 已提前到「四个页面」之前定义（内容区的空白点击分层需要它）。
         // ---- 星云球「溶解 / 汇聚」动画（维护者要求）----
         //
         // 方向语义：
@@ -429,10 +452,16 @@ fun MainShell() {
                             otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
+                            // 详情卡属于「不退出」白名单，但必须**消费掉点击**：
+                            // 若这里没有任何 pointerInput，事件会穿透到内容区下方的收起层，
+                            // 点卡片自己也会退出（实测 b3 那种情况）。
+                            // 所以挂一个只消费、不动作的 clickable —— 白名单的正确实现。
                             modifier = Modifier
                                 .fillMaxSize()
-                                // 点卡片任意处收起（横杠是提示，整卡可点更符合直觉）
-                                .clickable { detailCourse = null },
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                ) { /* 点详情卡：不退出 */ },
                         )
                     }
                 }
