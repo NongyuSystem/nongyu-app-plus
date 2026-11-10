@@ -63,12 +63,28 @@ gh_api(["--method","PATCH","repos/{REPO}/git/refs/heads/master"],
 
 ### 关键实现细节
 
-1. **JSON 用 stdin 传**：`gh api --input -`，Python 里 `subprocess.run(..., input=json_bytes)`。
+1. **内容必须从 git 对象库取，不能读工作区文件**（最容易踩的坑）：
+   ```python
+   raw = subprocess.run(["git", "cat-file", "blob", blob_sha], capture_output=True).stdout
+   ```
+   Windows 上工作区通常是 **CRLF**，而仓库对象里存的是 **LF**（`core.autocrlf`）。
+   直接 `open(path,"rb").read()` 会把 CRLF 传上去 —— 文件「看起来一样」，
+   但 tree sha 对不上，远端内容实际被改坏了。
+   本次实测：工作区 401 行全是 CRLF，而 HEAD 里的 blob 是 LF，
+   修复前 tree = `8487312`，改用 `git cat-file` 后 tree = `46fa2bd`，与本地完全一致。
+2. **中文路径要加 `-c core.quotepath=false`**：否则 `git ls-tree -r` 会把
+   `docs/adr/0001-调试链路.md` 输出成 `"docs/adr/0001-\350\260\203..."`，
+   后续 `open()` 直接报 `OSError: [Errno 22] Invalid argument`。
+3. **不要用 `git rev-list remote..head` 找待推提交**：API 建出的远端提交与本地
+   不共享历史，`rev-list` 会报 `fatal: Invalid revision range`。
+   正确做法是**按 tree 差异推**：递归拉两边文件清单，比对 blob sha，
+   只上传「新增 / 内容不同」的路径，删除「远端有本地没有」的路径。
+4. **Python 输出中文设 `PYTHONIOENCODING=utf-8`**，否则 Windows 控制台用 GBK 编码 stdout 会抛异常。
+5. **JSON 用 stdin 传**：`gh api --input -`，Python 里 `subprocess.run(..., input=json_bytes)`。
    这能彻底避开 shell 引号转义和临时文件编码两个坑。
-2. **`force: false`**：让远端自己拒绝非快进更新，多一层保险。
-3. **比对 tree sha 判断内容一致**，不要比 commit sha —— 后者因 author 时间戳等元数据
+6. **`force: false`**：让远端自己拒绝非快进更新，多一层保险。
+7. **比对 tree sha 判断内容一致**，不要比 commit sha —— 后者因 author 时间戳等元数据
    不同必然不同，这是正常的，不是失败。
-4. **被 `.gitignore` 忽略的文件不会进 blob**，与 `git push` 行为一致，无需特殊处理。
 
 ## 验证
 
