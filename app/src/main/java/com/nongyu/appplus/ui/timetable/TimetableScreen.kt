@@ -45,6 +45,7 @@ import com.nongyu.appplus.ui.theme.NongyuTheme
 fun TimetableScreen(
     navOccupiedPx: Float?,
     modifier: Modifier = Modifier,
+    onCourseClick: (CourseEntry) -> Unit = {},
 ) {
     val colors = NongyuTheme.colors
 
@@ -102,6 +103,7 @@ fun TimetableScreen(
                 uiScale = uiScale,
                 currentWeek = currentWeek,
                 courses = weekCourses,
+                onCourseClick = onCourseClick,
                 modifier = Modifier.fillMaxSize(),
             )
         }

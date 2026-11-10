@@ -1,6 +1,7 @@
 package com.nongyu.appplus.ui.timetable
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -161,6 +162,7 @@ fun TimetableGrid(
     modifier: Modifier = Modifier,
     currentWeek: Int = 1,
     courses: List<CourseEntry> = emptyList(),
+    onCourseClick: (CourseEntry) -> Unit = {},
 ) {
     val coursesByDay = remember(courses) { courses.groupedByDay() }
     // 课程名 → 色槽：保证**同屏课程必然不同色**（撞槽自动顺延），
@@ -400,6 +402,7 @@ fun TimetableGrid(
                             gapOf = { gapAfter(it) },
                             gap = gap,
                             cardCorner = cellCorner,
+                            onCourseClick = onCourseClick,
                             slotOf = { name ->
                                 hueSlots[name] ?: CoursePalette.preferredSlot(name)
                             },
@@ -491,6 +494,7 @@ private fun CourseDayColumn(
     gap: Dp,
     cardCorner: Dp,
     slotOf: (String) -> Int,
+    onCourseClick: (CourseEntry) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -532,6 +536,7 @@ private fun CourseDayColumn(
                     CourseCard(
                         block = block,
                         slot = slotOf(block.name),
+                        onClick = { onCourseClick(block) },
                         uiScale = uiScale,
                         corner = cardCorner,
                         modifier = Modifier
@@ -567,6 +572,7 @@ private fun CourseCard(
     slot: Int,
     uiScale: Float,
     corner: Dp,
+    onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val bg = Color(CoursePalette.backgroundArgb(slot, block.isSpanning))
@@ -577,6 +583,7 @@ private fun CourseCard(
         modifier = modifier
             .clip(RoundedCornerShape(corner))
             .background(bg)
+            .clickable(onClick = onClick)
             .padding(horizontal = (4f * uiScale).dp, vertical = (3f * uiScale).dp),
         contentAlignment = Alignment.Center,
     ) {

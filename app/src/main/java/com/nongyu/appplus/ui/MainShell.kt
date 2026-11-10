@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +31,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,6 +73,7 @@ import com.nongyu.appplus.ui.icon.NavIconStrokes
 import com.nongyu.appplus.ui.icon.drawNavIcon
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.ui.timetable.CourseEntry
 
 /**
  * 主框架与导航壳（概念验证版 0.0.1test）。
@@ -87,12 +93,27 @@ private val TABS = listOf("全部", "课表", "探索", "个人")
 
 private enum class OrbMode { Idle, Listening, Input }
 
+/**
+ * 底部条的三形态。三者**共用同一个容器**，靠高度/圆角/内容切换实现「原地变形」：
+ * - [Normal]：常规导航栏（2+2 + 中间星云球）
+ * - [Input]：输入态（导航项淡出，原地变输入栏）
+ * - [Detail]：课程详情卡（导航项与星云球都溶解，拉高展示课程信息）
+ */
+private enum class BarMode { Normal, Input, Detail }
+
 @Composable
 fun MainShell() {
     val colors = NongyuTheme.colors
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
+
+    // 点哪门课 → 导航栏**原地变形**为课程详情卡（票 #16 决策）。
+    //
+    // 为什么状态放 Shell：导航栏是自绘的、在 Shell 里，详情卡要「占据导航栏位置」，
+    // 所以选中态必须提升到 Shell，子页面只负责上报点击。
+    // 这与既有「导航栏变形为标签胶囊 / 输入条」是同一套做法。
+    var detailCourse by remember { mutableStateOf<CourseEntry?>(null) }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
@@ -129,11 +150,22 @@ fun MainShell() {
         }
     }
 
-    // 全屏 dim（第 2、3 激活态）
+    // 全屏 dim —— **只在长按态（Listening）出现**。
+    //
+    // 输入态（Input）不再整屏压暗：输入栏本身就在底栏里，
+    // 整屏压暗会把输入栏一起压灰（历史上输入栏浮在上层所以没暴露）。
+    // 输入态需要的是「底栏可见 + 背后课表变暗」，后者由下面的 dim 单独一层负责。
     val dimAlpha by animateFloatAsState(
-        targetValue = if (active) 0.55f else 0f,
+        targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
         animationSpec = tween(300),
         label = "dim",
+    )
+
+    // 输入态：只把**底栏以外**压暗（让输入栏保持明亮、成为视觉焦点）。
+    val inputScrimAlpha by animateFloatAsState(
+        targetValue = if (mode == OrbMode.Input) 0.35f else 0f,
+        animationSpec = tween(300),
+        label = "inputScrim",
     )
 
     // 点按态：圆球缩没、输入框展开
@@ -208,21 +240,123 @@ fun MainShell() {
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
             if (selectedTab == 1) {
-                com.nongyu.appplus.ui.timetable.TimetableScreen(navOccupiedPx = navOccupiedHeight)
+                com.nongyu.appplus.ui.timetable.TimetableScreen(
+                    navOccupiedPx = navOccupiedHeight,
+                    onCourseClick = { detailCourse = it },
+                )
             }
         }
 
-        // 底栏：贴底、2+2、中间留空。边界用 featheredEdge 虚化（无硬边框）。
-        Row(
+        // 点课表空白处收起详情卡 / 退出输入态（维护者要求 2）。
+        //
+        // 为什么用一层透明点击层而不是给课表本身加手势：
+        // 课表格子里已经有自己的点击（点课卡片开详情），若把「收起」也塞进课表手势，
+        // 会出现「点课程同时也收起了详情」的冲突。这里叠一层只占位不拦截子内容的点击层：
+        // 它铺满内容区、`clickable` 只处理「没被下面控件消费掉」的点击。
+        if (detailCourse != null || mode == OrbMode.Input) {
+            // 只在已经展开时铺这层，否则它会把「点课程卡片」的点击也吃掉。
+            // 注意它铺在课表**之上**：既是遮罩（视觉上略微压暗），也是收起的判定区。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x14000000))   // 约 8% 黑，提示"下面不可点"
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) {
+                        detailCourse = null
+                        mode = OrbMode.Idle
+                    },
+            )
+        }
+
+        // 全屏 dim：**必须画在底栏之前**。
+        //
+        // 历史上它画在底栏之后（为了"把导航栏一起压暗"），那时输入框是浮在 dim 之上的
+        // 独立控件，所以没问题。现在输入态与详情态都住进底栏本体，
+        // 若仍画在底栏之后，整块底栏会被这层近乎不透明的遮罩完全盖住 ——
+        // 表现就是「点星云球后什么都没出现」（实测屏幕变成整片深灰）。
+        // 输入态的压暗层：同样画在底栏**之前**，于是它压暗课表、不压底栏。
+        // 维护者要求「长按时导航栏要变暗」——长按那层（dimAlpha）已经画在底栏之后，
+        // 会把底栏一起压暗；这层只服务输入态，两者互不干扰。
+        if (inputScrimAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(inputScrimAlpha)
+                    .background(Color(0xFF0A140F)),
+            )
+        }
+
+        // ---------- 底部：导航栏 ⇄ 课程详情卡（原地变形）----------
+        //
+        // 票 #16 决策：**导航栏原地拉高成详情卡**，中间星云球淡出。
+        // 不跟旧农屿的 BottomSheet、也不跟它的全屏宽——这一条是明文采纳需求原文的。
+        //
+        // 实现要点（与既有「导航栏变形为标签胶囊」同一套）：
+        // - 容器高度 `animateDpAsState` 在「栏高」与「详情卡高」之间插值，
+        //   所以是**真的拉高**，不是淡入一个新卡片；
+        // - 两种形态用 `AnimatedContent` 交叉淡入，避免内容跳变；
+        // - 圆角、虚化边界、背景色两种形态共用，视觉上才像同一个东西变形。
+        // 三形态共用同一容器的目标尺寸
+        val barMode = when {
+            detailCourse != null -> BarMode.Detail
+            mode == OrbMode.Input -> BarMode.Input
+            else -> BarMode.Normal
+        }
+        // ---- 星云球「溶解 / 汇聚」动画（维护者要求）----
+        //
+        // 方向语义：
+        // - 导航栏进入变形（Input / Detail）时，球**溶解**：粒子外散 + 透明度渐隐；
+        // - 回到常态时，球**汇聚**：从四周收拢回球心并显形。
+        //
+        // 用 Animatable 而不是 animateFloatAsState，是因为要区分「正向/反向」
+        // 两个不同时长（溶解略快、汇聚略慢，收拢感更自然）。
+        val dissolve = remember { Animatable(0f) }
+        LaunchedEffect(barMode) {
+            if (barMode == BarMode.Normal) {
+                dissolve.animateTo(0f, tween(420))   // 汇聚
+            } else {
+                dissolve.animateTo(1f, tween(280))   // 溶解
+            }
+        }
+        // 球体可见度：溶解时同时缩小并变透明，配合下面的粒子外散
+        val orbDissolveAlpha = 1f - dissolve.value
+        val orbDissolveScale = 1f + dissolve.value * 0.55f
+
+        val detailHeight = s(196.dp)
+        val barHeight by animateDpAsState(
+            targetValue = when (barMode) {
+                BarMode.Detail -> detailHeight
+                BarMode.Input -> navHeight
+                BarMode.Normal -> navHeight
+            },
+            animationSpec = tween(340),
+            label = "barHeight",
+        )
+        val barCorner by animateDpAsState(
+            targetValue = when (barMode) {
+                BarMode.Detail -> s(26.dp)
+                BarMode.Input -> navCorner
+                BarMode.Normal -> navCorner
+            },
+            animationSpec = tween(340),
+            label = "barCorner",
+        )
+
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                // 垂直内边距也走 s()：此前写死 18.dp，大屏上栏体本身缩了、边距没缩，比例失真。
                 .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
-                .height(navHeight)
-                .alpha(navAlpha)
-                .featheredEdge(colors.navBar.colorItem, navCorner)
-                .clip(RoundedCornerShape(navCorner))
+                .height(barHeight)
+                // 这里**不能**用 .alpha(navAlpha)：
+                // navAlpha 的语义是「导航项该不该显示」，它若作用在整个容器上，
+                // 会把输入态 / 详情态的内容一起干掉。
+                // 历史上输入框浮在这层之外所以没暴露，现在它住进容器就立刻被隐藏。
+                // 正确做法：容器始终不透明，只让下面的导航项自己淡出（见 BarMode.Normal 分支）。
+                .featheredEdge(colors.navBar.colorItem, barCorner)
+                .clip(RoundedCornerShape(barCorner))
                 .background(colors.navBar.colorContainer)
                 // 上报底栏占位（供内容页做底部避让）。
                 //
@@ -236,17 +370,108 @@ fun MainShell() {
                     val h = coords.size.height.toFloat()
                     if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
                 },
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
-            NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f)) { selectedTab = 1 }
-            Spacer(modifier = Modifier.width(s(96.dp)))
-            NavItem(TABS[2], NavIconKey.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Compass), Modifier.weight(1f)) { selectedTab = 2 }
-            NavItem(TABS[3], NavIconKey.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Person), Modifier.weight(1f)) { selectedTab = 3 }
+            AnimatedContent(
+                targetState = barMode,
+                transitionSpec = {
+                    (fadeIn(tween(200)) + scaleIn(tween(240), initialScale = 0.96f))
+                        .togetherWith(fadeOut(tween(120)))
+                },
+                label = "navMorph",
+            ) { showing ->
+                when (showing) {
+                BarMode.Detail -> {
+                    val course = detailCourse
+                    if (course != null) {
+                        com.nongyu.appplus.ui.timetable.CourseDetailContent(
+                            course = course,
+                            uiScale = uiScale,
+                            // 同一门课在本学期的其他时段（同课不同天/不同节次）
+                            otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
+                                .filter { it.name == course.name && it.id != course.id },
+                            onDismiss = { detailCourse = null },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // 点卡片任意处收起（横杠是提示，整卡可点更符合直觉）
+                                .clickable { detailCourse = null },
+                        )
+                    }
+                }
+                BarMode.Input -> {
+                    // 输入态：导航栏**原地**变成输入栏，不再浮一个独立输入框。
+                    // 这是维护者要求「点击星云球 → 导航按钮变淡转化为输入栏」。
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = s(20.dp)),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        // 占位提示必须画在 EditText**之上或同层但不可交互**，
+                        // 否则空输入时它会被 BasicTextField 自己的绘制区域盖住（实测看不到）。
+                        // 这里用 Box 叠放：输入框在下，占位在上且不接收触摸。
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            BasicTextField(
+                                value = inputText,
+                                onValueChange = { inputText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = TextStyle(
+                                    color = colors.surface.colorText,
+                                    fontSize = (12f * uiScale).sp,
+                                ),
+                                cursorBrush = SolidColor(colors.brand.colorBrand),
+                                singleLine = true,
+                            )
+                            if (inputText.isEmpty()) {
+                                // 占位文字**不能带 clickable**：clickable 会把手势整段消费掉，
+                                // 下层 BasicTextField 永远收不到触摸，表现就是「点了打不了字」。
+                                // 纯 Text 不参与手势，事件会自然穿透到下面的输入框。
+                                Text(
+                                    text = "输入想问农小屿的问题…",
+                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.55f),
+                                    fontSize = (12f * uiScale).sp,
+                                )
+                            }
+                        }
+                    }
+                }
+                BarMode.Normal -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // 导航项自己承担淡出：输入态/详情态时 navAlpha=0，
+                            // 但它们住在同一个容器里，不能让容器整体透明。
+                            .alpha(navAlpha),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
+                        NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f)) { selectedTab = 1 }
+                        Spacer(modifier = Modifier.width(s(96.dp)))
+                        NavItem(TABS[2], NavIconKey.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Compass), Modifier.weight(1f)) { selectedTab = 2 }
+                        NavItem(TABS[3], NavIconKey.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Person), Modifier.weight(1f)) { selectedTab = 3 }
+                    }
+                }
+                }
+            }
+
+            // 长按态：在底栏**内部**再压一层暗色。
+            //
+            // 为什么不能只靠外层全屏 dim：外层那个 Box 虽然声明在底栏之后，
+            // 但底栏本身带 featheredEdge（drawBehind 多层向外扩的描边）与 clip，
+            // 实测外层遮罩压不进这层描边区域，导航栏看着仍是亮的。
+            // 这里在容器内部补一层，保证"长按时导航栏一定变暗"这个要求落地。
+            if (dimAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(dimAlpha)
+                        .background(Color(0xFF0A140F)),
+                )
+            }
         }
 
-        // 全屏 dim：画在底栏**之后**，才能把导航栏一起压暗。
-        // （此前画在导航栏之前，导航栏永远不变暗。）
+        // 长按态的全屏 dim：压暗底栏**之外**的一切（配合上面那层形成完整压暗）
+        // （维护者要求「长按时导航栏要变暗」）。
+        // 它与输入态的 inputScrim 是两层不同语义的遮罩，不要合并。
         if (dimAlpha > 0f) {
             Box(
                 modifier = Modifier
@@ -309,8 +534,8 @@ fun MainShell() {
                 // 凸起偏移量按球径比例：球小则凸起少，避免球浮在导航栏之上脱节
                 .offset(y = (orbSize.value * -0.22f).dp)
                 .size(orbSize)
-                .scale(orbScale)
-                .alpha(orbAlpha)
+                .scale(orbScale * orbDissolveScale)
+                .alpha(orbAlpha * orbDissolveAlpha)
                 // 不 clip(CircleShape)：星云球边缘在渲染层已羽化到透明，
                 // 硬裁剪会把软边切成 3D 球的硬圆轮廓。
                 .pointerInput(Unit) {
@@ -351,53 +576,6 @@ fun MainShell() {
             )
         }
 
-        // 点按态输入框：与导航栏**同宽同位置**（同样的 horizontal=18.dp + fillMaxWidth）。
-        // 关键：AnimatedVisibility 必须自己也 fillMaxWidth，否则它按内容测量，
-        // 内部 Box 的 fillMaxWidth 会在收缩后的约束里再算一次，结果比导航栏窄。
-        AnimatedVisibility(
-            visible = mode == OrbMode.Input,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 18.dp),
-            enter = fadeIn(tween(260)),
-            exit = fadeOut(tween(220)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(inputHeight)
-                    .graphicsLayer {
-                        scaleX = inputScale
-                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                    }
-                    // 与导航栏用同一套虚化边界，二者观感一致
-                    .featheredEdge(colors.navBar.colorItem, inputCorner)
-                    .clip(RoundedCornerShape(inputCorner))
-                    .background(colors.surface.colorCard)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (inputText.isEmpty()) {
-                    Text(
-                        text = "输入想问农小屿的问题…",
-                        color = colors.surface.colorTextSecondary.copy(alpha = 0.55f),
-                        fontSize = 13.sp,
-                    )
-                }
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(
-                        color = colors.surface.colorText,
-                        fontSize = 13.sp,
-                    ),
-                    cursorBrush = SolidColor(colors.brand.colorBrand),
-                    singleLine = true,
-                )
-            }
-        }
     }
 }
 
