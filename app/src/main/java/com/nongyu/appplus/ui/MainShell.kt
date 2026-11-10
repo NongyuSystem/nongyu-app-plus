@@ -34,6 +34,11 @@ import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -149,6 +155,13 @@ fun MainShell() {
             pulse.animateTo(1f, animationSpec = tween(if (pulseExpand) 520 else 460))
         }
     }
+
+    // 长按态用于压暗**底栏自身**的强度（与全屏 dim 分开：全屏那层压不到底栏）。
+    val longPressDim by animateFloatAsState(
+        targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
+        animationSpec = tween(300),
+        label = "longPressDim",
+    )
 
     // 全屏 dim —— **只在长按态（Listening）出现**。
     //
@@ -324,7 +337,11 @@ fun MainShell() {
         val orbDissolveAlpha = 1f - dissolve.value
         val orbDissolveScale = 1f + dissolve.value * 0.55f
 
-        val detailHeight = s(196.dp)
+        // 详情卡高度：必须能容纳内容，否则 AnimatedContent 内部会把内容压没
+        // （实测 96dp 时卡片变成一片空白）。
+        // 内容实测约 62dp（横杠 4 + 课名 18 + 时间行 14 + 胶囊 22 + 间距），
+        // 加上容器上下 padding 与留白，128dp 是刚好不空、也不裁的高度。
+        val detailHeight = s(128.dp)
         val barHeight by animateDpAsState(
             targetValue = when (barMode) {
                 BarMode.Detail -> detailHeight
@@ -358,6 +375,21 @@ fun MainShell() {
                 .featheredEdge(colors.navBar.colorItem, barCorner)
                 .clip(RoundedCornerShape(barCorner))
                 .background(colors.navBar.colorContainer)
+                // 长按态把**整条底栏**一起压暗（维护者要求「长按时导航栏要变暗」）。
+                //
+                // 为什么用 drawWithContent 而不是叠一个 Box 子元素：
+                // 容器的 .background() 在子内容之前绘制，叠子元素只能盖住内容本身；
+                // 而这里要连容器底色一起压暗。drawWithContent 在**所有子内容之后**
+                // 再画一层半透明暗色，等效于给整条底栏蒙一层，且不引入额外布局节点。
+                .drawWithContent {
+                    drawContent()
+                    if (longPressDim > 0f) {
+                        drawRect(
+                            color = Color(0xFF0A140F),
+                            alpha = longPressDim,
+                        )
+                    }
+                }
                 // 上报底栏占位（供内容页做底部避让）。
                 //
                 // 为什么不再上报「顶边 y 坐标」：
@@ -367,8 +399,15 @@ fun MainShell() {
                 // 改为直接上报**底栏自身在外层 Box 中的高度**：
                 // 它就是「内容区底部必须让出的像素数」，无需任何坐标换算。
                 .onGloballyPositioned { coords ->
-                    val h = coords.size.height.toFloat()
-                    if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
+                    // 只在**常态**下上报占位高度。
+                    //
+                    // 之前无条件上报当前高度，导致点开详情卡（62dp->128dp）时
+                    // 内容区底部让位量同步变大，整张课程表被挤压变形（维护者反馈）。
+                    // 课程表只需要知道「常态底栏会占多高」，变形是浮层行为，不该推动内容。
+                    if (barMode == BarMode.Normal) {
+                        val h = coords.size.height.toFloat()
+                        if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
+                    }
                 },
         ) {
             AnimatedContent(
@@ -400,6 +439,24 @@ fun MainShell() {
                 BarMode.Input -> {
                     // 输入态：导航栏**原地**变成输入栏，不再浮一个独立输入框。
                     // 这是维护者要求「点击星云球 → 导航按钮变淡转化为输入栏」。
+                    //
+                    // 自动聚焦：等切换动画走完再请求焦点。
+                    // 直接 rememberFocusRequester + requestFocus() 在重组时调用会失败
+                    // （此时输入框还没 attach 到窗口），必须放到 LaunchedEffect 里，
+                    // 并延迟一点等 AnimatedContent 把内容挂上去，否则键盘不弹。
+                    val focusRequester = remember { FocusRequester() }
+                    val keyboard = LocalSoftwareKeyboardController.current
+                    // 先等一帧让 AnimatedContent 真正把输入框挂上，
+                    // 再等切换动画走完，最后才请求焦点并弹键盘。
+                    // 只 delay 一次会在内容 attach 前就 requestFocus（静默失败，键盘不弹）。
+                    LaunchedEffect(Unit) {
+                        withFrameNanos { }
+                        delay(340)
+                        runCatching {
+                            focusRequester.requestFocus()
+                            keyboard?.show()
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -413,7 +470,9 @@ fun MainShell() {
                             BasicTextField(
                                 value = inputText,
                                 onValueChange = { inputText = it },
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(focusRequester),
                                 textStyle = TextStyle(
                                     color = colors.surface.colorText,
                                     fontSize = (12f * uiScale).sp,
@@ -452,26 +511,9 @@ fun MainShell() {
                 }
                 }
             }
-
-            // 长按态：在底栏**内部**再压一层暗色。
-            //
-            // 为什么不能只靠外层全屏 dim：外层那个 Box 虽然声明在底栏之后，
-            // 但底栏本身带 featheredEdge（drawBehind 多层向外扩的描边）与 clip，
-            // 实测外层遮罩压不进这层描边区域，导航栏看着仍是亮的。
-            // 这里在容器内部补一层，保证"长按时导航栏一定变暗"这个要求落地。
-            if (dimAlpha > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(dimAlpha)
-                        .background(Color(0xFF0A140F)),
-                )
-            }
         }
 
-        // 长按态的全屏 dim：压暗底栏**之外**的一切（配合上面那层形成完整压暗）
-        // （维护者要求「长按时导航栏要变暗」）。
-        // 它与输入态的 inputScrim 是两层不同语义的遮罩，不要合并。
+        // 长按态的全屏 dim：压暗底栏**之外**的一切（与上面那层配合）
         if (dimAlpha > 0f) {
             Box(
                 modifier = Modifier
@@ -538,34 +580,45 @@ fun MainShell() {
                 .alpha(orbAlpha * orbDissolveAlpha)
                 // 不 clip(CircleShape)：星云球边缘在渲染层已羽化到透明，
                 // 硬裁剪会把软边切成 3D 球的硬圆轮廓。
-                .pointerInput(Unit) {
-                    // longPressed 记录本轮手势是否已判为长按，避免长按后又误触发 onTap。
-                    var longPressed = false
-                    detectTapGestures(
-                        onPress = {
-                            longPressed = false
-                            // 按下后等待释放；抬手 / 移出 / 手势取消都会返回。
-                            // 只有长按态需要「松手后恢复」，点按态(Input)要保留。
-                            tryAwaitRelease()
-                            if (longPressed) {
-                                mode = OrbMode.Idle
-                                pulseExpand = false   // 变亮：波向内回收
-                                pulseKey++
-                            }
-                        },
-                        onLongPress = {
-                            longPressed = true
-                            mode = OrbMode.Listening
-                            pulseExpand = true        // 变黑：波向外扩散
-                            pulseKey++
-                        },
-                        onTap = {
-                            if (!longPressed) {
-                                mode = if (mode == OrbMode.Input) OrbMode.Idle else OrbMode.Input
-                            }
-                        },
-                    )
-                },
+                // 星云球只在**常态**接收触摸。
+                //
+                // 否则球的手势区会盖在课程表底部（球是浮在内容之上的），
+                // 在课程卡片上点按/长按会被判成星云球的操作（维护者反馈）。
+                // 输入态/详情态时球本来就在溶解，也不需要交互。
+                .then(
+                    if (barMode == BarMode.Normal) {
+                        Modifier.pointerInput(Unit) {
+                            // longPressed 记录本轮手势是否已判为长按，避免长按后又误触发 onTap。
+                            var longPressed = false
+                            detectTapGestures(
+                                onPress = {
+                                    longPressed = false
+                                    // 按下后等待释放；抬手 / 移出 / 手势取消都会返回。
+                                    // 只有长按态需要「松手后恢复」，点按态(Input)要保留。
+                                    tryAwaitRelease()
+                                    if (longPressed) {
+                                        mode = OrbMode.Idle
+                                        pulseExpand = false   // 变亮：波向内回收
+                                        pulseKey++
+                                    }
+                                },
+                                onLongPress = {
+                                    longPressed = true
+                                    mode = OrbMode.Listening
+                                    pulseExpand = true        // 变黑：波向外扩散
+                                    pulseKey++
+                                },
+                                onTap = {
+                                    if (!longPressed) {
+                                        mode = if (mode == OrbMode.Input) OrbMode.Idle else OrbMode.Input
+                                    }
+                                },
+                            )
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             NongyuOrb(
