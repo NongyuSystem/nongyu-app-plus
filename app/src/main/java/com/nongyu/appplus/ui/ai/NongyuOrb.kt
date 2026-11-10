@@ -73,6 +73,7 @@ private val BLOBS = listOf(
 
 @Composable
 fun NongyuOrb(
+    modifier: Modifier = Modifier,
     diameter: Dp = 120.dp,
     speed: Float = 0.25f,
     /**
@@ -81,7 +82,6 @@ fun NongyuOrb(
      * 此时把最外缘压得更透、过渡带拉得更宽，让球自然消融进暗背景。
      */
     dimmed: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors.aiOrb
 

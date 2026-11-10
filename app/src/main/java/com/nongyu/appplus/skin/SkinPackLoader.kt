@@ -240,40 +240,81 @@ object SkinPackLoader {
         }
 
         // 选路径：API 30+ 且有 Resources 且确实在 UI 线程 → 走 ResourcesLoader；否则文件解码。
-        // 用一个局部非空值承载，避免后面到处写 `!!`（那会让「可能为 null」的语义被掩盖）。
-        val canUseLoader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && onUiThread
-        val hostResources: Resources? = resources?.takeIf { canUseLoader }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && resources != null && !onUiThread) {
-            Log.w(TAG, "非 UI 线程调用 addLoaders 会与 UI 线程争锁，本次改走文件解码")
+        //
+        // 为什么拆成两个独立函数、而不是在一个函数里 if 一下：
+        // API 30 那半边标了 @RequiresApi(R)，静态检查就能看清边界。
+        // 之前写成「局部变量 + takeIf 守卫」时，lint 看不穿这个守卫，
+        // 会对 ResourcesLoaderBinding / ResourcesLoaderPackByteSource / fromResources
+        // 一律报 NewApi 错误（7 个 error 让 :app:lintDebug 直接失败），
+        // 而实际运行期是安全的 —— 属于「代码没错、表达方式让工具读不懂」。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && resources != null) {
+            if (onUiThread) {
+                // 挂不上 loader（attach 返回 null）时保持原行为：回落文件解码。
+                loadWithResourcesLoader(
+                    resources = resources,
+                    packDir = packDir,
+                    manifest = manifest,
+                    appVersionCode = appVersionCode,
+                    builtIn = builtIn,
+                    verifier = verifier,
+                )?.let { return it }
+            } else {
+                Log.w(TAG, "非 UI 线程调用 addLoaders 会与 UI 线程争锁，本次改走文件解码")
+            }
         }
 
-        val attached = hostResources?.let { ResourcesLoaderBinding.attach(it, packDir) }
+        return loadWithFileSource(
+            packDir = packDir,
+            manifest = manifest,
+            appVersionCode = appVersionCode,
+            builtIn = builtIn,
+            verifier = verifier,
+        )
+    }
 
-        val source: PackByteSource
-        val fontReadable: (String) -> Boolean
-        if (hostResources != null && attached != null) {
-            source = ResourcesLoaderPackByteSource(hostResources)
-            fontReadable = { path -> PackFontProbe.fromResources(hostResources, path) }
-        } else {
-            source = FilePackByteSource(packDir)
-            fontReadable = { path -> PackFontProbe.fromFile(File(packDir, path)) }
-        }
-
+    /**
+     * API 30+ 路径：把包目录挂成 `ResourcesLoader`，按资源直接读。
+     *
+     * @return 挂载成功时的加载结果；`attach` 返回 `null`（挂不上）时返回 `null`，
+     *   由调用方回落文件解码。
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun loadWithResourcesLoader(
+        resources: Resources,
+        packDir: File,
+        manifest: SkinPackManifest,
+        appVersionCode: Int,
+        builtIn: ResourcePayload,
+        verifier: PackSignatureVerifier,
+    ): LoadedResources? {
+        val attached = ResourcesLoaderBinding.attach(resources, packDir) ?: return null
         return try {
-            val planned = assemble(
-                source = source,
+            assemble(
+                source = ResourcesLoaderPackByteSource(resources),
                 manifest = manifest,
                 appVersionCode = appVersionCode,
                 builtIn = builtIn,
                 verifier = verifier,
-                fontReadable = fontReadable,
-            )
-            Log.i(TAG, "皮肤包加载完成: ${planned.meta.describe("resources")}")
-            planned
+                fontReadable = { path -> PackFontProbe.fromResources(resources, path) },
+            ).also { Log.i(TAG, "皮肤包加载完成: ${it.meta.describe("resources")}") }
         } finally {
-            if (hostResources != null && attached != null) {
-                ResourcesLoaderBinding.detach(hostResources, attached)
-            }
+            ResourcesLoaderBinding.detach(resources, attached)
         }
     }
+
+    /** 文件解码路径：API < 30，或调用方不在 UI 线程，或 loader 挂不上。 */
+    private fun loadWithFileSource(
+        packDir: File,
+        manifest: SkinPackManifest,
+        appVersionCode: Int,
+        builtIn: ResourcePayload,
+        verifier: PackSignatureVerifier,
+    ): LoadedResources = assemble(
+        source = FilePackByteSource(packDir),
+        manifest = manifest,
+        appVersionCode = appVersionCode,
+        builtIn = builtIn,
+        verifier = verifier,
+        fontReadable = { path -> PackFontProbe.fromFile(File(packDir, path)) },
+    ).also { Log.i(TAG, "皮肤包加载完成: ${it.meta.describe("resources")}") }
 }
