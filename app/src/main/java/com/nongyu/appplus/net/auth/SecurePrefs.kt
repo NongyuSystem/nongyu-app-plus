@@ -22,6 +22,25 @@ package com.nongyu.appplus.net.auth
  * （见 `SecurePrefsNameConsistencyTest`）。
  *
  * **改这里时必须同步改两个 XML 文件。**
+ *
+ * ## 旧数据不迁移：为什么这是安全的（重要，别当成遗漏）
+ *
+ * 从 `EncryptedSharedPreferences` 迁到 DataStore 后，新代码**不读取**旧的
+ * `shared_prefs/nongyu_secure_session.xml`。看起来像「老用户升级后被静默登出」，
+ * 但实际不是问题，原因有二：
+ *
+ * 1. **从来没有生产代码往这里写过 token**：令牌来源是 `defaultTokenProvider()`
+ *    （debug 取 `BuildConfig.DEV_TOKEN`，release 恒为 `null`），
+ *    即 [SessionStore] 目前只在「会话失效时 clear()」这一条路径被用到，
+ *    `readToken()` / `writeToken()` 尚无生产调用方。没有存量数据，就谈不上丢失。
+ * 2. 即便要迁移，也**不能**在移除 security-crypto 依赖后读旧数据：
+ *    旧文件是用 `MasterKey`（旧库自己的 Keystore 别名）加密的，
+ *    不解回该依赖就读不出来。
+ *
+ * **将来接真实登录时必须做的决定**：一旦 `writeToken()` 有了生产调用方（真正落地的登录），
+ * 需要在此处明确二选一——要么确认「当前没有存量用户」直接不管，
+ * 要么加一次性迁移（临时把 security-crypto 作为 `compileOnly`/迁移期依赖读旧文件，
+ * 把明文搬进 DataStore 后删除旧文件与依赖）。
  */
 object SecurePrefs {
     /**
