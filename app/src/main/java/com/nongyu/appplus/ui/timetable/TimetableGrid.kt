@@ -189,6 +189,19 @@ fun TimetableGrid(
             trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
         ),
     )
+    // 表头「星期 / 日期」两行也必须用同一套行高裁切。
+    //
+    // 维护者反馈：真机上日期贴着盒子底部、不居中，而左上角「第N周/共N周」正常。
+    // 根因是左上角两行写了显式 lineHeight，这里没写 —— Text 会用字体默认的
+    // ascent/descent + 字体自带上下留白，不同机型字体度量不同，
+    // 真机上日期行 descent 偏大，整行被往下推到贴底；蓝叠上恰好居中所以没暴露。
+    // 统一成 Trim.Both + 显式 lineHeight 后，行高裁到字形边界，上下留白严格对称。
+    val headerTextStyle = androidx.compose.ui.text.TextStyle(
+        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+        ),
+    )
     val outerPadding = s(OUTER_PADDING)
     val cellCorner = s(CELL_CORNER)
     val headerCorner = s(HEADER_CORNER)
@@ -293,6 +306,8 @@ fun TimetableGrid(
                             text = label,
                             color = if (isToday) colors.brand.colorBrand else colors.surface.colorText,
                             fontSize = (9f * uiScale).sp,
+                            lineHeight = (11f * uiScale).sp,
+                            style = headerTextStyle,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             softWrap = false,
@@ -303,6 +318,8 @@ fun TimetableGrid(
                             color = if (isToday) colors.brand.colorBrand
                             else colors.surface.colorTextSecondary,
                             fontSize = (7f * uiScale).sp,
+                            lineHeight = (9f * uiScale).sp,
+                            style = headerTextStyle,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             softWrap = false,
