@@ -19,22 +19,29 @@ import androidx.compose.ui.unit.dp
 import com.nongyu.appplus.ui.theme.NongyuTheme
 
 /**
- * 课表页容器（第 1 步，票 #15，维护者第二轮修订）。
+ * 课表页容器（票 #15）。
  *
- * 职责：算 `uiScale`、算状态栏避让、算底部导航栏避让、把布局铺满剩下的可视区。
- * 顶部为右上角 4 个按钮预留的高度由 [TimetableGrid] 自己让出。
+ * 职责三件：算 `uiScale`、让出底部导航栏的占位、把布局铺满剩下的可视区。
  *
- * ## 为什么底栏高度必须实测，不能写死
- * 底部导航栏是自绘的（`MainShell.kt`，非 Scaffold）。它在屏幕上占的 = 竖直内边距 × 2 + 栏高，
- * 还要再加中间星云球的凸起量；这些值**全部乘了 `uiScale`**。写死一个 dp 数在不同屏宽下必错，
- * 而错了的表现就是「最下面一行被导航栏盖住」（需求 15）。
+ * ## 底部避让为什么用「让出高度」而不是「按顶边坐标换算」
  *
- * @param navTopY 底栏顶边在根坐标系中的 y（像素）。`null` = 尚未测量完（首帧），
- *   此时先按整屏铺满，下一帧再收缩。
+ * 底部导航栏是自绘的（`MainShell.kt`，非 Scaffold）。一开始的做法是让 Shell 上报
+ * 底栏**顶边 y 坐标**，再由本页算可用高度。这条路线**连续踩了两次坑**：
+ * 1. 用 `positionInRoot` 取到的是 padding 之内的内容区，比真实顶边低了内边距，
+ *    少让出空间 → 最后一行被导航栏压住（维护者在真机上看到的正是这个）；
+ * 2. 改用 `boundsInRoot` 后含了 padding，但换算时又叠加了状态栏高度，
+ *    变成多让出 → 底部空出一大块。
+ *
+ * 根因是「顶边坐标 + padding + 内容偏移」三者在不同坐标系里叠加，很容易错一次。
+ * 现在改为让 Shell 直接上报**底栏节点自身的高度**（[navOccupiedPx]），
+ * 本页只需让出这个高度，**不做任何坐标换算**，从结构上消除这类错误。
+ *
+ * @param navOccupiedPx 底栏占位高度（像素）。`null` = 首帧尚未测量完，
+ *   此时先按「无底栏」铺满，下一帧马上修正（不会闪出明显错误，因为通常在首帧内测完）。
  */
 @Composable
 fun TimetableScreen(
-    navTopY: Float?,
+    navOccupiedPx: Float?,
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -52,11 +59,21 @@ fun TimetableScreen(
         // 不扣掉状态栏高度的话，顶部内容会被状态栏文字压住（实测表头 y=0..56 重叠）。
         val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-        // 可用高度 = 底栏顶边 - 上段（状态栏 + 呼吸位）- 下段呼吸位。
-        // 全部换算成同一坐标系（px）再折回 Dp，换设备 / 换 uiScale 自动正确。
-        val bottomBreath = with(density) { (BOTTOM_BREATH * uiScale).toPx() }
-        val availableHeight: Dp = if (navTopY != null && navTopY > 0f) {
-            with(density) { (navTopY - bottomBreath).coerceAtLeast(0f).toDp() }
+        val bottomOccupied: Dp = if (navOccupiedPx != null && navOccupiedPx > 0f) {
+            with(density) { navOccupiedPx.toDp() }
+        } else {
+            0.dp
+        }
+
+        // 表格占用「屏幕高 - 状态栏 - 底栏占位 - 底部呼吸位」。
+        // 末项是视觉留白，避免最后一行贴着导航栏。
+        val breathPx = with(density) { (BOTTOM_BREATH * uiScale).toPx() }
+        val gridHeight: Dp = if (navOccupiedPx != null && navOccupiedPx > 0f) {
+            with(density) {
+                (constraints.maxHeight.toFloat() - statusBarPadding.toPx() - navOccupiedPx - breathPx)
+                    .coerceAtLeast(0f)
+                    .toDp()
+            }
         } else {
             (maxHeight - statusBarPadding).coerceAtLeast(0.dp)
         }
@@ -66,7 +83,7 @@ fun TimetableScreen(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .padding(top = statusBarPadding)
-                .height(availableHeight),
+                .height(gridHeight),
         ) {
             TimetableGrid(
                 uiScale = uiScale,
@@ -77,8 +94,10 @@ fun TimetableScreen(
 }
 
 /**
- * 布局底部与导航栏之间额外让出的呼吸位（维护者第 3 条）。
- * 维护者看完首版后要求「再多 0.5」，故由 14dp 提到 21dp（+50%）：
- * 实测第 10 行下沿与导航栏之间原为 123px，视觉上偏贴。
+ * 表格最底部与导航栏之间额外留出的呼吸位（视觉留白，不参与避让计算）。
+ *
+ * 维护者要求「多一点间隙」，由 10dp 提到 20dp（翻倍）。
+ * 这个值只影响观感：避让本身由 [navOccupiedPx] 保证，所以调大它不会重新引发遮挡，
+ * 只会在窄屏上略微压缩每行高度。
  */
-private val BOTTOM_BREATH = 21.dp
+private val BOTTOM_BREATH = 20.dp

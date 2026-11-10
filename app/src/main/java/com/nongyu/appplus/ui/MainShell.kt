@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -200,14 +199,16 @@ fun MainShell() {
         val iconSize = s(30.dp)
         val labelSize = (8f * uiScale).sp
 
-        // 底栏顶边的实测位置（根坐标系像素），交给内容页做底部避让（需求 15）。
-        // 必须实测：底栏高度、内边距、球体凸起都乘了 uiScale，写死 dp 会随屏宽漂移。
-        var navTopY by remember { mutableStateOf<Float?>(null) }
+        // 底栏占位高度（像素）：内容区底部必须让出的量（需求 15）。
+        // 必须实测：底栏高度与内边距都乘了 uiScale，写死 dp 会随屏宽漂移。
+        // 取的是**底栏节点自身高度**（含竖直 padding 的外框），不是顶边坐标 ——
+        // 顶边还要再做坐标系换算，历史上两次都算错（一次少让出被遮、一次多让出留白过大）。
+        var navOccupiedHeight by remember { mutableStateOf<Float?>(null) }
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
             if (selectedTab == 1) {
-                com.nongyu.appplus.ui.timetable.TimetableScreen(navTopY = navTopY)
+                com.nongyu.appplus.ui.timetable.TimetableScreen(navOccupiedPx = navOccupiedHeight)
             }
         }
 
@@ -223,11 +224,17 @@ fun MainShell() {
                 .featheredEdge(colors.navBar.colorItem, navCorner)
                 .clip(RoundedCornerShape(navCorner))
                 .background(colors.navBar.colorContainer)
-                // 上报栏体顶边：注意本 Row 自身已含竖直 padding，
-                // 取其顶层（含 padding 的外框）才能把导航栏占位一起让出去。
+                // 上报底栏占位（供内容页做底部避让）。
+                //
+                // 为什么不再上报「顶边 y 坐标」：
+                // 之前用 positionInRoot / boundsInRoot 取顶边，再在内容页里做坐标换算，
+                // 两次都出现了偏差（一次少让出、一次多让出），因为 padding 与子树坐标
+                // 叠加后极易算错，且不同机型表现不一致。
+                // 改为直接上报**底栏自身在外层 Box 中的高度**：
+                // 它就是「内容区底部必须让出的像素数」，无需任何坐标换算。
                 .onGloballyPositioned { coords ->
-                    val top = coords.positionInRoot().y
-                    if (top > 0f && top != navTopY) navTopY = top
+                    val h = coords.size.height.toFloat()
+                    if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {

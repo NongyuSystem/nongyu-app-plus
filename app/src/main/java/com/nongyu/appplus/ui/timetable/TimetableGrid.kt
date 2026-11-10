@@ -305,57 +305,67 @@ fun TimetableGrid(
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            // 三行"各占一份等高槽位"：这是让上下留白对称的关键。
+                            // 三行「各占一份等高槽位」：让上下留白对称。
                             //
                             // 为什么不用 Arrangement.Center / spacedBy：
                             // Text 的布局盒高由字号与字体度量决定，三行字号不同
                             // （6.5 / 11 / 6.5sp），实测节次号盒高 33px、时间行 19px。
                             // 自然堆叠时盒子内部的间隔是「首行→节次号 22px、节次号→末行 3px」，
-                            // 看上去就是上松下紧、与盒子边缘的距离不相等。
-                            // 用 weight 均分后每行独占一份高度，三行间距由布局确定，不再受字体度量影响。
+                            // 看上去上松下紧、与盒子边缘距离不相等。
+                            //
+                            // 为什么用外层 Box 承担 weight（而不是直接给 Text）：
+                            // weight 会把 Text 自身撑到槽高，而 Text 内部字形是**顶部对齐**，
+                            // 于是文字贴着槽底显示（维护者在真机上看到的就是这个）。
+                            // 把 weight 交给 Box、Box 用 contentAlignment 居中，字形才会真的居中。
                         ) {
-                            Text(
-                                text = startTime,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
-                                fontSize = (6.5f * uiScale).sp,
-                                lineHeight = (7.5f * uiScale).sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                textAlign = TextAlign.Center,
-                                style = timeTextStyle,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .wrapContentHeight(Alignment.CenterVertically),
-                            )
-                            Text(
-                                text = period.toString(),
-                                color = colors.surface.colorText,
-                                fontSize = (11f * uiScale).sp,
-                                lineHeight = (11f * uiScale).sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                textAlign = TextAlign.Center,
-                                style = timeTextStyle,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .wrapContentHeight(Alignment.CenterVertically),
-                            )
-                            Text(
-                                text = endTime,
-                                color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
-                                fontSize = (6.5f * uiScale).sp,
-                                lineHeight = (7.5f * uiScale).sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                textAlign = TextAlign.Center,
-                                style = timeTextStyle,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .wrapContentHeight(Alignment.CenterVertically),
-                            )
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = startTime,
+                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
+                                    fontSize = (6.5f * uiScale).sp,
+                                    lineHeight = (7.5f * uiScale).sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center,
+                                    style = timeTextStyle,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = period.toString(),
+                                    color = colors.surface.colorText,
+                                    fontSize = (11f * uiScale).sp,
+                                    lineHeight = (11f * uiScale).sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center,
+                                    style = timeTextStyle,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = endTime,
+                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.80f),
+                                    fontSize = (6.5f * uiScale).sp,
+                                    lineHeight = (7.5f * uiScale).sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center,
+                                    style = timeTextStyle,
+                                )
+                            }
                         }
                     }
 
