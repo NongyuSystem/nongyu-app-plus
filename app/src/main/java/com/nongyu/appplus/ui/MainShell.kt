@@ -185,6 +185,12 @@ fun MainShell() {
         if (detailCourse != null && !isCollapsing) isCollapsing = true
     }
 
+    // 点空白格添加的日程（#18 第 6 项）：状态放 Shell，TimetableScreen 只负责渲染。
+    // 本期内存态、不持久化（与 MOCK_COURSES 口径一致）。
+    val addedSchedules = remember {
+        androidx.compose.runtime.mutableStateListOf<com.nongyu.appplus.ui.timetable.ScheduleEntry>()
+    }
+
     // ---- 详情卡的可修改数据 ----
     val courseId = detailCourse?.id
 
@@ -275,6 +281,10 @@ fun MainShell() {
     var showLocationEdit by remember { mutableStateOf(false) }
     var showLocationNav by remember { mutableStateOf(false) }
     var showWeekEdit by remember { mutableStateOf(false) }
+    // 点空白格添加日程：(day, period, week)；非 null 即弹添加子窗体（#18 第 6 项）
+    var pendingSlot by remember {
+        mutableStateOf<Triple<Int, Int, Int>?>(null)
+    }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
@@ -440,7 +450,12 @@ fun MainShell() {
                 com.nongyu.appplus.ui.timetable.TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
                     deletedIds = deletedIds,
+                    schedules = addedSchedules,
                     onCourseClick = { detailCourse = it },
+                    onBlankSlotAdd = { day, period, week ->
+                        // 点空白格 → 记下位置，弹「添加日程」子窗体（#18 第 6 项）
+                        pendingSlot = Triple(day, period, week)
+                    },
                 )
             }
 
@@ -993,6 +1008,21 @@ fun MainShell() {
                 location = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,
                 onDismiss = { showLocationNav = false },
+            )
+        }
+
+        // 点空白格 → 添加日程子窗体（#18 第 6 项）
+        pendingSlot?.let { (day, period, week) ->
+            com.nongyu.appplus.ui.timetable.AddScheduleDialog(
+                day = day,
+                startPeriod = period,
+                week = week,
+                uiScale = uiScale,
+                onConfirm = { entry ->
+                    addedSchedules.add(entry)
+                    pendingSlot = null
+                },
+                onDismiss = { pendingSlot = null },
             )
         }
 

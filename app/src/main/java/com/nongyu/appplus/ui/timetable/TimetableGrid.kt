@@ -162,7 +162,13 @@ fun TimetableGrid(
     modifier: Modifier = Modifier,
     currentWeek: Int = 1,
     courses: List<CourseEntry> = emptyList(),
+    /** 非 null = 按天模式，只渲染这一天（0..6），该列占满课程区宽度。 */
+    onlyDay: Int? = null,
+    /** 用户新增的日程（画成与课程卡类似的卡片）。 */
+    schedules: List<ScheduleEntry> = emptyList(),
     onCourseClick: (CourseEntry) -> Unit = {},
+    /** 点空白格：(day 0..6, period 1..10)。 */
+    onBlankSlotClick: (day: Int, period: Int) -> Unit = { _, _ -> },
 ) {
     val coursesByDay = remember(courses) { courses.groupedByDay() }
     // 课程名 → 色槽：保证**同屏课程必然不同色**（撞槽自动顺延），
@@ -287,7 +293,11 @@ fun TimetableGrid(
             }
 
             // 七天：每天都独占一个圆角盒子，盒子之间用 Arrangement.spacedBy 隔开。
-            WEEKDAY_LABELS.forEachIndexed { day, label ->
+            // 表头与网格必须用**同一份**要渲染的天，否则按天模式会「表头七天、网格一天」，
+            // 列宽也对不上（实测天模式下课程卡消失、七天表头还在）。
+            val headerDays = onlyDay?.let { listOf(it) } ?: WEEKDAY_LABELS.indices.toList()
+            headerDays.forEach { day ->
+                val label = WEEKDAY_LABELS[day]
                 val isToday = day == todayIndex
                 val date = mondayOfWeek.plusDays(day.toLong())
                 Box(
@@ -417,14 +427,18 @@ fun TimetableGrid(
                         .padding(start = gap),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
-                    for (day in WEEKDAY_LABELS.indices) {
+                    // 按天模式只渲染选中那一天（该列 weight(1f) 自然占满整宽）
+                    val daysToRender = onlyDay?.let { listOf(it) } ?: WEEKDAY_LABELS.indices.toList()
+                    for (day in daysToRender) {
                         CourseDayColumn(
                             courses = coursesByDay[day],
                             uiScale = uiScale,
                             gapOf = { gapAfter(it) },
                             gap = gap,
                             cardCorner = cellCorner,
+                            schedules = schedules.filter { it.day == day },
                             onCourseClick = onCourseClick,
+                            onBlankSlotClick = { period -> onBlankSlotClick(day, period) },
                             slotOf = { name ->
                                 hueSlots[name] ?: CoursePalette.preferredSlot(name)
                             },
@@ -516,7 +530,11 @@ private fun CourseDayColumn(
     gap: Dp,
     cardCorner: Dp,
     slotOf: (String) -> Int,
+    /** 该天用户新增的日程（画成与课程卡类似的卡片）。 */
+    schedules: List<ScheduleEntry> = emptyList(),
     onCourseClick: (CourseEntry) -> Unit = {},
+    /** 点空白槽位：(period 1..10)。是否真的空白由本列判断后被占据的节次过滤。 */
+    onBlankSlotClick: (period: Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -527,6 +545,16 @@ private fun CourseDayColumn(
     var layoutVersion by remember { mutableIntStateOf(0) }
 
     Box(modifier = modifier) {
+        // 哪些节次已经被课程/日程占据：只有**真空位**才响应「点击添加」，
+        // 否则点课程卡片会同时触发添加（课程卡的 clickable 声明更靠后，
+        // 但这里先从数据层挡掉，行为更确定）。
+        val occupiedPeriods = remember(courses, schedules) {
+            buildSet {
+                courses.forEach { c -> (c.startPeriod..c.endPeriod).forEach { add(it) } }
+                schedules.forEach { s -> (s.startPeriod..s.endPeriod).forEach { add(it) } }
+            }
+        }
+
         // ---- 骨架：与左侧时间列逐行一一对应 ----
         Column(modifier = Modifier.fillMaxSize()) {
             for (period in 1..PERIOD_COUNT) {
@@ -534,6 +562,13 @@ private fun CourseDayColumn(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
+                        .then(
+                            if (period !in occupiedPeriods) {
+                                Modifier.clickable { onBlankSlotClick(period) }
+                            } else {
+                                Modifier
+                            },
+                        )
                         .onGloballyPositioned { coords ->
                             val b = coords.boundsInParent()
                             slotTops[period] = b.top
@@ -568,6 +603,70 @@ private fun CourseDayColumn(
                             .offset(y = with(LocalDensity.current) { top.toDp() }),
                     )
                 }
+            }
+            // 用户新增的日程：与课程卡同一套定位，样式近似但用虚线感底色区分
+            schedules.forEach { sc ->
+                val top = slotTops[sc.startPeriod]
+                val bottom = slotBottoms[sc.endPeriod]
+                if (bottom > top) {
+                    ScheduleCard(
+                        entry = sc,
+                        uiScale = uiScale,
+                        corner = cardCorner,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(LocalDensity.current) { (bottom - top).toDp() })
+                            .offset(y = with(LocalDensity.current) { top.toDp() }),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 用户新增的日程卡片：与课程卡同一套尺寸/圆角/居中排版，
+ * 但底色用「品牌淡底 + 描边」以示区别（不是从教务来的课）。
+ */
+@Composable
+private fun ScheduleCard(
+    entry: ScheduleEntry,
+    uiScale: Float,
+    corner: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val colors = NongyuTheme.colors
+    val bg = colors.brand.colorBrandMuted.copy(alpha = 0.75f)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(corner))
+            .background(bg)
+            .padding(horizontal = (4f * uiScale).dp, vertical = (3f * uiScale).dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = entry.title,
+                color = colors.brand.colorBrand,
+                fontSize = (8.5f * uiScale).sp,
+                lineHeight = (10f * uiScale).sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+            )
+            if (entry.location.isNotBlank()) {
+                Text(
+                    text = entry.location,
+                    color = colors.brand.colorBrand.copy(alpha = 0.85f),
+                    fontSize = (6.5f * uiScale).sp,
+                    lineHeight = (8f * uiScale).sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }

@@ -1,29 +1,56 @@
 package com.nongyu.appplus.ui.timetable
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import java.time.LocalDate
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.ui.theme.NongyuTheme
+import java.time.LocalDate
 
 /**
- * 课表页容器（票 #15）。
+ * 课表页容器（票 #15 建、#18 补齐交互）。
  *
- * 职责三件：算 `uiScale`、让出底部导航栏的占位、把布局铺满剩下的可视区。
+ * 职责：算 `uiScale`、让出底部导航栏占位、承载切周/切天/滑动/添加日程这些交互状态。
  *
  * ## 底部避让为什么用「让出高度」而不是「按顶边坐标换算」
  *
@@ -48,30 +75,21 @@ fun TimetableScreen(
     /** 已删除的课程 id 集合：贯穿切周链路过滤，避免切周后「复活」。 */
     deletedIds: Set<String> = emptySet(),
     onCourseClick: (CourseEntry) -> Unit = {},
+    /** 用户新增的日程（状态提升到 Shell，本页只渲染）。 */
+    schedules: List<ScheduleEntry> = emptyList(),
+    /** 点空白格：回调 (星期索引 0..6, 节次 1..10, 当前周)，由 Shell 弹添加日程子窗体。 */
+    onBlankSlotAdd: (day: Int, period: Int, week: Int) -> Unit = { _, _, _ -> },
 ) {
     val colors = NongyuTheme.colors
+    val density = LocalDensity.current
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(colors.surface.colorBackground),
     ) {
-        // 与 MainShell 完全同一套：以 411dp 为基准，夹在 0.85~1.25。
         val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
-        val density = LocalDensity.current
-
-        // 状态栏避让：MainActivity 开了 enableEdgeToEdge，内容顶到屏幕最上沿，
-        // 不扣掉状态栏高度的话，顶部内容会被状态栏文字压住（实测表头 y=0..56 重叠）。
         val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-
-        val bottomOccupied: Dp = if (navOccupiedPx != null && navOccupiedPx > 0f) {
-            with(density) { navOccupiedPx.toDp() }
-        } else {
-            0.dp
-        }
-
-        // 表格占用「屏幕高 - 状态栏 - 底栏占位 - 底部呼吸位」。
-        // 末项是视觉留白，避免最后一行贴着导航栏。
         val breathPx = with(density) { (BOTTOM_BREATH * uiScale).toPx() }
         val gridHeight: Dp = if (navOccupiedPx != null && navOccupiedPx > 0f) {
             with(density) {
@@ -83,6 +101,25 @@ fun TimetableScreen(
             (maxHeight - statusBarPadding).coerceAtLeast(0.dp)
         }
 
+        // ---- 切周 / 切天 状态（#18）----
+        val today = remember { LocalDate.now() }
+        val thisWeek = remember(today) { weekOfTerm(today) }
+        var currentWeek by remember { mutableStateOf(thisWeek) }
+        // true = 按天模式（一天占满宽）
+        var dayMode by remember { mutableStateOf(false) }
+        var currentDay by remember { mutableStateOf(today.dayOfWeek.value - 1) }
+
+        val weekCourses = remember(currentWeek, deletedIds) {
+            MOCK_COURSES
+                .filter { it.id !in deletedIds }
+                .coursesInWeek(currentWeek)
+                .mergeAdjacent()
+        }
+
+        // ---- 左右滑动切周/切天（阈值 60px）----
+        var dragAccum by remember { mutableStateOf(0f) }
+        val swipeThresholdPx = with(density) { 60.dp.toPx() }
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -90,27 +127,197 @@ fun TimetableScreen(
                 .padding(top = statusBarPadding)
                 .height(gridHeight),
         ) {
-            // 切周链路（票 #12 第 3/5/6 条）：
-            //   今天 → 学期第几周 → 按周过滤 → 合并连堂 → 按天分组渲染。
-            //
-            // 每个环节都是纯函数、各自有单测，所以这里只做组装，不写逻辑。
-            // 学期首日目前是 mock 常量，将来从教务/设置注入时只需换这一处入参。
-            val today = remember { LocalDate.now() }
-            val currentWeek = remember(today) { weekOfTerm(today) }
-            val weekCourses = remember(currentWeek, deletedIds) {
-                MOCK_COURSES
-                    .filter { it.id !in deletedIds }
-                    .coursesInWeek(currentWeek)
-                    .mergeAdjacent()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(dayMode) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragAccum = 0f },
+                            onDragEnd = {
+                                when {
+                                    dragAccum <= -swipeThresholdPx -> {
+                                        // 左滑：下一周 / 下一天，夹在合法范围内
+                                        if (dayMode) currentDay = (currentDay + 1) % 7
+                                        else currentWeek = (currentWeek + 1).coerceAtMost(TOTAL_WEEKS)
+                                    }
+                                    dragAccum >= swipeThresholdPx -> {
+                                        if (dayMode) currentDay = (currentDay + 6) % 7
+                                        else currentWeek = (currentWeek - 1).coerceAtLeast(1)
+                                    }
+                                }
+                                dragAccum = 0f
+                            },
+                            onHorizontalDrag = { _, dx -> dragAccum += dx },
+                        )
+                    },
+            ) {
+                // 切周/切天用方向滑动过渡，让「翻页」有方向感
+                AnimatedContent(
+                    targetState = currentWeek to (if (dayMode) currentDay else -1),
+                    transitionSpec = {
+                        val forward = targetState.first > initialState.first ||
+                            (targetState.first == initialState.first && targetState.second > initialState.second)
+                        if (forward) {
+                            (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
+                                .togetherWith(slideOutHorizontally(tween(220)) { -it } + fadeOut(tween(160)))
+                        } else {
+                            (slideInHorizontally(tween(220)) { -it } + fadeIn(tween(220)))
+                                .togetherWith(slideOutHorizontally(tween(220)) { it } + fadeOut(tween(160)))
+                        }
+                    },
+                    label = "weekPage",
+                ) { (week, day) ->
+                    TimetableGrid(
+                        uiScale = uiScale,
+                        currentWeek = week,
+                        courses = weekCourses,
+                        // 按天模式只渲染那一天；-1 表示按周（七天全显）
+                        onlyDay = if (day >= 0) day else null,
+                        schedules = schedules,
+                        onCourseClick = onCourseClick,
+                        onBlankSlotClick = { d, period ->
+                            // 点空白：记下 (星期, 节次)，由 Shell 弹添加日程子窗体
+                            onBlankSlotAdd(d, period, week)
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
-            TimetableGrid(
-                uiScale = uiScale,
-                currentWeek = currentWeek,
-                courses = weekCourses,
-                onCourseClick = onCourseClick,
-                modifier = Modifier.fillMaxSize(),
+            // ---- 顶部右侧控制区：周/天切换 + 回到本周 ----
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = s(uiScale, 6.dp), end = s(uiScale, 12.dp)),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 周/天 切换胶囊
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(s(uiScale, 12.dp)))
+                        .background(colors.surface.colorCard.copy(alpha = 0.9f))
+                        .padding(s(uiScale, 2.dp)),
+                ) {
+                    ModeChip("周", !dayMode, uiScale) { dayMode = false }
+                    ModeChip("天", dayMode, uiScale) { dayMode = true }
+                }
+            }
+
+            // ---- 非本周/非今日时的「回到本周」按钮（#16 决策：右侧贴边半圆）----
+            val showBack = if (dayMode) {
+                currentWeek != thisWeek || currentDay != (today.dayOfWeek.value - 1)
+            } else {
+                currentWeek != thisWeek
+            }
+            if (showBack) {
+                // 必须在外层 Box 上做 align：Modifier.align 是 BoxScope 的扩展，
+                // 传进自定义 Composable 内部再应用会失效（实测按钮完全不显示）。
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = s(uiScale, 96.dp)),
+                ) {
+                    BackToWeekFab(
+                        uiScale = uiScale,
+                        onClick = {
+                            currentWeek = thisWeek
+                            currentDay = today.dayOfWeek.value - 1
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 60dp 阈值等常量用 uiScale 缩放后的 Dp。 */
+private fun s(uiScale: Float, dp: Dp): Dp = (dp.value * uiScale).dp
+
+/** 「周 / 天」切换的一个胶囊。 */
+@Composable
+private fun ModeChip(label: String, active: Boolean, uiScale: Float, onClick: () -> Unit) {
+    val colors = NongyuTheme.colors
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape((10f * uiScale).dp))
+            .background(if (active) colors.brand.colorBrand else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = (10f * uiScale).dp, vertical = (4f * uiScale).dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (active) colors.brand.colorOnBrand else colors.surface.colorTextSecondary,
+            fontSize = (8.5f * uiScale).sp,
+            lineHeight = (11f * uiScale).sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * 「回到本周/今天」按钮（票 #16 决策实现）：
+ * 右侧贴边半圆（right:0、48×40、仅左侧圆角 20）、自绘箭头、淡入 160ms。
+ *
+ * 淡入用 graphicsLayer.alpha 由 0 动画到 1，**不用内嵌 AnimatedVisibility**：
+ * 该组件本身就是「条件为真才组合」的，内嵌 visible 初值 false 再置 true
+ * 在父级同帧重组时可能不触发（实测按钮不出现）。
+ */
+@Composable
+private fun BackToWeekFab(
+    uiScale: Float,
+    onClick: () -> Unit,
+) {
+    val colors = NongyuTheme.colors
+    // 用 animateFloatAsState 而不是 Animatable + LaunchedEffect：
+    // 后者在父级频繁重组时可能被反复重启，导致透明度一直停在 0（实测按钮画出来了但全透明）。
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(160),
+        label = "backFabAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .width((48f * uiScale).dp)
+            .height((40f * uiScale).dp)
+            // 淡入用 graphicsLayer 且**放在 background 之前**：
+            // Modifier.alpha 只影响它之后绘制的内容，若写在 background 之后
+            // 会连底色一起透明；若 alpha 值恰为 0 则整个按钮看不见（实测踩到）。
+            .graphicsLayer { this.alpha = alpha }
+            // 只裁左侧圆角：贴右边，右边缘与屏幕齐平
+            .clip(
+                RoundedCornerShape(
+                    topStart = (20f * uiScale).dp,
+                    bottomStart = (20f * uiScale).dp,
+                    topEnd = 0.dp,
+                    bottomEnd = 0.dp,
+                ),
             )
+            .background(colors.brand.colorBrand)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier.size((18f * uiScale).dp),
+        ) {
+            // 自绘箭头（向上）：零依赖，不引图标库
+            val w = size.width
+            val h = size.height
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = (2.2f * uiScale).dp.toPx(),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, h * 0.82f)
+                lineTo(w * 0.5f, h * 0.20f)
+                moveTo(w * 0.20f, h * 0.48f)
+                lineTo(w * 0.5f, h * 0.18f)
+                lineTo(w * 0.80f, h * 0.48f)
+            }
+            drawPath(path, color = colors.brand.colorOnBrand, style = stroke)
         }
     }
 }
