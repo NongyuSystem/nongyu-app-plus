@@ -1,8 +1,5 @@
 package com.nongyu.appplus.ui.timetable
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -60,6 +58,10 @@ fun CourseDetailContent(
     uiScale: Float,
     onDismiss: () -> Unit,
     fullStage: Boolean,
+    /** 高度进度 0..1：0 = 简介态，1 = 详情态满高。内容分帧动画据此驱动。 */
+    expandProgress: Float,
+    /** 是否正在收拢退出：此时两种形态都应淡出，不让胶囊重新浮现。 */
+    collapsing: Boolean = false,
     onHandleDrag: (deltaDp: Float) -> Unit,
     onHandleDragEnd: () -> Unit,
     /** 地点覆盖值（已解析后的显示值）。 */
@@ -140,24 +142,52 @@ fun CourseDetailContent(
         )
         Spacer(Modifier.height(s(8.dp)))
 
-        // ---- 简介态：横向三个胶囊标签 ----
-        AnimatedVisibility(visible = !fullStage, enter = fadeIn(), exit = fadeOut()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(s(6.dp)),
-                verticalAlignment = Alignment.CenterVertically,
+        // ---- 形态切换：全部由 expandProgress 驱动（跟随高度的弹簧动画逐帧变化）----
+        //
+        // 为什么不用 AnimatedVisibility：那是一次性的淡入淡出，与高度的 spring
+        // 不同步，视觉上「高度在动、内容啪一下换掉」。这里让内容的位置/透明度
+        // 直接由高度进度算出来，做到「根据高度位置做动画帧」（维护者要求）。
+        //
+        // - briefProgress  = 1 - expand：简介态胶囊随展开淡出并轻微上移
+        // - detailProgress = expand：详情态 K-V 从下方滑入
+        // 两者在同一坐标系里交叉，读起来像「三个胶囊移动、摊开成左键右值」。
+        // 收拢退出时高度降到 navHeight，expandProgress 会被 coerce 到 0，
+        // 若不处理，胶囊会「重新浮现」一下再消失。这里统一乘一个退出淡出系数。
+        val exitFade = if (collapsing) 0f else 1f
+        val briefProgress = ((1f - expandProgress) * exitFade).coerceIn(0f, 1f)
+        val detailProgress = (expandProgress * exitFade).coerceIn(0f, 1f)
+
+        if (briefProgress > 0.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = briefProgress
+                        translationY = -(1f - briefProgress) * 12f * density.density
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                BriefChip(location, uiScale)
-                BriefChip(course.teacher, uiScale)
-                BriefChip(weeksLabel(course), uiScale)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(s(6.dp)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BriefChip(location, uiScale)
+                    BriefChip(course.teacher, uiScale)
+                    BriefChip(weeksLabel(course), uiScale)
+                }
             }
         }
 
-        // ---- 详情态：左键右值 + 考勤 + 评论 + 备注 ----
-        AnimatedVisibility(visible = fullStage, enter = fadeIn(), exit = fadeOut()) {
+        if (detailProgress > 0.01f) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .graphicsLayer {
+                        alpha = detailProgress
+                        // 从盒子底部滑入（局部位移，不是全屏）
+                        translationY = (1f - detailProgress) * 28f * density.density
+                    },
             ) {
                 KeyValueRow("地点", location, uiScale, onClick = onLocationEdit) {
                     LocationNavButton(uiScale, onLocationNav)
@@ -175,19 +205,50 @@ fun CourseDetailContent(
                 Spacer(Modifier.height(s(8.dp)))
                 SectionDivider(uiScale)
                 Spacer(Modifier.height(s(6.dp)))
-                AttendanceSection(course, attendance, onAttendanceToggle, uiScale)
+                StagedSlideIn(progress = expandProgress, threshold = 0.30f, density = density) {
+                    AttendanceSection(course, attendance, onAttendanceToggle, uiScale)
+                }
 
                 Spacer(Modifier.height(s(8.dp)))
                 SectionDivider(uiScale)
                 Spacer(Modifier.height(s(6.dp)))
-                CommentSection(comments, onCommentAdd, onCommentRemove, uiScale)
+                StagedSlideIn(progress = expandProgress, threshold = 0.52f, density = density) {
+                    CommentSection(comments, onCommentAdd, onCommentRemove, uiScale)
+                }
 
                 Spacer(Modifier.height(s(8.dp)))
                 SectionDivider(uiScale)
                 Spacer(Modifier.height(s(6.dp)))
-                NoteSection(note, onNoteChange, uiScale)
+                StagedSlideIn(progress = expandProgress, threshold = 0.74f, density = density) {
+                    NoteSection(note, onNoteChange, uiScale)
+                }
             }
         }
+    }
+}
+
+/**
+ * 按「高度位置」错峰滑出：卡片越往下长，越靠下的分区才依次从**盒子底部**滑入。
+ *
+ * 不是全屏滑入，而是每个分区各自一段短位移（24dp）＋淡入。
+ * [threshold] 是该分区开始出现所需的展开进度；进度从 threshold 到 1 线性完成。
+ */
+@Composable
+private fun StagedSlideIn(
+    progress: Float,
+    threshold: Float,
+    density: androidx.compose.ui.unit.Density,
+    content: @Composable () -> Unit,
+) {
+    val local = ((progress - threshold) / (1f - threshold)).coerceIn(0f, 1f)
+    if (local <= 0f) return
+    Box(
+        modifier = Modifier.graphicsLayer {
+            alpha = local
+            translationY = (1f - local) * 24f * density.density
+        },
+    ) {
+        content()
     }
 }
 

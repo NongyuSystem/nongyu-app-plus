@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -51,11 +52,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -155,12 +156,25 @@ fun MainShell() {
     var detailStage by remember { mutableStateOf(DetailStage.Brief) }
     // 拖拽中的实时高度偏移（dp，正值=往上拉高）。松手后清零，由动画接管。
     var detailDragDp by remember { mutableStateOf(0f) }
+    // 是否正在拖拽。**独立于 detailDragDp**：拖拽结束时两者在同一次重组里都变，
+    // 若用 `detailDragDp != 0f` 当动画开关，松手那帧取到的仍是拖拽期状态，
+    // 导致吸附动画被 tween(0) 吞掉 —— 这就是「上划/下降没有动画」的根因。
+    var isDragging by remember { mutableStateOf(false) }
+    // 退出时先收拢高度、再切内容；为 true 期间卡片仍在但目标高度降到 navHeight。
+    var isCollapsing by remember { mutableStateOf(false) }
     // 打开课程时复位到简介态
     LaunchedEffect(detailCourse?.id) {
         if (detailCourse != null) {
             detailStage = DetailStage.Brief
             detailDragDp = 0f
+            isDragging = false
+            isCollapsing = false
         }
+    }
+
+    /** 统一的退出：先收拢高度，动画走完再切内容。点空白、拖到底、返回都走它。 */
+    fun collapseDetail() {
+        if (detailCourse != null && !isCollapsing) isCollapsing = true
     }
 
     // ---- 详情卡的可修改数据（方案已批准）----
@@ -265,18 +279,13 @@ fun MainShell() {
         }
     }
 
-    // 长按态用于压暗**底栏自身**的强度（与全屏 dim 分开：全屏那层压不到底栏）。
-    val longPressDim by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
-        animationSpec = tween(300),
-        label = "longPressDim",
-    )
-
     // 全屏 dim —— **只在长按态（Listening）出现**。
     //
     // 输入态（Input）不再整屏压暗：输入栏本身就在底栏里，
     // 整屏压暗会把输入栏一起压灰（历史上输入栏浮在上层所以没暴露）。
-    // 输入态需要的是「底栏可见 + 背后课表变暗」，后者由下面的 dim 单独一层负责。
+    // 输入态需要的是「底栏可见 + 背后课表变暗」，后者由下面的 inputScrim 单独一层负责。
+    // 只保留这一层：曾经在底栏内部用 drawWithContent 又补过一层 longPressDim，
+    // 两层叠加导致过暗（维护者一直要求删掉，本次删除）。
     val dimAlpha by animateFloatAsState(
         targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
         animationSpec = tween(300),
@@ -391,7 +400,7 @@ fun MainShell() {
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
-                        ) { detailCourse = null },
+                        ) { collapseDetail() },
                 )
             }
 
@@ -469,36 +478,76 @@ fun MainShell() {
         val orbDissolveAlpha = 1f - dissolve.value
         val orbDissolveScale = 1f + dissolve.value * 0.55f
 
-        // 详情卡两个形态的高度（维护者拍板：简介 128dp / 详情 260dp）。
+        // 详情卡两个形态的高度：简介 128dp / 详情 340dp（340 才装得下全部内容）。
         val briefHeight = s(128.dp)
-        // 详情态要装下：课名/时间 + 3 行信息 + 考勤 + 评论列表(可增删) + 备注多行输入。
-        // 260dp 实测会把备注整块裁掉（评论也只露一半），340dp 才够。
-        // 内容区另加 verticalScroll，避免将来评论变多又被裁。
         val fullHeight = s(340.dp)
         val detailHeight = when (detailStage) {
             DetailStage.Brief -> briefHeight
             DetailStage.Full -> fullHeight
         }
-        // 拖拽时把实时偏移叠加到目标高度上（往下拖 = 负值 = 变矮）。
-        // 下限 navHeight：拖到底就不再变矮，松手时判定为退出。
         val draggedDetailHeight = (detailHeight + detailDragDp.dp).coerceAtLeast(navHeight)
-        val barHeight by animateDpAsState(
-            targetValue = when (barMode) {
-                BarMode.Detail -> draggedDetailHeight
-                BarMode.Input -> navHeight
-                BarMode.Normal -> navHeight
-            },
-            // 拖拽中不要动画（否则跟手延迟），只在吸附/切换形态时动画
-            animationSpec = tween(if (detailDragDp == 0f) 300 else 0),
-            label = "barHeight",
-        )
+
+        // ---- 高度 / 圆角：全部由 Animatable + spring 驱动 ----
+        //
+        // 为什么不用 animateDpAsState：它每帧读一次 animationSpec，
+        // 拖拽期用 tween(0) 跟手、松手那帧若 spec 仍是 0 就会瞬间跳变，
+        // 表现为「上划/下降没有动画」。改用显式 Animatable：
+        //   - 拖拽中：snapTo（零延迟，纯跟手）
+        //   - 吸附 / 打开 / 退出收拢：animateTo(spring)（有弹性过渡）
+        // 两者路径完全分开，不会互相吞掉。
+        val density = LocalDensity.current
+        val targetPx = with(density) {
+            when {
+                isCollapsing || barMode != BarMode.Detail -> navHeight.toPx()
+                else -> draggedDetailHeight.toPx()
+            }
+        }
+        val barHeightPx = remember { Animatable(with(density) { navHeight.toPx() }) }
+        // key 必须包含 detailStage：上划吸附到 Full 时 barMode 仍是 Detail、
+        // isCollapsing 仍是 false，若只盯这两个 key，effect 不会重跑，
+        // 高度就停在简介态 —— 这正是「上划/下降没有动画」的另一半根因。
+        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging) {
+            // 形态切换 / 吸附 / 开始退出：走弹簧动画（拖拽中除外）
+            if (!isDragging) {
+                barHeightPx.animateTo(
+                    targetValue = targetPx,
+                    animationSpec = spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessLow,
+                    ),
+                )
+                if (isCollapsing) {
+                    // 收拢动画走完才真正切回常态内容
+                    detailCourse = null
+                    isCollapsing = false
+                }
+            }
+        }
+        LaunchedEffect(targetPx, isDragging) {
+            if (isDragging) barHeightPx.snapTo(targetPx)   // 拖拽中跟手，不动画
+        }
+        val barHeight = with(density) { barHeightPx.value.toDp() }
+
+        // 形态进度 0..1：**在 briefHeight -> fullHeight 这段归一化**。
+        // 用 navHeight 做分母会让简介态就有约 0.24 的进度，
+        // 导致胶囊半透明、K-V 提前浮现（两种形态糊在一起）。
+        // 这里让简介态 = 0（胶囊满、K-V 无），详情态 = 1（胶囊无、K-V 满）。
+        val expandProgress = with(density) {
+            val briefPx = briefHeight.toPx()
+            val fullPx = fullHeight.toPx()
+            ((barHeightPx.value - briefPx) / (fullPx - briefPx)).coerceIn(0f, 1f)
+        }
+
         val barCorner by animateDpAsState(
             targetValue = when (barMode) {
                 BarMode.Detail -> s(26.dp)
                 BarMode.Input -> navCorner
                 BarMode.Normal -> navCorner
             },
-            animationSpec = tween(340),
+            animationSpec = spring(
+                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+            ),
             label = "barCorner",
         )
 
@@ -516,21 +565,6 @@ fun MainShell() {
                 .featheredEdge(colors.navBar.colorItem, barCorner)
                 .clip(RoundedCornerShape(barCorner))
                 .background(colors.navBar.colorContainer)
-                // 长按态把**整条底栏**一起压暗（维护者要求「长按时导航栏要变暗」）。
-                //
-                // 为什么用 drawWithContent 而不是叠一个 Box 子元素：
-                // 容器的 .background() 在子内容之前绘制，叠子元素只能盖住内容本身；
-                // 而这里要连容器底色一起压暗。drawWithContent 在**所有子内容之后**
-                // 再画一层半透明暗色，等效于给整条底栏蒙一层，且不引入额外布局节点。
-                .drawWithContent {
-                    drawContent()
-                    if (longPressDim > 0f) {
-                        drawRect(
-                            color = Color(0xFF0A140F),
-                            alpha = longPressDim,
-                        )
-                    }
-                }
                 // 上报底栏占位（供内容页做底部避让）。
                 //
                 // 为什么不再上报「顶边 y 坐标」：
@@ -572,6 +606,10 @@ fun MainShell() {
                             course = course,
                             uiScale = uiScale,
                             fullStage = detailStage == DetailStage.Full,
+                            // 高度进度 0..1，内容层据此做「胶囊 -> K-V 移动」与
+                            // 「评论/备注从盒底滑出」的分帧动画
+                            expandProgress = expandProgress,
+                            collapsing = isCollapsing,
                             otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
@@ -603,16 +641,10 @@ fun MainShell() {
                             onLocationEdit = { showLocationEdit = true },
                             onLocationNav = { showLocationNav = true },
                             onHandleDrag = { deltaDp ->
-                                // 累计拖拽位移；上不封顶（详情态之上不再拉高），
-                                // 下限由 draggedDetailHeight 的 coerceAtLeast 兜住。
+                                isDragging = true
                                 detailDragDp += deltaDp
                             },
                             onHandleDragEnd = {
-                                // 以「当前形态高度 + 累计偏移」判定吸附：
-                                // - 低于简介态一半 -> 退出（拖到底）
-                                // - 高于简介态与详情态的中点 -> 详情态
-                                // - 否则 -> 简介态
-                                // 用纯 Float 的 dp 数值比较，避开 Dp.compareTo 的泛型推断问题
                                 val briefDp = briefHeight.value
                                 val fullDp = fullHeight.value
                                 val base = when (detailStage) {
@@ -621,12 +653,18 @@ fun MainShell() {
                                 }
                                 val current = base + detailDragDp
                                 when {
-                                    current < briefDp * 0.55f -> detailCourse = null
+                                    current < briefDp * 0.55f -> {
+                                        // 拖到底：不立刻清 detailCourse，否则 AnimatedContent
+                                        // 当帧就把内容换成导航栏、收拢动画根本来不及跑。
+                                        // 改为触发「收拢」：高度先弹回 navHeight，走完再切内容。
+                                        isCollapsing = true
+                                    }
                                     current > (briefDp + fullDp) / 2f ->
                                         detailStage = DetailStage.Full
                                     else -> detailStage = DetailStage.Brief
                                 }
                                 detailDragDp = 0f
+                                isDragging = false
                             },
                             // 详情卡属于「不退出」白名单，但必须**消费掉点击**：
                             // 若这里没有任何 pointerInput，事件会穿透到内容区下方的收起层，
@@ -718,7 +756,7 @@ fun MainShell() {
             }
         }
 
-        // 长按态的全屏 dim：压暗底栏**之外**的一切（与上面那层配合）
+        // 长按态的全屏 dim：画在底栏之后，把整条导航栏也一起压暗
         if (dimAlpha > 0f) {
             Box(
                 modifier = Modifier
