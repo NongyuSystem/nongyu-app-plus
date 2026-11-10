@@ -37,9 +37,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +49,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -97,6 +101,23 @@ import com.nongyu.appplus.ui.timetable.CourseEntry
 
 private val TABS = listOf("全部", "课表", "探索", "个人")
 
+/**
+ * 第 [period] 节是否已经结束（用于考勤默认态）。
+ *
+ * 取 COURSE_TIMES 里该节的**结束时刻**，与当前系统时间比较。
+ * 纯判定、不依赖 Android/Compose，放在这里便于以后挪进数据层加单测。
+ */
+private fun isPeriodEnded(period: Int): Boolean {
+    val end = com.nongyu.appplus.ui.timetable.COURSE_TIMES
+        .getOrNull(period - 1)?.end ?: return false
+    val parts = end.split(":")
+    if (parts.size != 2) return false
+    val endMin = (parts[0].toIntOrNull() ?: return false) * 60 +
+        (parts[1].toIntOrNull() ?: return false)
+    val now = java.time.LocalTime.now()
+    return now.hour * 60 + now.minute >= endMin
+}
+
 private enum class OrbMode { Idle, Listening, Input }
 
 /**
@@ -116,6 +137,9 @@ private enum class DetailStage { Brief, Full }
 @Composable
 fun MainShell() {
     val colors = NongyuTheme.colors
+    val context = LocalContext.current
+    val courseUserStore = remember { com.nongyu.appplus.ui.timetable.CourseUserStore(context) }
+    val coroutineScope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
@@ -138,6 +162,73 @@ fun MainShell() {
             detailDragDp = 0f
         }
     }
+
+    // ---- 详情卡的可修改数据（方案已批准）----
+    // 地点覆盖 / 考勤 / 备注走 CourseUserStore（本地持久层）；
+    // 评论走 CourseComments 的 mock 后端。
+    val courseId = detailCourse?.id
+    // 地点覆盖：Flow 用 remember 固定，避免每次重组都新建 Flow 导致订阅抖动。
+    val locationFlow = remember(courseId) {
+        if (courseId != null) {
+            courseUserStore.locationOverride(
+                courseId,
+                com.nongyu.appplus.ui.timetable.LocationScope.Once,
+            )
+        } else null
+    }
+    val locationOverride by (locationFlow ?: kotlinx.coroutines.flow.flowOf(null))
+        .collectAsState(initial = null)
+
+    // 备注：**不用 collectAsState 直接喂给 TextField**。
+    // 那样每次输入都要等 DataStore 回读，写入与回读会打架（实测重启后丢值）。
+    // 正确做法：本地 mutableState 做 UI 真源，打开卡片时从持久层读一次，
+    // 之后每次改动既更新本地、又异步落盘。
+    var noteText by remember(courseId) { mutableStateOf("") }
+    // true = 初始化读取已完成，之后的改动才允许落盘（避免把空串覆盖掉已存的值）。
+    var noteReady by remember(courseId) { mutableStateOf(false) }
+    LaunchedEffect(courseId) {
+        if (courseId != null) {
+            noteText = courseUserStore.noteOnce(courseId)
+            noteReady = true
+        } else {
+            noteText = ""
+            noteReady = false
+        }
+    }
+    // 输入停止 250ms 后统一落盘：既不会每个字符都起一个写协程（竞态），
+    // 也不会因为 Flow 回读把输入框内容拉回去。
+    LaunchedEffect(noteText, courseId, noteReady) {
+        if (noteReady && courseId != null) {
+            delay(250)
+            courseUserStore.setNote(courseId, noteText)
+        }
+    }
+
+    // 考勤：period -> 是否已考勤。默认按「课程结束时刻 < 现在」判定已考勤；
+    // 持久层里有显式记录时以记录为准（用户点过就听用户的）。
+    var attendanceOverrides by remember(courseId) {
+        mutableStateOf<Map<Int, Boolean>>(emptyMap())
+    }
+    val effectiveAttendance: Map<Int, Boolean> = remember(courseId, attendanceOverrides) {
+        val c = detailCourse
+        if (c == null) emptyMap()
+        else (c.startPeriod..c.endPeriod).associateWith { p ->
+            attendanceOverrides[p] ?: isPeriodEnded(p)
+        }
+    }
+
+    // 评论（mock 后端，进程内可增删）
+    var comments by remember(courseId) {
+        mutableStateOf(
+            if (courseId != null) {
+                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository.list(courseId)
+            } else emptyList(),
+        )
+    }
+
+    // 两个子窗体的开关
+    var showLocationEdit by remember { mutableStateOf(false) }
+    var showLocationNav by remember { mutableStateOf(false) }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
     // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
@@ -380,7 +471,10 @@ fun MainShell() {
 
         // 详情卡两个形态的高度（维护者拍板：简介 128dp / 详情 260dp）。
         val briefHeight = s(128.dp)
-        val fullHeight = s(260.dp)
+        // 详情态要装下：课名/时间 + 3 行信息 + 考勤 + 评论列表(可增删) + 备注多行输入。
+        // 260dp 实测会把备注整块裁掉（评论也只露一半），340dp 才够。
+        // 内容区另加 verticalScroll，避免将来评论变多又被裁。
+        val fullHeight = s(340.dp)
         val detailHeight = when (detailStage) {
             DetailStage.Brief -> briefHeight
             DetailStage.Full -> fullHeight
@@ -478,10 +572,36 @@ fun MainShell() {
                             course = course,
                             uiScale = uiScale,
                             fullStage = detailStage == DetailStage.Full,
-                            // 同一门课在本学期的其他时段（同课不同天/不同节次）
                             otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
+                            // 地点：显示覆盖值，没有覆盖就用原始 room
+                            location = locationOverride ?: course.room,
+                            attendance = effectiveAttendance,
+                            onAttendanceToggle = { p ->
+                                val next = !(effectiveAttendance[p] ?: false)
+                                attendanceOverrides = attendanceOverrides + (p to next)
+                                coroutineScope.launch {
+                                    courseUserStore.setAttendance(course.id, p, next)
+                                }
+                            },
+                            note = noteText,
+                            onNoteChange = { text -> noteText = text },
+                            comments = comments,
+                            onCommentAdd = { text ->
+                                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                    .add(course.id, text)
+                                comments = com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                    .list(course.id)
+                            },
+                            onCommentRemove = { i ->
+                                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                    .remove(course.id, i)
+                                comments = com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                    .list(course.id)
+                            },
+                            onLocationEdit = { showLocationEdit = true },
+                            onLocationNav = { showLocationNav = true },
                             onHandleDrag = { deltaDp ->
                                 // 累计拖拽位移；上不封顶（详情态之上不再拉高），
                                 // 下限由 draggedDetailHeight 的 coerceAtLeast 兜住。
@@ -711,6 +831,32 @@ fun MainShell() {
                 speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
                 // 激活态有全屏 dim，球边缘要消融进暗背景，不能留灰白亮边。
                 dimmed = active,
+            )
+        }
+
+        // ---- 地点修改 / 导航占位 两个子窗体 ----
+        // 放在 MainShell 根 Box 的最后：Dialog 是独立 Window，
+        // 但它读的 CourseEntry / location / uiScale 都在这里，就近接线最清楚。
+        val dlgCourse = detailCourse
+        if (showLocationEdit && dlgCourse != null) {
+            com.nongyu.appplus.ui.timetable.LocationEditDialog(
+                courseName = dlgCourse.name,
+                currentLocation = locationOverride ?: dlgCourse.room,
+                uiScale = uiScale,
+                onConfirm = { scope, newLocation ->
+                    coroutineScope.launch {
+                        courseUserStore.setLocationOverride(dlgCourse.id, scope, newLocation)
+                    }
+                },
+                onDismiss = { showLocationEdit = false },
+            )
+        }
+        if (showLocationNav && dlgCourse != null) {
+            com.nongyu.appplus.ui.timetable.LocationNavDialog(
+                courseName = dlgCourse.name,
+                location = locationOverride ?: dlgCourse.room,
+                uiScale = uiScale,
+                onDismiss = { showLocationNav = false },
             )
         }
 
