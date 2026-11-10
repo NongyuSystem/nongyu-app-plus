@@ -15,11 +15,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         // 每次打包都必须递增 versionCode / versionName，并 commit + push 到 GitHub。
-        // v38：课表「布局」第 1 步（#15）—— 重新引入课表 Tab，含节次时间列、
-        // 星期表头与大课分组节奏；无表格线、格子无底色，课程卡片留待第 2 步（#13）。
-        // versionCode 必须大于已发布的 37，否则手机无法覆盖安装。
-        versionCode = 38
-        versionName = "0.0.30test"
+        // v39：时间列三行间距修复（22px/3px -> 16px/16px）+
+        // 课表数据抽成 TimetableData 单一真源 + 消除 debug/release 重复源集。
+        // versionCode 必须大于已发布的 38，否则手机无法覆盖安装。
+        versionCode = 39
+        versionName = "0.0.31test"
 
         // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
         // 默认空串：设了才有值，避免把真实 token 写进仓库。
