@@ -21,6 +21,12 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
+import com.nongyu.appplus.ui.common.ModalScrim
+import com.nongyu.appplus.ui.timetable.TimetableRuler
+import com.nongyu.appplus.ui.timetable.rememberWaterTilt
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -292,6 +298,55 @@ fun MainShell() {
     var addingSchedule by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     // 占位按钮的轻提示（不接任何真实逻辑）
     var placeholderHint by remember { mutableStateOf<String?>(null) }
+    // 票 #60 需求 4.1：切到课表 Tab 时，课表图标从底部往上变绿（800ms）。
+    // 切走直接归零，不做离场动画（需求 5）。
+    val iconFill = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) {
+            iconFill.snapTo(0f)
+            iconFill.animateTo(
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 800,
+                    easing = androidx.compose.animation.core.LinearOutSlowInEasing,
+                ),
+            )
+        } else {
+            iconFill.snapTo(0f)
+        }
+    }
+
+    // 票 #60：节次行的真实屏幕范围（由 TimetableGrid 实测上报），
+    // 时间条按它定位 —— 不再手算那些容易漏项的 padding 公式。
+    var periodTopPx by remember { mutableFloatStateOf(0f) }
+    var periodHeightPx by remember { mutableFloatStateOf(0f) }
+    // 票 #60：时间条拖动状态（遮罩用）；时间条本身也搬到 Shell 层，
+    // 这样遮罩才能盖住底部导航栏和右上角工具条，同时时间条浮在遮罩之上。
+    var rulerDragging by remember { mutableStateOf(false) }
+    // 当前时间在时间轴上的比例（每分钟刷新够了）
+    var nowMinute by remember { mutableStateOf(java.time.LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            nowMinute = java.time.LocalTime.now()
+            delay(30_000L)
+        }
+    }
+    var rulerFocus by remember { mutableStateOf<Float?>(null) }
+    var rulerFocusHeld by remember { mutableStateOf<Float?>(null) }
+    // 松手后延时清除。key 只盯 rulerDragging：
+    // 之前同时盯 rulerFocus 和 rulerDragging，两个状态在 onDragEnd 里连续写，
+    // 可能出现「focus 已 null 但 dragging 仍 true」的一帧，导致清除分支不触发，
+    // 时间文字就一直挂在屏幕上（实测反馈）。
+    LaunchedEffect(rulerDragging) {
+        if (!rulerDragging && rulerFocusHeld != null) {
+            delay(1600)
+            rulerFocusHeld = null
+        }
+    }
+    // 拖动中实时跟随手指
+    LaunchedEffect(rulerFocus) {
+        if (rulerFocus != null) rulerFocusHeld = rulerFocus
+    }
     // 占位按钮的轻提示（设置 / 更新课表）：不接任何真实逻辑，只显示一句话。
     LaunchedEffect(placeholderHint) {
         // 提示出现 2.2s 后自动消失；用独立 effect 盯 placeholderHint，
@@ -515,6 +570,12 @@ fun MainShell() {
                     onScheduleClick = { sc ->
                         scheduleDetailId = if (scheduleDetailId == sc.id) null else sc.id
                     },
+                    onRulerDragStateChange = { rulerDragging = it },
+                    onPeriodColumnBounds = { top, h ->
+                        periodTopPx = top
+                        periodHeightPx = h
+                    },
+                    onRulerFocusChange = { rulerFocus = it },
                 )
             }
 
@@ -960,7 +1021,7 @@ fun MainShell() {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
-                        NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f)) { selectedTab = 1 }
+                        NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f), fillProgress = if (selectedTab == 1) iconFill.value else 0f) { selectedTab = 1 }
                         Spacer(modifier = Modifier.width(s(96.dp)))
                         NavItem(TABS[2], NavIconKey.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Compass), Modifier.weight(1f)) { selectedTab = 2 }
                         NavItem(TABS[3], NavIconKey.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Person), Modifier.weight(1f)) { selectedTab = 3 }
@@ -998,6 +1059,8 @@ fun MainShell() {
                     .background(Color(0xFF0A140F)),
             )
         }
+
+
 
         // 全屏雷达波：进入时向外扩散、退出时向内回收。
         // 画在 dim 之后、球体之前 —— 压在暗色后景上、位于球体下层。
@@ -1105,6 +1168,49 @@ fun MainShell() {
             )
         }
 
+        // ---- 票 #60：拖时间条时的遮罩 ----
+        // 位置必须在**星云球之后**：维护者要求遮板也要遮住星云球。
+        // 时间条仍然声明在它之后 → 时间条与时间文字浮在遮罩之上，不被压暗。
+        ModalScrim(visible = rulerDragging)
+
+        // ---- 时间条（页面级 overlay）----
+        if (selectedTab == 1) {
+            // 位置与高度**全部用实测值**（TimetableGrid 上报的节次行范围）。
+            // 手算公式已连续错两次（漏底栏占位、漏工具条预留），
+            // 而这段区域还受状态栏、表头、各种 padding 影响，永远算不全。
+            // 实测值天然包含所有偏移，所以这里只做一次 dp 换算。
+            val rulerTop = with(density) { periodTopPx.toDp() }
+            val rulerHeight = with(density) { periodHeightPx.toDp() }
+            // 课表几何映射：滑动时间 / 松手节次 / 流水位置全部走它，
+            // 于是与右侧课程行严格对齐（密度不均匀：45 分钟一节课 vs 150 分钟午休）。
+            val geometry = remember(rulerHeight) {
+                com.nongyu.appplus.ui.timetable.TimetableGeometry
+                    .build(totalHeightDp = rulerHeight.value)
+            }
+            TimetableRuler(
+                uiScale = uiScale,
+                boxWidthRatio = 1f,
+                waterFraction = geometry.fractionAtTime(nowMinute),
+                tiltDegrees = rememberWaterTilt(),
+                onRelease = { fraction ->
+                    val period = geometry.periodAtFraction(fraction)
+                    val today = java.time.LocalDate.now()
+                    addingSchedule = Triple(
+                        today.dayOfWeek.value - 1,
+                        period,
+                        com.nongyu.appplus.ui.timetable.weekOfTerm(today),
+                    )
+                },
+                onDragStateChange = { rulerDragging = it },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = rulerTop)
+                    .width(s(8.dp))
+                    .height(if (rulerHeight.value > 0f) rulerHeight else 1.dp),
+            )
+        }
+
+
         // ---- 地点 / 周次 / 导航 三个子窗体 ----
         // 地点与周次共用 CourseCalendar：都先选「生效天」，再改值；
         // 需上课的天由 classDaysOf(course) 算出并标主题色。
@@ -1207,6 +1313,8 @@ private fun NavItem(
     labelSize: TextUnit,
     iconStroke: Float,
     modifier: Modifier = Modifier,
+    /** 入场动画：图标从底部往上变绿的进度 0..1（票 #60）。默认 0f，只有课表 Tab 会传。 */
+    fillProgress: Float = 0f,
     onClick: () -> Unit,
 ) {
     val tint = if (selected) indicatorColor else itemColor
@@ -1224,12 +1332,28 @@ private fun NavItem(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.offset(y = (iconSize.value * 0.07f).dp),
         ) {
-            Canvas(modifier = Modifier.size(iconSize)) {
-                drawNavIcon(
-                    geometry = NavIconGeometry.builtInOf(icon),
-                    tint = tint,
-                    strokeScale = iconStroke,
-                )
+            Box(modifier = Modifier.size(iconSize)) {
+                Canvas(modifier = Modifier.size(iconSize)) {
+                    drawNavIcon(
+                        geometry = NavIconGeometry.builtInOf(icon),
+                        tint = tint,
+                        strokeScale = iconStroke,
+                    )
+                }
+                // 票 #60 需求 4.1：从底部往上变绿。绿色层按 fillProgress 裁切。
+                if (fillProgress > 0f && selected) {
+                    Canvas(
+                        modifier = Modifier
+                            .size(iconSize)
+                            .clip(BottomUpReveal(fillProgress)),
+                    ) {
+                        drawNavIcon(
+                            geometry = NavIconGeometry.builtInOf(icon),
+                            tint = indicatorColor,
+                            strokeScale = iconStroke,
+                        )
+                    }
+                }
             }
             // 图标与文字继续靠近：不留 Spacer，用压缩行高让文字紧贴图标下缘
             Text(
@@ -1246,4 +1370,23 @@ private fun NavItem(
 @Composable
 private fun MainShellPreview() {
     NongyuAppPlusTheme { MainShell() }
+}
+
+/** 从底部往上揭开的裁剪形状（票 #60 需求 4.1「课表图标从底部往上变绿」）。 */
+private class BottomUpReveal(private val progress: Float) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ): androidx.compose.ui.graphics.Outline {
+        val visible = size.height * progress.coerceIn(0f, 1f)
+        return androidx.compose.ui.graphics.Outline.Rectangle(
+            androidx.compose.ui.geometry.Rect(
+                left = 0f,
+                top = size.height - visible,
+                right = size.width,
+                bottom = size.height,
+            ),
+        )
+    }
 }

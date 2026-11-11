@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     // 票 #48 实测：AGP 9 内置 Kotlin 下按目录 alias 声明即可，不需要 buildscript classpath。
@@ -18,8 +18,8 @@ android {
         // v45：表头周次两行微调（第一行缩小到 8.5sp、两行间距 3dp）。
         // 底部避让改为让 Shell 直接上报底栏占位高度（不再做坐标换算）。
         // versionCode 必须大于已发布的 46，否则手机无法覆盖安装。
-        versionCode = 60
-        versionName = "0.0.52test"
+        versionCode = 63
+        versionName = "0.0.55test"
 
         // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
         // 默认空串：设了才有值，避免把真实 token 写进仓库。

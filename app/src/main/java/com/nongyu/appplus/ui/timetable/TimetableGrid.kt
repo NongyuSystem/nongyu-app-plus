@@ -3,6 +3,13 @@ package com.nongyu.appplus.ui.timetable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.setValue
@@ -30,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -174,6 +182,32 @@ fun TimetableGrid(
     onBlankSlotClick: (day: Int, period: Int) -> Unit = { _, _ -> },
     /** 点日程卡 / 下拉横杠：开或关该日程的展开态。 */
     onScheduleClick: (ScheduleEntry) -> Unit = {},
+    /**
+     * 入场：课程卡出现进度 0..1（票 #60 需求 4.3「课程盒子一个一个出现」）。
+     * 每张卡按**起始节次**错峰，同一列越靠上的课越早出现。
+     */
+    cardAppear: Float = 1f,
+    /**
+     * 滑动动画的目标状态（周, 天）。变化时**只让右侧课程区**左右滑动；
+     * 左侧节次列与顶部表头保持不动（表头文字原地更新）。
+     * 见 TimetableScreen 的调用点。
+     */
+    pageKey: Pair<Int, Int> = 0 to -1,
+    /**
+     * 上报「节次行的真实屏幕范围」（top, height，像素）。
+     *
+     * 时间条必须与这段区域严格对齐，而这段区域的位置受状态栏、工具条预留、
+     * 表头、各种 padding 共同影响 —— 手算公式已经错过两次（漏底栏、漏工具条）。
+     * 所以让节次列自己把实测值报出去，外部按它定位，从根上消掉算错的可能。
+     */
+    onPeriodColumnBounds: (topPx: Float, heightPx: Float) -> Unit = { _, _ -> },
+    /**
+     * 点左上角「第N周 / 共N周」表头：打开跳周（周模式）或跳天（天模式）的日历。
+     *
+     * 维护者要求：这个表头是**快速跳转入口**，点开已有日历直接选日期过去，
+     * 比一周一周滑动快得多。
+     */
+    onWeekHeaderClick: () -> Unit = {},
 ) {
     val coursesByDay = remember(courses) { courses.groupedByDay() }
     // 课程名 → 色槽：保证**同屏课程必然不同色**（撞槽自动顺延），
@@ -217,12 +251,21 @@ fun TimetableGrid(
     val cellCorner = s(CELL_CORNER)
     val headerCorner = s(HEADER_CORNER)
 
-    // 今天 = 系统当天；日期与「第几周」的数据模型无关，等 #12 定口径后再参与周次推导。
+    // 「今天」= 系统当天的星期索引（0..6，周一为 0）。
     val todayIndex = remember {
         val today = LocalDate.now()
         ChronoUnit.DAYS.between(today.with(DayOfWeek.MONDAY), today).toInt().takeIf { it in 0..6 } ?: -1
     }
-    val mondayOfWeek = remember { LocalDate.now().with(DayOfWeek.MONDAY) }
+    // 本学期「本周」的周一（用于判断当前显示的是不是本周）。
+    val thisWeekMonday = remember { LocalDate.now().with(DayOfWeek.MONDAY) }
+    // 显示这一周的周一：跟着 currentWeek 走，日期才会随切周变化。
+    // 之前写死 LocalDate.now()，导致切到别的周时表头日期不变、
+    // 而且「今天」在别的周也照样高亮（维护者实测反馈）。
+    val mondayOfWeek = remember(currentWeek) {
+        thisWeekMonday.plusWeeks((currentWeek - weekOfTerm(LocalDate.now())).toLong())
+    }
+    // 只有「显示的这一周」就是本周时，才把今天高亮；切到别的周不高亮任何一天。
+    val showingThisWeek = currentWeek == weekOfTerm(LocalDate.now())
 
     // 维护者第 6 条：
     // - 日期盒：淡淡的品牌绿；今天是更明显一点的淡绿（第 5 条「再淡一点」——比旧版整列铺底淡得多）。
@@ -257,7 +300,9 @@ fun TimetableGrid(
                     .width(leftColumnWidth)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(headerCorner))
-                    .background(timeColStart),
+                    .background(timeColStart)
+                    // 点「第N周 / 共N周」打开日历快速跳转
+                    .clickable(onClick = onWeekHeaderClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -303,7 +348,8 @@ fun TimetableGrid(
             val headerDays = onlyDay?.let { listOf(it) } ?: WEEKDAY_LABELS.indices.toList()
             headerDays.forEach { day ->
                 val label = WEEKDAY_LABELS[day]
-                val isToday = day == todayIndex
+                // 只有「显示的是本周」时，今天才高亮；切到别的周一律不高亮。
+                val isToday = showingThisWeek && day == todayIndex
                 val date = mondayOfWeek.plusDays(day.toLong())
                 Box(
                     modifier = Modifier
@@ -375,7 +421,18 @@ fun TimetableGrid(
         ) {
             Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 // -------- 左：节次时间列（逐行）--------
-                Column(modifier = Modifier.width(leftColumnWidth)) {
+                Column(
+                    modifier = Modifier
+                        .width(leftColumnWidth)
+                        // 把节次行的真实屏幕范围报出去（时间条据此对齐，不再手算）
+                        //
+                        // 本仓的 Compose 版本没有 boundsInRoot/positionInRoot，
+                        // 用 localToRoot(Offset.Zero) 取左上角绝对坐标，高度用 size.height。
+                        .onGloballyPositioned { coords ->
+                            val topLeft = coords.localToRoot(androidx.compose.ui.geometry.Offset.Zero)
+                            onPeriodColumnBounds(topLeft.y, coords.size.height.toFloat())
+                        },
+                ) {
                     for (period in 1..PERIOD_COUNT) {
                         val time = COURSE_TIMES[period - 1]
                         val rowRatio = (period - 1).toFloat() / (PERIOD_COUNT - 1).toFloat()
@@ -425,31 +482,52 @@ fun TimetableGrid(
                 //
                 // 时间列单元格**不再**加 `padding(end = gap)`：间距统一由这里给出，
                 // 避免出现「时间列与第一天 = 2×gap、天与天之间 = gap」的不均匀。
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(start = gap),
-                    horizontalArrangement = Arrangement.spacedBy(gap),
-                ) {
-                    // 按天模式只渲染选中那一天（该列 weight(1f) 自然占满整宽）
-                    val daysToRender = onlyDay?.let { listOf(it) } ?: WEEKDAY_LABELS.indices.toList()
-                    for (day in daysToRender) {
-                        CourseDayColumn(
-                            courses = coursesByDay[day],
-                            uiScale = uiScale,
-                            gapOf = { gapAfter(it) },
-                            gap = gap,
-                            cardCorner = cellCorner,
-                            schedules = schedules.filter { it.day == day },
-                            onCourseClick = onCourseClick,
-                            onBlankSlotClick = { period -> onBlankSlotClick(day, period) },
-                            onScheduleClick = onScheduleClick,
-                            slotOf = { name ->
-                                hueSlots[name] ?: CoursePalette.preferredSlot(name)
-                            },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
+                // 课程区：**只有这一块参与切周滑动**。
+                //
+                // 维护者要求：左侧节次列（1..10 节）与左上角第N周保持不变、
+                // 顶部表头原地换文字，只有右侧 7 列课程区左右滑动。
+                // 所以 AnimatedContent 只包住这 7 列，不含时间列与表头。
+                AnimatedContent(
+                    targetState = pageKey,
+                    transitionSpec = {
+                        val forward = targetState.first > initialState.first ||
+                            (targetState.first == initialState.first && targetState.second > initialState.second)
+                        val dir = if (forward) 1 else -1
+                        (
+                            slideInHorizontally(tween(240)) { full -> dir * full / 3 } + fadeIn(tween(200))
+                            ).togetherWith(
+                            slideOutHorizontally(tween(200)) { full -> -dir * full / 3 } + fadeOut(tween(140)),
+                            )
+                    },
+                    label = "courseArea",
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                ) { _ ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(start = gap),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                    ) {
+                        // 按天模式只渲染选中那一天（该列 weight(1f) 自然占满整宽）
+                        val daysToRender = onlyDay?.let { listOf(it) } ?: WEEKDAY_LABELS.indices.toList()
+                        for (day in daysToRender) {
+                            CourseDayColumn(
+                                courses = coursesByDay[day],
+                                uiScale = uiScale,
+                                gapOf = { gapAfter(it) },
+                                gap = gap,
+                                cardCorner = cellCorner,
+                                schedules = schedules.filter { it.day == day },
+                                onCourseClick = onCourseClick,
+                                onBlankSlotClick = { period -> onBlankSlotClick(day, period) },
+                                onScheduleClick = onScheduleClick,
+                                cardAppear = cardAppear,
+                                slotOf = { name ->
+                                    hueSlots[name] ?: CoursePalette.preferredSlot(name)
+                                },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                        }
                     }
                 }
             }
@@ -543,6 +621,8 @@ private fun CourseDayColumn(
     onScheduleClick: (ScheduleEntry) -> Unit = {},
     /** 点空白槽位：(period 1..10)。是否真的空白由本列判断后被占据的节次过滤。 */
     onBlankSlotClick: (period: Int) -> Unit = {},
+    /** 入场：课程卡出现进度 0..1，按起始节次错峰（票 #60）。 */
+    cardAppear: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -609,6 +689,17 @@ private fun CourseDayColumn(
                 val top = slotTops[block.startPeriod]
                 val bottom = slotBottoms[block.endPeriod]
                 if (bottom > top) {
+                    // 入场：**水位线扫过就淡入**（维护者 2026-11-11 定案）。
+                    // 注意仍然是 alpha 渐变，不是跳变 —— 水位只决定"这张卡什么时候开始淡入"。
+                    //
+                    // cardAppear 是水位线在本列的纵向比例：1 = 列底，0 = 列顶。
+                    // 水位从底部往上升，漫过某张卡的底边时开始淡入、漫过顶边时完全显示。
+                    // span 用卡片自身高度归一化，避免连堂大课的淡入被拉得过慢。
+                    val columnHeightPx = (slotBottoms[PERIOD_COUNT]).coerceAtLeast(1f)
+                    val cardBottomFrac = (bottom / columnHeightPx).coerceIn(0f, 1f)
+                    val cardTopFrac = (top / columnHeightPx).coerceIn(0f, 1f)
+                    val span = (cardBottomFrac - cardTopFrac).coerceAtLeast(0.06f)
+                    val local = ((cardBottomFrac - cardAppear) / span).coerceIn(0f, 1f)
                     CourseCard(
                         block = block,
                         slot = slotOf(block.name),
@@ -617,6 +708,7 @@ private fun CourseDayColumn(
                         corner = cardCorner,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .graphicsLayer { alpha = local }
                             .height(with(LocalDensity.current) { (bottom - top).toDp() })
                             // 用 offset 而非 padding：偏移量是像素算出来的绝对位置
                             .offset(y = with(LocalDensity.current) { top.toDp() }),
@@ -628,6 +720,12 @@ private fun CourseDayColumn(
                 val top = slotTops[sc.startPeriod]
                 val bottom = slotBottoms[sc.endPeriod]
                 if (bottom > top) {
+                    // 日程卡与课程卡同一套水位线淡入规则
+                    val colH = slotBottoms[PERIOD_COUNT].coerceAtLeast(1f)
+                    val bFrac = (bottom / colH).coerceIn(0f, 1f)
+                    val tFrac = (top / colH).coerceIn(0f, 1f)
+                    val scSpan = (bFrac - tFrac).coerceAtLeast(0.06f)
+                    val scLocal = ((bFrac - cardAppear) / scSpan).coerceIn(0f, 1f)
                     ScheduleCard(
                         entry = sc,
                         uiScale = uiScale,
@@ -635,6 +733,7 @@ private fun CourseDayColumn(
                         onClick = { onScheduleClick(sc) },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .graphicsLayer { alpha = scLocal }
                             .height(with(LocalDensity.current) { (bottom - top).toDp() })
                             .offset(y = with(LocalDensity.current) { top.toDp() }),
                     )

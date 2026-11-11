@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,6 +89,14 @@ fun TimetableScreen(
     onAddScheduleFromToolbar: (week: Int, day: Int) -> Unit = { _, _ -> },
     /** 点日程卡 / 下拉横杠：开或关该日程的展开态。 */
     onScheduleClick: (ScheduleEntry) -> Unit = {},
+    /** 时间条拖动状态上报（外层据此显示遮罩）。 */
+    onRulerDragStateChange: (Boolean) -> Unit = {},
+    /** 时间条手指位置比例上报（外层在置顶层画时间文字）。null = 松手。 */
+    onRulerFocusChange: (Float?) -> Unit = {},
+    /** 上报节次行真实屏幕范围（top, height），供时间条对齐。 */
+    onPeriodColumnBounds: (topPx: Float, heightPx: Float) -> Unit = { _, _ -> },
+    /** 点左上角周次表头：打开日历快速跳周/跳天。 */
+    onWeekHeaderClick: () -> Unit = {},
 ) {
     val colors = NongyuTheme.colors
     val density = LocalDensity.current
@@ -116,6 +126,41 @@ fun TimetableScreen(
         // true = 按天模式（一天占满宽）
         var dayMode by remember { mutableStateOf(false) }
         var currentDay by remember { mutableStateOf(today.dayOfWeek.value - 1) }
+        // 点左上角周次表头 → 打开日历快速跳转（周模式跳周、天模式跳天）
+        var showJumpDialog by remember { mutableStateOf(false) }
+
+        // ---- 票 #60：流水位置 + 水平仪倾斜 ----
+        var nowMinute by remember { mutableStateOf(java.time.LocalTime.now()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                nowMinute = java.time.LocalTime.now()
+                kotlinx.coroutines.delay(30_000L)
+            }
+        }
+        val waterFraction = remember(nowMinute) { TimetableAxis.fractionOf(nowMinute) }
+        val tiltDegrees = rememberWaterTilt()
+
+        // 票 #60 需求 4：进入课表页的入场动画（单一进度，避免多段 LaunchedEffect 打架）
+        //   0.00~0.20 流水上涌到当前时间
+        //   0.15~0.95 课表卡片逐个渐显（窗口拉长，观感柔和）
+        //   0.55~0.85 工具条/表头跟随
+        //
+        // 总时长 1800 → 2600ms：之前卡片总窗口只有约 990ms、单卡约 300ms，
+        // 60fps 下仅十来帧，看起来就是「突然跳出来」（维护者实测）。
+        // 拉长总时长 + 扩大卡片区间后，单卡渐显约 700ms，过渡才明显柔和。
+        val entryProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(Unit) {
+            entryProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 2600,
+                    easing = androidx.compose.animation.core.LinearOutSlowInEasing,
+                ),
+            )
+        }
+        val ep = entryProgress.value
+        fun seg(start: Float, end: Float): Float =
+            ((ep - start) / (end - start)).coerceIn(0f, 1f)
 
         val weekCourses = remember(currentWeek, deletedIds) {
             MOCK_COURSES
@@ -127,6 +172,45 @@ fun TimetableScreen(
         // ---- 左右滑动切周/切天（阈值 60px）----
         var dragAccum by remember { mutableStateOf(0f) }
         val swipeThresholdPx = with(density) { 60.dp.toPx() }
+
+        // 点左上角周次表头打开的跳转日历（复用 CourseCalendar）。
+        // 周模式：选一天 → 跳到它所属的周；天模式：直接跳到那一天。
+        if (showJumpDialog) {
+            val currentDate = remember(currentWeek, currentDay) {
+                MOCK_TERM_START.plusWeeks((currentWeek - 1).toLong()).plusDays(currentDay.toLong())
+            }
+            JumpToDateDialog(
+                dayMode = dayMode,
+                currentDate = currentDate,
+                uiScale = uiScale,
+                classDays = remember(weekCourses) {
+                    weekCourses.flatMap { classDaysOf(it) }.toSet()
+                },
+                onPick = { picked ->
+                    // 周/日都先换算成「该日期属于第几周」，再决定是否也切天
+                    val w = weekOfTerm(picked).coerceIn(1, TOTAL_WEEKS)
+                    currentWeek = w
+                    if (dayMode) {
+                        currentDay = picked.dayOfWeek.value - 1
+                    }
+                    showJumpDialog = false
+                },
+                onDismiss = { showJumpDialog = false },
+            )
+        }
+
+        // 票 #60：整屏宽流水，从当前时间水位一直铺到**屏幕底部**。
+        //
+        // 必须挂在 BoxWithConstraints 根层（比课表 Box 更高）：
+        // 课表 Box 的高度是 gridHeight，已经扣掉了底部导航栏占位与呼吸位，
+        // 把水放在它里面就永远到不了屏幕底边（维护者实测反馈）。
+        // 用 fillMaxSize 铺满整屏，且声明在课表之前 → 天然在课表之下、不拦事件。
+        WaterLine(
+            // 入场：进度 0 时水面在屏幕底(=1)，逐渐上涌到真实位置
+            surfacePercent = 1f - (1f - waterFraction) * seg(0.00f, 0.25f),
+            tiltDegrees = tiltDegrees,
+            modifier = Modifier.fillMaxSize(),
+        )
 
         Box(
             modifier = Modifier
@@ -159,47 +243,69 @@ fun TimetableScreen(
                         )
                     },
             ) {
-                // 切周/切天过渡：**交叉淡入淡出**为主，只保留很轻的方向位移。
+                // 切周/切天过渡：**位移 + 旧页快速淡出**。
                 //
-                // 之前是整页 220ms 平移 + 各自淡出，观感生硬：旧内容整块滑走、
-                // 新内容整块滑入，像翻幻灯片。维护者要求「增添/去除的课要有淡入淡出」。
-                // 现在：
-                // - 淡入 260ms 比淡出 180ms 长，新旧内容在中间有交叠，看起来是「溶解」而非「切换」
-                // - 位移只用屏宽的 6%（0.06f），只做方向暗示，不抢戏
-                // - 淡出用线性起步、淡入用 tween 缓动，避免同时消失造成的闪空
-                AnimatedContent(
-                    targetState = currentWeek to (if (dayMode) currentDay else -1),
-                    transitionSpec = {
-                        val forward = targetState.first > initialState.first ||
-                            (targetState.first == initialState.first && targetState.second > initialState.second)
-                        val dir = if (forward) 1 else -1
-                        (
-                            fadeIn(tween(260, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) +
-                                slideInHorizontally(tween(260)) { full -> dir * (full * 0.06f).toInt() }
-                            ).togetherWith(
-                            fadeOut(tween(180)) +
-                                slideOutHorizontally(tween(180)) { full -> -dir * (full * 0.06f).toInt() },
-                            )
+                // 为什么新页不加 fadeIn：卡片自己已经由水位线控制 alpha，
+                // 再包一层整块淡入会把"逐张揭幕"糊掉。
+                // 为什么旧页必须有 fadeOut：上一版只保留 6% 位移、不淡出，
+                // 新旧两页几乎重叠滑行，看起来就是"重影"（维护者实测）。
+                // 现在旧页在 140ms 内快速淡出，视觉上只有新页在滑入。
+                // 切周/切天：**不再包整个课表**。
+                //
+                // 维护者要求「左侧节次列（1..10 节）与左上角第N周保持不变，
+                // 顶部表头原地换文字，只有右侧课程区左右滑动」。
+                // 所以动画下沉进 TimetableGrid，只包课程列；这里直接传当前周/天。
+                TimetableGrid(
+                    uiScale = uiScale,
+                    currentWeek = currentWeek,
+                    courses = weekCourses,
+                    // 按天模式只渲染那一天；-1 表示按周（七天全显）
+                    onlyDay = if (dayMode) currentDay else null,
+                    // 滑动动画的目标状态（周, 天）：变化时只滑课程区
+                    pageKey = currentWeek to (if (dayMode) currentDay else -1),
+                    schedules = schedules,
+                    onCourseClick = onCourseClick,
+                    onBlankSlotClick = { d, period ->
+                        // 点空白：记下 (星期, 节次)，由 Shell 弹添加日程子窗体
+                        onBlankSlotAdd(d, period, currentWeek)
                     },
-                    label = "weekPage",
-                ) { (week, day) ->
-                    TimetableGrid(
-                        uiScale = uiScale,
-                        currentWeek = week,
-                        courses = weekCourses,
-                        // 按天模式只渲染那一天；-1 表示按周（七天全显）
-                        onlyDay = if (day >= 0) day else null,
-                        schedules = schedules,
-                        onCourseClick = onCourseClick,
-                        onBlankSlotClick = { d, period ->
-                            // 点空白：记下 (星期, 节次)，由 Shell 弹添加日程子窗体
-                            onBlankSlotAdd(d, period, week)
-                        },
-                        onScheduleClick = onScheduleClick,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                    onScheduleClick = onScheduleClick,
+                    // 入场：水位线从列底一路升到**列顶**（不能只升到当前时间）。
+                    //
+                    // 之前写成升到 waterFraction 就停，结果水位线以上的课永远透明，
+                    // 屏幕上只剩当前时间以下的几节课（维护者实测）。
+                    // 现在 1f → -0.2f：越过列顶再多扫 20%，保证所有卡片都被扫过。
+                    // 视觉上流水仍只升到当前时间（由 WaterLine 自己控制），
+                    // 卡片揭幕走完整列，两者各管各的。
+                    cardAppear = 1f - 1.2f * seg(0.00f, 0.55f),
+                    onPeriodColumnBounds = onPeriodColumnBounds,
+                    onWeekHeaderClick = { showJumpDialog = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
+
+            // ---- 票 #60：拖动时间条时的遮罩 ----
+            //
+            // 维护者要求与星云球遮罩一致：**不遮关键交互元素**。
+            // 星云球遮罩不遮球和输入框（因为画在它们之前），这里同理：
+            // 遮罩声明在时间条**之前** → 时间条与时间文字天然浮在遮罩之上，
+            // 被压暗的只有课表内容。
+
+
+            // ---- 左上角：标题「课程表」+ 节假日倒计时（缓存优先，失败静默）----
+            // 挂在 TopStart，与 TopCenter 的工具条并排，共用 TOOLBAR_RESERVE_HEIGHT
+            // 这段预留高度 → 不新增占高、不挤压课表，时间条的实测对齐不受影响。
+            //
+            // ⚠️ top 里**不能再加 statusBarPadding**：外层课表 Box 已经
+            // `.padding(top = statusBarPadding)`，这里再加等于叠两次。
+            // 模拟器状态栏矮（48px）看不出来，真机刘海屏状态栏高，直接压住课表
+            // （维护者真机实测反馈"上面课程表和四个按钮遮挡下方课程表"）。
+            com.nongyu.appplus.ui.timetable.holiday.TimetableTitleBlock(
+                uiScale = uiScale,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = (2f * uiScale).dp, top = (6f * uiScale).dp),
+            )
 
             // ---- 顶部工具条：设置 / 更新课表 / 切换日周 / 添加日程（票 #14）----
             // 占据 TimetableGrid 里 TOOLBAR_RESERVE_HEIGHT 预留的空位。
@@ -216,7 +322,11 @@ fun TimetableScreen(
                 },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = statusBarPadding),
+                    // ⚠️ 不能再加 statusBarPadding：外层课表 Box 已经有
+                    // `.padding(top = statusBarPadding)`，这里再加就是叠两次。
+                    // 模拟器状态栏矮（48px）看不出来；真机刘海屏状态栏高，
+                    // 4 个按钮会整体下移、压住上面的课程（维护者真机实测）。
+                    .padding(top = (6f * uiScale).dp),
             )
 
             // ---- 非本周/非今日时的「回到本周」按钮（#16 决策：右侧贴边半圆）----
