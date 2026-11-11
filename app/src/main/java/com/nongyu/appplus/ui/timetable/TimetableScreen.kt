@@ -304,7 +304,11 @@ fun TimetableScreen(
                 uiScale = uiScale,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = (2f * uiScale).dp, top = (6f * uiScale).dp),
+                    .padding(start = (2f * uiScale).dp, top = (6f * uiScale).dp)
+                    // 需求 4.4「其他的也跟随出现」：标题在课程卡之后跟上（0.70~0.90）。
+                    // 用 graphicsLayer 而非 Modifier.alpha —— alpha 写在 background
+                    // 之后会连底色一起透明（本仓踩过两次）。
+                    .graphicsLayer { alpha = seg(0.70f, 0.90f) },
             )
 
             // ---- 顶部工具条：设置 / 更新课表 / 切换日周 / 添加日程（票 #14）----
@@ -326,7 +330,10 @@ fun TimetableScreen(
                     // `.padding(top = statusBarPadding)`，这里再加就是叠两次。
                     // 模拟器状态栏矮（48px）看不出来；真机刘海屏状态栏高，
                     // 4 个按钮会整体下移、压住上面的课程（维护者真机实测）。
-                    .padding(top = (6f * uiScale).dp),
+                    .padding(top = (6f * uiScale).dp)
+                    // 需求 4.4「其他的也跟随出现」：工具条与标题同步淡入。
+                    // 用 graphicsLayer 而非 Modifier.alpha（后者会让底色一起透明）。
+                    .graphicsLayer { alpha = seg(0.70f, 0.90f) },
             )
 
             // ---- 非本周/非今日时的「回到本周」按钮（#16 决策：右侧贴边半圆）----
