@@ -3,6 +3,7 @@ package com.nongyu.appplus.net.http
 import com.nongyu.appplus.net.auth.AuthTokenProvider
 import com.nongyu.appplus.net.auth.SessionInvalidListener
 import com.nongyu.appplus.net.core.NongyuLogger
+import com.nongyu.appplus.net.sign.AppRequestSigner
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -39,6 +40,7 @@ object OkHttpFactory {
      * ```
      * SessionInvalidInterceptor  最外：要判的是「最终响应」
      * AuthInterceptor            加 Authorization / 分区短路
+     * AppSignInterceptor         有签名器才挂：NY1 请求签名
      * SafeLoggingInterceptor     最内：只读拷贝
      * ```
      *
@@ -56,16 +58,23 @@ object OkHttpFactory {
         sessionInvalidListener: SessionInvalidListener,
         loggingEnabled: Boolean,
         logger: NongyuLogger = NongyuLogger.Noop,
-    ): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        // 硬约束：关掉 OkHttp 自带的重试，否则 POST 仍可能被重发两次。
-        .retryOnConnectionFailure(false)
-        // 拦截器：由外到内
-        .addInterceptor(SessionInvalidInterceptor(sessionInvalidListener, logger))
-        .addInterceptor(AuthInterceptor(tokenProvider, logger))
-        .addInterceptor(SafeLoggingInterceptor(enabled = loggingEnabled, logger = logger))
-        .build()
+        requestSigner: AppRequestSigner? = null,
+    ): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            // 硬约束：关掉 OkHttp 自带的重试，否则 POST 仍可能被重发两次。
+            .retryOnConnectionFailure(false)
+            // 拦截器：由外到内。签名在鉴权之内，这样缺票短路不会白签。
+            .addInterceptor(SessionInvalidInterceptor(sessionInvalidListener, logger))
+            .addInterceptor(AuthInterceptor(tokenProvider, logger))
+        if (requestSigner != null) {
+            builder.addInterceptor(AppSignInterceptor(requestSigner))
+        }
+        return builder
+            .addInterceptor(SafeLoggingInterceptor(enabled = loggingEnabled, logger = logger))
+            .build()
+    }
 }

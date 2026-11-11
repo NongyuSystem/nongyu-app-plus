@@ -7,7 +7,9 @@ import com.nongyu.appplus.net.auth.DefaultSessionInvalidListener
 import com.nongyu.appplus.net.auth.MinimalSessionStore
 import com.nongyu.appplus.net.auth.SessionStore
 import com.nongyu.appplus.net.http.AndroidLogger
+import com.nongyu.appplus.BuildConfig
 import com.nongyu.appplus.net.http.OkHttpFactory
+import com.nongyu.appplus.net.sign.AppRequestSigner
 import com.nongyu.appplus.net.model.NetJson
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -104,6 +106,10 @@ object NetHolder {
             sessionInvalidListener = sessionInvalidListener,
             loggingEnabled = netLoggingEnabled(),
             logger = AndroidLogger,
+            requestSigner = AppRequestSigner.fromBase64(
+                BuildConfig.APP_SIGNING_KEY_ID,
+                BuildConfig.APP_SIGNING_KEY_B64,
+            ),
         )
 
         // 4) baseUrl 规范化（空串会在这里抛带明确文案的异常，不静默失败）
