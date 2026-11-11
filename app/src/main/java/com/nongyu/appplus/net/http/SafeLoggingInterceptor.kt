@@ -152,6 +152,7 @@ class SafeLoggingInterceptor(
 
         private val SENSITIVE_HEADERS = setOf(
             "authorization", "cookie", "set-cookie", "proxy-authorization",
+            "x-nongyu-signature",
         )
 
         private val SENSITIVE_JSON_KEYS = listOf(

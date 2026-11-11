@@ -11,10 +11,11 @@ package com.nongyu.appplus.net.core
  * | (C) presence | `internal/school/presence/handler.go` |
  * | (D) 中间件 | `internal/server/{auth,revocable_auth}.go` |
  * | (E) handler 手写 | 散落在各 handler，**不在任何常量表里** |
+ * | (F) 回传缓存 | `internal/school/jiaowu/cachehandler.go` |
  *
  * ## 一期的失效判定只用这四个
  * [SESSION_EXPIRED] / [UNAUTHORIZED] / [AUTH_UNAVAILABLE] / [INVALID_PRESENCE]。
- * 其余 19 个只是**记录**（进日志 / 异常信息），**不产生行为分支**。
+ * 其余只是**记录**（进日志 / 异常信息），**不产生行为分支**。
  * 把每个码都写成 `when` 分支是过度实现。
  *
  * ## `Unknown` 兜底是强制的
@@ -77,6 +78,28 @@ object ApiErrorCode {
     const val NOT_FOUND = "not_found"
     const val BAD_REQUEST = "bad_request"
 
+    // ---------- (F) 回传缓存子域（backend-plus `jiaowu/cachehandler.go`，规格 §3.6） ----------
+
+    /**
+     * ⚠️ **这个码配的是 HTTP 200，不是错误状态**。
+     * 后端 `cacheGetHandler` 未命中时回 `200 + {"code":"cache_miss"}`，
+     * 刻意让「没缓存」成为正常流程的一步而不是错误。
+     * 因此**不能**走 `ApiCall` 的「非 2xx 解 errorBody」路径，判别要看 body 里的 `code`。
+     */
+    const val CACHE_MISS = "cache_miss"
+
+    /** 回传体形状校验未通过（400）。 */
+    const val SCHEMA_REJECTED = "schema_rejected"
+
+    /** 回传体超过 1 MiB（413）。上限由后端 `MaxBytesReader` 校验，客户端不重复校。 */
+    const val PAYLOAD_TOO_LARGE = "payload_too_large"
+
+    /** 失效过频（429），响应头带 `Retry-After`。 */
+    const val REFRESH_TOO_SOON = "refresh_too_soon"
+
+    /** 缓存层未配置（503，如未配 Redis/Store）。 */
+    const val CACHE_UNAVAILABLE = "cache_unavailable"
+
     // ---------- 兜底 ----------
 
     /**
@@ -89,6 +112,7 @@ object ApiErrorCode {
         USER_DISABLED, LOGIN_METHOD_UNBOUND, TOO_MANY_ATTEMPTS, INTERNAL_ERROR, CONFLICT,
         TARGET_DENIED, BLOCKED_REDIRECT, TICKET_EXPIRED, CAMPUS_UNREACHABLE, INVALID_PRESENCE,
         AUTH_UNAVAILABLE, RATE_LIMITED, INVALID_REQUEST, NOT_FOUND, BAD_REQUEST,
+        CACHE_MISS, SCHEMA_REJECTED, PAYLOAD_TOO_LARGE, REFRESH_TOO_SOON, CACHE_UNAVAILABLE,
     )
 
     /**

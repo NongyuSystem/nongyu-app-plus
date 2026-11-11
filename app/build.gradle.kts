@@ -18,8 +18,8 @@ android {
         // v45：表头周次两行微调（第一行缩小到 8.5sp、两行间距 3dp）。
         // 底部避让改为让 Shell 直接上报底栏占位高度（不再做坐标换算）。
         // versionCode 必须大于已发布的 46，否则手机无法覆盖安装。
-        versionCode = 64
-        versionName = "0.0.56test"
+        versionCode = 65
+        versionName = "0.0.57test"
 
         // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
         // 默认空串：设了才有值，避免把真实 token 写进仓库。
@@ -35,6 +35,13 @@ android {
             "DEV_TOKEN",
             "\"${providers.gradleProperty("devToken").orNull ?: ""}\"",
         )
+        // 请求签名密钥。默认是与后端 .env.example 对齐的开发密钥，不是生产秘密。
+        // 轮换：./gradlew -PappSigningKeyId=v2 -PappSigningKey=<base64url>
+        val appSigningKeyId = providers.gradleProperty("appSigningKeyId").orNull ?: "dev"
+        val appSigningKey = providers.gradleProperty("appSigningKey").orNull
+            ?: "bm9uZ3l1LWRldi1hcHAtc2lnbi1rZXktdjEtMzJiISE"
+        buildConfigField("String", "APP_SIGNING_KEY_ID", "\"$appSigningKeyId\"")
+        buildConfigField("String", "APP_SIGNING_KEY_B64", "\"$appSigningKey\"")
     }
 
     buildTypes {
