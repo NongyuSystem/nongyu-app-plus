@@ -77,8 +77,14 @@ fun TimetableScreen(
     onCourseClick: (CourseEntry) -> Unit = {},
     /** 用户新增的日程（状态提升到 Shell，本页只渲染）。 */
     schedules: List<ScheduleEntry> = emptyList(),
-    /** 点空白格：回调 (星期索引 0..6, 节次 1..10, 当前周)，由 Shell 弹添加日程子窗体。 */
+    /** 点空白格：回调 (星期索引 0..6, 节次 1..10, 当前周)，由 Shell 弹添加日程表单。 */
     onBlankSlotAdd: (day: Int, period: Int, week: Int) -> Unit = { _, _, _ -> },
+    /** 工具条：设置（占位）。 */
+    onSettings: () -> Unit = {},
+    /** 工具条：更新课表（占位）。 */
+    onUpdateSchedule: () -> Unit = {},
+    /** 工具条：添加日程（不带格子位置）。 */
+    onAddScheduleFromToolbar: (week: Int, day: Int) -> Unit = { _, _ -> },
 ) {
     val colors = NongyuTheme.colors
     val density = LocalDensity.current
@@ -184,24 +190,23 @@ fun TimetableScreen(
                 }
             }
 
-            // ---- 顶部右侧控制区：周/天切换 + 回到本周 ----
-            Row(
+            // ---- 顶部工具条：设置 / 更新课表 / 切换日周 / 添加日程（票 #14）----
+            // 占据 TimetableGrid 里 TOOLBAR_RESERVE_HEIGHT 预留的空位。
+            // 周/天 切换**只保留这一个入口**（原来的顶部胶囊已删除，避免两个控件表达同一件事）。
+            TimetableToolbar(
+                uiScale = uiScale,
+                dayMode = dayMode,
+                onSettings = onSettings,
+                onUpdateSchedule = onUpdateSchedule,
+                onToggleDayWeek = { dayMode = !dayMode },
+                onAddSchedule = {
+                    // 不带格子位置：由 Shell 弹「添加日程」表单（默认当前周的今天第 1 节）
+                    onAddScheduleFromToolbar(currentWeek, today.dayOfWeek.value - 1)
+                },
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = s(uiScale, 6.dp), end = s(uiScale, 12.dp)),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 周/天 切换胶囊
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(s(uiScale, 12.dp)))
-                        .background(colors.surface.colorCard.copy(alpha = 0.9f))
-                        .padding(s(uiScale, 2.dp)),
-                ) {
-                    ModeChip("周", !dayMode, uiScale) { dayMode = false }
-                    ModeChip("天", dayMode, uiScale) { dayMode = true }
-                }
-            }
+                    .align(Alignment.TopCenter)
+                    .padding(top = statusBarPadding),
+            )
 
             // ---- 非本周/非今日时的「回到本周」按钮（#16 决策：右侧贴边半圆）----
             val showBack = if (dayMode) {
@@ -232,29 +237,6 @@ fun TimetableScreen(
 
 /** 60dp 阈值等常量用 uiScale 缩放后的 Dp。 */
 private fun s(uiScale: Float, dp: Dp): Dp = (dp.value * uiScale).dp
-
-/** 「周 / 天」切换的一个胶囊。 */
-@Composable
-private fun ModeChip(label: String, active: Boolean, uiScale: Float, onClick: () -> Unit) {
-    val colors = NongyuTheme.colors
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape((10f * uiScale).dp))
-            .background(if (active) colors.brand.colorBrand else androidx.compose.ui.graphics.Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = (10f * uiScale).dp, vertical = (4f * uiScale).dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = if (active) colors.brand.colorOnBrand else colors.surface.colorTextSecondary,
-            fontSize = (8.5f * uiScale).sp,
-            lineHeight = (11f * uiScale).sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
 
 /**
  * 「回到本周/今天」按钮（票 #16 决策实现）：

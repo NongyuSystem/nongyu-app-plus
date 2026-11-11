@@ -130,7 +130,7 @@ private enum class OrbMode { Idle, Listening, Input }
  * - [Input]：输入态（导航项淡出，原地变输入栏）
  * - [Detail]：课程详情卡（导航项与星云球都溶解，拉高展示课程信息）
  */
-private enum class BarMode { Normal, Input, Detail }
+private enum class BarMode { Normal, Input, Detail, AddSchedule }
 
 /**
  * 课程详情卡的四态（维护者 2026-11-10 拍板）：
@@ -281,9 +281,19 @@ fun MainShell() {
     var showLocationEdit by remember { mutableStateOf(false) }
     var showLocationNav by remember { mutableStateOf(false) }
     var showWeekEdit by remember { mutableStateOf(false) }
-    // 点空白格添加日程：(day, period, week)；非 null 即弹添加子窗体（#18 第 6 项）
-    var pendingSlot by remember {
-        mutableStateOf<Triple<Int, Int, Int>?>(null)
+    // 添加日程表单（#14）：非 null 即导航栏原地变形为表单卡。
+    // (day, startPeriod, week) —— 工具条入口用「今天 + 第 1 节」，空白格入口用被点的那格。
+    var addingSchedule by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    // 占位按钮的轻提示（不接任何真实逻辑）
+    var placeholderHint by remember { mutableStateOf<String?>(null) }
+    // 占位按钮的轻提示（设置 / 更新课表）：不接任何真实逻辑，只显示一句话。
+    LaunchedEffect(placeholderHint) {
+        // 提示出现 2.2s 后自动消失；用独立 effect 盯 placeholderHint，
+        // 不放在组装点里，避免被后续重组打断。
+        if (placeholderHint != null) {
+            delay(2200)
+            placeholderHint = null
+        }
     }
 
     // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
@@ -413,6 +423,8 @@ fun MainShell() {
         // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
         // （原先定义在底栏段落里，那里太晚，内容区拿不到。）
         val barMode = when {
+            // 添加日程优先于详情卡：从工具条/空白格进入表单时不该同时开详情卡
+            addingSchedule != null -> BarMode.AddSchedule
             detailCourse != null -> BarMode.Detail
             mode == OrbMode.Input -> BarMode.Input
             else -> BarMode.Normal
@@ -453,8 +465,14 @@ fun MainShell() {
                     schedules = addedSchedules,
                     onCourseClick = { detailCourse = it },
                     onBlankSlotAdd = { day, period, week ->
-                        // 点空白格 → 记下位置，弹「添加日程」子窗体（#18 第 6 项）
-                        pendingSlot = Triple(day, period, week)
+                        // 点空白格 → 导航栏原地变形为「添加日程」表单（#14：与点课同动画）
+                        addingSchedule = Triple(day, period, week)
+                    },
+                    onSettings = { placeholderHint = "设置：本期占位，未实现" },
+                    onUpdateSchedule = { placeholderHint = "更新课表：本期占位，未实现" },
+                    onAddScheduleFromToolbar = { week, day ->
+                        // 工具条入口：预填今天、第 1 节
+                        addingSchedule = Triple(day, 1, week)
                     },
                 )
             }
@@ -536,6 +554,9 @@ fun MainShell() {
             DetailStage.FullDelete -> fullDeleteHeight
         }
         val draggedDetailHeight = (detailHeight + detailDragDp.dp).coerceAtLeast(navHeight)
+        // 添加日程表单卡高度：六字段＋底部固定按钮，取比详情态略高的值。
+        // 内容区内部可滚动，这里不需要精确等于内容高度。
+        val addScheduleHeight = s(392.dp)
 
         // ---- 高度 / 圆角：全部由 Animatable + spring 驱动 ----
         //
@@ -548,6 +569,7 @@ fun MainShell() {
         val density = LocalDensity.current
         val targetPx = with(density) {
             when {
+                barMode == BarMode.AddSchedule && !isCollapsing -> addScheduleHeight.toPx()
                 isCollapsing || barMode != BarMode.Detail -> navHeight.toPx()
                 else -> draggedDetailHeight.toPx()
             }
@@ -556,7 +578,7 @@ fun MainShell() {
         // key 必须包含 detailStage：上划吸附到 Full 时 barMode 仍是 Detail、
         // isCollapsing 仍是 false，若只盯这两个 key，effect 不会重跑，
         // 高度就停在简介态 —— 这正是「上划/下降没有动画」的另一半根因。
-        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging) {
+        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging, addingSchedule) {
             // 形态切换 / 吸附 / 开始退出：走弹簧动画（拖拽中除外）
             if (!isDragging) {
                 barHeightPx.animateTo(
@@ -591,6 +613,7 @@ fun MainShell() {
         val barCorner by animateDpAsState(
             targetValue = when (barMode) {
                 BarMode.Detail -> s(26.dp)
+                BarMode.AddSchedule -> s(26.dp)
                 BarMode.Input -> navCorner
                 BarMode.Normal -> navCorner
             },
@@ -653,6 +676,26 @@ fun MainShell() {
                 label = "navMorph",
             ) { showing ->
                 when (showing) {
+                BarMode.AddSchedule -> {
+                    val slot = addingSchedule
+                    if (slot != null) {
+                        com.nongyu.appplus.ui.timetable.ScheduleFormContent(
+                            initialDay = slot.first,
+                            initialPeriod = slot.second,
+                            week = slot.third,
+                            uiScale = uiScale,
+                            // 先关表单、再收日程：两个状态分开写。
+                            // 之前写在同一个回调里时，AnimatedContent 的 targetState
+                            // 没有及时重算，导致表单保存后不关闭（实测）。
+                            onSave = { entry ->
+                                addingSchedule = null
+                                addedSchedules.add(entry)
+                            },
+                            onCancel = { addingSchedule = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
                 BarMode.Detail -> {
                     val course = detailCourse
                     if (course != null) {
@@ -837,6 +880,25 @@ fun MainShell() {
             }
         }
 
+        // 占位按钮的轻提示（设置 / 更新课表）：不接任何真实逻辑，只显示一句话。
+        placeholderHint?.let { hint ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = s(120.dp))
+                    .clip(RoundedCornerShape(s(10.dp)))
+                    .background(Color(0xE60A140F))
+                    .padding(horizontal = s(14.dp), vertical = s(8.dp)),
+            ) {
+                Text(
+                    text = hint,
+                    color = Color.White,
+                    fontSize = (9f * uiScale).sp,
+                    lineHeight = (12f * uiScale).sp,
+                )
+            }
+        }
+
         // 长按态的全屏 dim：画在底栏之后，把整条导航栏也一起压暗
         if (dimAlpha > 0f) {
             Box(
@@ -1008,21 +1070,6 @@ fun MainShell() {
                 location = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,
                 onDismiss = { showLocationNav = false },
-            )
-        }
-
-        // 点空白格 → 添加日程子窗体（#18 第 6 项）
-        pendingSlot?.let { (day, period, week) ->
-            com.nongyu.appplus.ui.timetable.AddScheduleDialog(
-                day = day,
-                startPeriod = period,
-                week = week,
-                uiScale = uiScale,
-                onConfirm = { entry ->
-                    addedSchedules.add(entry)
-                    pendingSlot = null
-                },
-                onDismiss = { pendingSlot = null },
             )
         }
 
