@@ -1,5 +1,9 @@
 package com.nongyu.appplus.ui.timetable
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,9 +62,13 @@ fun ScheduleFormContent(
     onSave: (ScheduleEntry) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 下拉横杠时向 Shell 回报位移（dp，正数=向下），用于跟手 / 关闭判定。 */
+    onHandleDrag: (deltaDp: Float) -> Unit = {},
+    onHandleDragEnd: () -> Unit = {},
 ) {
     val colors = NongyuTheme.colors
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+    val density = LocalDensity.current
 
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
@@ -77,11 +85,39 @@ fun ScheduleFormContent(
             .padding(horizontal = s(16.dp), vertical = s(2.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // ---- 可拖拽的横杠（命中区 56×18，视觉 40×4），与课程详情卡同一套 ----
+        // 拖到最底 = 关闭表单（与详情卡退出同一手感）
+        Box(
+            modifier = Modifier
+                .width(s(56.dp))
+                .height(s(18.dp))
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { _, dy -> onHandleDrag(dy / density.density) },
+                        onDragEnd = onHandleDragEnd,
+                        onDragCancel = onHandleDragEnd,
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(s(40.dp))
+                    .height(s(4.dp))
+                    .clip(RoundedCornerShape(s(2.dp)))
+                    .background(colors.surface.colorOutline.copy(alpha = 0.55f)),
+            )
+        }
+
+        // 标题与整体内容下移 10dp（维护者要求「卡片内容整体往下」）
+        Spacer(Modifier.height(s(10.dp)))
+
         Text(
             text = "添加日程",
             color = colors.surface.colorText,
-            fontSize = (12f * uiScale).sp,
-            lineHeight = (15f * uiScale).sp,
+            // 标题放大到 15sp（与课程详情卡课名同级），原来 12sp 明显偏小
+            fontSize = (15f * uiScale).sp,
+            lineHeight = (18f * uiScale).sp,
             fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.Center,
         )

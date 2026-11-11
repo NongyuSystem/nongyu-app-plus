@@ -85,6 +85,8 @@ fun TimetableScreen(
     onUpdateSchedule: () -> Unit = {},
     /** 工具条：添加日程（不带格子位置）。 */
     onAddScheduleFromToolbar: (week: Int, day: Int) -> Unit = { _, _ -> },
+    /** 点日程卡 / 下拉横杠：开或关该日程的展开态。 */
+    onScheduleClick: (ScheduleEntry) -> Unit = {},
 ) {
     val colors = NongyuTheme.colors
     val density = LocalDensity.current
@@ -157,19 +159,27 @@ fun TimetableScreen(
                         )
                     },
             ) {
-                // 切周/切天用方向滑动过渡，让「翻页」有方向感
+                // 切周/切天过渡：**交叉淡入淡出**为主，只保留很轻的方向位移。
+                //
+                // 之前是整页 220ms 平移 + 各自淡出，观感生硬：旧内容整块滑走、
+                // 新内容整块滑入，像翻幻灯片。维护者要求「增添/去除的课要有淡入淡出」。
+                // 现在：
+                // - 淡入 260ms 比淡出 180ms 长，新旧内容在中间有交叠，看起来是「溶解」而非「切换」
+                // - 位移只用屏宽的 6%（0.06f），只做方向暗示，不抢戏
+                // - 淡出用线性起步、淡入用 tween 缓动，避免同时消失造成的闪空
                 AnimatedContent(
                     targetState = currentWeek to (if (dayMode) currentDay else -1),
                     transitionSpec = {
                         val forward = targetState.first > initialState.first ||
                             (targetState.first == initialState.first && targetState.second > initialState.second)
-                        if (forward) {
-                            (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
-                                .togetherWith(slideOutHorizontally(tween(220)) { -it } + fadeOut(tween(160)))
-                        } else {
-                            (slideInHorizontally(tween(220)) { -it } + fadeIn(tween(220)))
-                                .togetherWith(slideOutHorizontally(tween(220)) { it } + fadeOut(tween(160)))
-                        }
+                        val dir = if (forward) 1 else -1
+                        (
+                            fadeIn(tween(260, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) +
+                                slideInHorizontally(tween(260)) { full -> dir * (full * 0.06f).toInt() }
+                            ).togetherWith(
+                            fadeOut(tween(180)) +
+                                slideOutHorizontally(tween(180)) { full -> -dir * (full * 0.06f).toInt() },
+                            )
                     },
                     label = "weekPage",
                 ) { (week, day) ->
@@ -185,6 +195,7 @@ fun TimetableScreen(
                             // 点空白：记下 (星期, 节次)，由 Shell 弹添加日程子窗体
                             onBlankSlotAdd(d, period, week)
                         },
+                        onScheduleClick = onScheduleClick,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

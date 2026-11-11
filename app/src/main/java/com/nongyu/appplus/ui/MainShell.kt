@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -130,7 +131,7 @@ private enum class OrbMode { Idle, Listening, Input }
  * - [Input]：输入态（导航项淡出，原地变输入栏）
  * - [Detail]：课程详情卡（导航项与星云球都溶解，拉高展示课程信息）
  */
-private enum class BarMode { Normal, Input, Detail, AddSchedule }
+private enum class BarMode { Normal, Input, Detail, AddSchedule, ScheduleDetail }
 
 /**
  * 课程详情卡的四态（维护者 2026-11-10 拍板）：
@@ -190,6 +191,11 @@ fun MainShell() {
     val addedSchedules = remember {
         androidx.compose.runtime.mutableStateListOf<com.nongyu.appplus.ui.timetable.ScheduleEntry>()
     }
+
+    // 添加日程表单的横杠下拉累计位移（dp，正=向下）
+    var scheduleDragDp by remember { mutableFloatStateOf(0f) }
+    // 日程卡「展开态」：点日程卡拉杆打开，再点卡外任意位置退出（开/关两态）
+    var scheduleDetailId by remember { mutableStateOf<String?>(null) }
 
     // ---- 详情卡的可修改数据 ----
     val courseId = detailCourse?.id
@@ -425,6 +431,8 @@ fun MainShell() {
         val barMode = when {
             // 添加日程优先于详情卡：从工具条/空白格进入表单时不该同时开详情卡
             addingSchedule != null -> BarMode.AddSchedule
+            // 日程展开态次之：它也要占用导航栏位置来显示日程明细
+            scheduleDetailId != null -> BarMode.ScheduleDetail
             detailCourse != null -> BarMode.Detail
             mode == OrbMode.Input -> BarMode.Input
             else -> BarMode.Normal
@@ -465,7 +473,14 @@ fun MainShell() {
                     schedules = addedSchedules,
                     onCourseClick = { detailCourse = it },
                     onBlankSlotAdd = { day, period, week ->
-                        // 点空白格 → 导航栏原地变形为「添加日程」表单（#14：与点课同动画）
+                        // 点空白格 → 导航栏原地变形为「添加日程」表单（#14：与点课同动画）。
+                        //
+                        // 必须先收起已打开的详情卡：详情态的整屏消费层声明在本层之前，
+                        // 正常情况下点击会被它吃成「取消卡片」；这里既然回调进来了，
+                        // 就说明用户意图是「加日程」，要把卡片一并收起，
+                        // 否则会同时存在 detailCourse 与 addingSchedule（前者优先，表单开不出来）。
+                        detailCourse = null
+                        isCollapsing = false
                         addingSchedule = Triple(day, period, week)
                     },
                     onSettings = { placeholderHint = "设置：本期占位，未实现" },
@@ -474,6 +489,27 @@ fun MainShell() {
                         // 工具条入口：预填今天、第 1 节
                         addingSchedule = Triple(day, 1, week)
                     },
+                    // 日程卡只有开/关两态（维护者：「只有开关两态，拉下去就是关了这个卡片」）：
+                    // 点卡或下拉横杠都是 toggle。
+                    onScheduleClick = { sc ->
+                        scheduleDetailId = if (scheduleDetailId == sc.id) null else sc.id
+                    },
+                )
+            }
+
+            // 【日程展开态】点任意位置退出（维护者：「点击后面任意位置退出」）。
+            //
+            // 注意这里**必须盖在课表之上**，与详情卡相反：
+            // 详情卡要放行课程盒子（点别的课切卡），而日程开态要求「点哪都退出」，
+            // 放到底层会被课表空白格的 clickable 先命中、变成弹添加表单。
+            if (scheduleDetailId != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { scheduleDetailId = null },
                 )
             }
 
@@ -557,6 +593,8 @@ fun MainShell() {
         // 添加日程表单卡高度：六字段＋底部固定按钮，取比详情态略高的值。
         // 内容区内部可滚动，这里不需要精确等于内容高度。
         val addScheduleHeight = s(392.dp)
+        // 日程展开卡：只展示明细，比课程详情矮
+        val scheduleDetailHeight = s(210.dp)
 
         // ---- 高度 / 圆角：全部由 Animatable + spring 驱动 ----
         //
@@ -570,6 +608,7 @@ fun MainShell() {
         val targetPx = with(density) {
             when {
                 barMode == BarMode.AddSchedule && !isCollapsing -> addScheduleHeight.toPx()
+                barMode == BarMode.ScheduleDetail && !isCollapsing -> scheduleDetailHeight.toPx()
                 isCollapsing || barMode != BarMode.Detail -> navHeight.toPx()
                 else -> draggedDetailHeight.toPx()
             }
@@ -578,7 +617,7 @@ fun MainShell() {
         // key 必须包含 detailStage：上划吸附到 Full 时 barMode 仍是 Detail、
         // isCollapsing 仍是 false，若只盯这两个 key，effect 不会重跑，
         // 高度就停在简介态 —— 这正是「上划/下降没有动画」的另一半根因。
-        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging, addingSchedule) {
+        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging, addingSchedule, scheduleDetailId) {
             // 形态切换 / 吸附 / 开始退出：走弹簧动画（拖拽中除外）
             if (!isDragging) {
                 barHeightPx.animateTo(
@@ -614,6 +653,7 @@ fun MainShell() {
             targetValue = when (barMode) {
                 BarMode.Detail -> s(26.dp)
                 BarMode.AddSchedule -> s(26.dp)
+                BarMode.ScheduleDetail -> s(26.dp)
                 BarMode.Input -> navCorner
                 BarMode.Normal -> navCorner
             },
@@ -692,6 +732,28 @@ fun MainShell() {
                                 addedSchedules.add(entry)
                             },
                             onCancel = { addingSchedule = null },
+                            // 横杠下拉：跟手记录位移，松手时超过阈值就关闭表单。
+                            // 与详情卡退出同一手感（「拉下去就是关了这个卡片」）。
+                            onHandleDrag = { deltaDp ->
+                                scheduleDragDp += deltaDp
+                            },
+                            onHandleDragEnd = {
+                                val closeThreshold: Float = 72f * uiScale
+                                if (scheduleDragDp > closeThreshold) addingSchedule = null
+                                scheduleDragDp = 0f
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                BarMode.ScheduleDetail -> {
+                    val sc = addedSchedules.firstOrNull { it.id == scheduleDetailId }
+                    if (sc != null) {
+                        com.nongyu.appplus.ui.timetable.ScheduleDetailContent(
+                            entry = sc,
+                            uiScale = uiScale,
+                            onClose = { scheduleDetailId = null },
+                            onHandleDragDown = { scheduleDetailId = null },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

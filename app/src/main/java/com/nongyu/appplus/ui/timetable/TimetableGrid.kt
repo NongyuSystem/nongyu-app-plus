@@ -1,5 +1,8 @@
 package com.nongyu.appplus.ui.timetable
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.setValue
@@ -169,6 +172,8 @@ fun TimetableGrid(
     onCourseClick: (CourseEntry) -> Unit = {},
     /** 点空白格：(day 0..6, period 1..10)。 */
     onBlankSlotClick: (day: Int, period: Int) -> Unit = { _, _ -> },
+    /** 点日程卡 / 下拉横杠：开或关该日程的展开态。 */
+    onScheduleClick: (ScheduleEntry) -> Unit = {},
 ) {
     val coursesByDay = remember(courses) { courses.groupedByDay() }
     // 课程名 → 色槽：保证**同屏课程必然不同色**（撞槽自动顺延），
@@ -439,6 +444,7 @@ fun TimetableGrid(
                             schedules = schedules.filter { it.day == day },
                             onCourseClick = onCourseClick,
                             onBlankSlotClick = { period -> onBlankSlotClick(day, period) },
+                            onScheduleClick = onScheduleClick,
                             slotOf = { name ->
                                 hueSlots[name] ?: CoursePalette.preferredSlot(name)
                             },
@@ -533,6 +539,8 @@ private fun CourseDayColumn(
     /** 该天用户新增的日程（画成与课程卡类似的卡片）。 */
     schedules: List<ScheduleEntry> = emptyList(),
     onCourseClick: (CourseEntry) -> Unit = {},
+    /** 点日程卡：开/关展开态。 */
+    onScheduleClick: (ScheduleEntry) -> Unit = {},
     /** 点空白槽位：(period 1..10)。是否真的空白由本列判断后被占据的节次过滤。 */
     onBlankSlotClick: (period: Int) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -564,7 +572,18 @@ private fun CourseDayColumn(
                         .fillMaxWidth()
                         .then(
                             if (period !in occupiedPeriods) {
-                                Modifier.clickable { onBlankSlotClick(period) }
+                                // 点击水波纹必须是圆角矩形（与课程卡同一套 cardCorner）。
+                                // 默认 Ripple 只在 clip 之后才会被裁圆；所以先 clip 再挂 indication，
+                                // 并且 interactionSource 要 remember，否则每次重组都新建、波纹会断。
+                                val rippleSource = remember { MutableInteractionSource() }
+                                Modifier
+                                    .clip(RoundedCornerShape(cardCorner))
+                                    .clickable(
+                                        interactionSource = rippleSource,
+                                        indication = androidx.compose.material3.ripple(
+                                            bounded = true,
+                                        ),
+                                    ) { onBlankSlotClick(period) }
                             } else {
                                 Modifier
                             },
@@ -613,6 +632,8 @@ private fun CourseDayColumn(
                         entry = sc,
                         uiScale = uiScale,
                         corner = cardCorner,
+                        onClick = { onScheduleClick(sc) },
+                        onHandleDragDown = { onScheduleClick(sc) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(with(LocalDensity.current) { (bottom - top).toDp() })
@@ -633,6 +654,10 @@ private fun ScheduleCard(
     entry: ScheduleEntry,
     uiScale: Float,
     corner: Dp,
+    /** 点卡片任意位置：打开/关闭日程详情态（维护者要求「只有开关两态」）。 */
+    onClick: () -> Unit = {},
+    /** 下拉横杠：松手时判关闭。 */
+    onHandleDragDown: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -641,13 +666,42 @@ private fun ScheduleCard(
         modifier = modifier
             .clip(RoundedCornerShape(corner))
             .background(bg)
-            .padding(horizontal = (4f * uiScale).dp, vertical = (3f * uiScale).dp),
+            // 点日程卡任意位置都算「操作这张卡」，由 Shell 决定开还是关
+            .clickable { onClick() }
+            .padding(horizontal = (4f * uiScale).dp, vertical = (2f * uiScale).dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
+            // ---- 日程卡的滑动杠（与课程详情卡同一套视觉：40×4、圆角 2）----
+            // 命中区放宽到 40×14，避免小卡上太难点；下拉超过阈值即关闭。
+            Box(
+                modifier = Modifier
+                    .width((40f * uiScale).dp)
+                    .height((10f * uiScale).dp)
+                    .pointerInput(entry.id) {
+                        var acc = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { acc = 0f },
+                            onVerticalDrag = { _, dy -> acc += dy },
+                            onDragEnd = {
+                                if (acc > 24.dp.toPx()) onHandleDragDown()
+                            },
+                            onDragCancel = { },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width((28f * uiScale).dp)
+                        .height((2.5f * uiScale).dp)
+                        .clip(RoundedCornerShape((1.5f * uiScale).dp))
+                        .background(colors.brand.colorBrand.copy(alpha = 0.45f)),
+                )
+            }
             Text(
                 text = entry.title,
                 color = colors.brand.colorBrand,
