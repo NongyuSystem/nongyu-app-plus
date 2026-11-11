@@ -633,7 +633,6 @@ private fun CourseDayColumn(
                         uiScale = uiScale,
                         corner = cardCorner,
                         onClick = { onScheduleClick(sc) },
-                        onHandleDragDown = { onScheduleClick(sc) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(with(LocalDensity.current) { (bottom - top).toDp() })
@@ -656,8 +655,6 @@ private fun ScheduleCard(
     corner: Dp,
     /** 点卡片任意位置：打开/关闭日程详情态（维护者要求「只有开关两态」）。 */
     onClick: () -> Unit = {},
-    /** 下拉横杠：松手时判关闭。 */
-    onHandleDragDown: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
@@ -675,33 +672,8 @@ private fun ScheduleCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // ---- 日程卡的滑动杠（与课程详情卡同一套视觉：40×4、圆角 2）----
-            // 命中区放宽到 40×14，避免小卡上太难点；下拉超过阈值即关闭。
-            Box(
-                modifier = Modifier
-                    .width((40f * uiScale).dp)
-                    .height((10f * uiScale).dp)
-                    .pointerInput(entry.id) {
-                        var acc = 0f
-                        detectVerticalDragGestures(
-                            onDragStart = { acc = 0f },
-                            onVerticalDrag = { _, dy -> acc += dy },
-                            onDragEnd = {
-                                if (acc > 24.dp.toPx()) onHandleDragDown()
-                            },
-                            onDragCancel = { },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width((28f * uiScale).dp)
-                        .height((2.5f * uiScale).dp)
-                        .clip(RoundedCornerShape((1.5f * uiScale).dp))
-                        .background(colors.brand.colorBrand.copy(alpha = 0.45f)),
-                )
-            }
+            // 课表上的日程小卡**不画滑动杠**（维护者 2026-11-11：小格子太窄，
+            // 杠子只保留在展开态里）。这里点一下即可打开展开态。
             Text(
                 text = entry.title,
                 color = colors.brand.colorBrand,

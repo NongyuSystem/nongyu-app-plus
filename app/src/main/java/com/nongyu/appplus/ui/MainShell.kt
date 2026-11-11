@@ -440,29 +440,30 @@ fun MainShell() {
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
-            // 【详情卡态】空白收起层放在**课表之下**。
+            // 【卡片外退出层】三种形态规则统一（维护者 2026-11-11 拍板）：
+            //   课程卡 / 日程卡 / 添加日程：点「卡片之外」退出，点「卡片之内」不退出。
             //
-            // 维护者 2026-11-10 给的精确定义：
-            //   空白区域 = 除「详情卡 / 课表上有的课程盒子 / 日程盒子」之外的所有区域。
-            //
-            // 为什么放底层：Compose 命中测试按「后声明的先命中」。
-            // 课程盒子（课表覆盖层里、带 clickable）是更上层的命中节点，
-            // 会先消费掉 down，事件就落不到这层 —— 点盒子不会退出。
-            // 而课表的空白槽位没有任何 pointerInput，事件自然落到这里 —— 退出。
-            //
-            // 反过来（原来那版）把收起层盖在课表**之上**，
-            // 它先命中并消费，点课程盒子也被强行收起 —— 正是这次要修的 bug。
-            //
-            // 日程盒子本期未渲染到网格（MOCK_SCHEDULES 留给 #18），
-            // 将来接入时它自带 clickable，同样会被这层放行，无需改这里。
-            if (barMode == BarMode.Detail) {
+            // 实现要点：这层是**全屏**的，但声明位置在**底栏之前**。
+            // Compose 命中测试「后声明的先命中」，而卡片本体就住在底栏里
+            // （底栏声明在上面几行之后），所以：
+            //   - 落在卡片上的点击 → 底栏先命中，这层收不到 → 卡片内部不退出 ✅
+            //   - 落在其余区域     → 只有这层能接 → 退出 ✅
+            // 之前两版都不对：放整屏最顶（底栏之后）会连卡片内部一起吃掉；
+            // 干脆不放则卡片外无处接收点击（点了没反应）。
+            val dismissAction: (() -> Unit)? = when (barMode) {
+                BarMode.Detail -> ({ collapseDetail() })
+                BarMode.ScheduleDetail -> ({ scheduleDetailId = null })
+                BarMode.AddSchedule -> ({ addingSchedule = null })
+                else -> null
+            }
+            if (dismissAction != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
-                        ) { collapseDetail() },
+                        ) { dismissAction() },
                 )
             }
 
@@ -471,17 +472,37 @@ fun MainShell() {
                     navOccupiedPx = navOccupiedHeight,
                     deletedIds = deletedIds,
                     schedules = addedSchedules,
-                    onCourseClick = { detailCourse = it },
+                    onCourseClick = { course ->
+                        // 点课程盒子：只有「课程卡/日程卡/表单」都关着时才打开课程卡；
+                        // 任一卡片开着时，点课程盒子= 先退出当前卡片（维护者要求：
+                        // 课程卡开时点课程盒子之外的区域都退出，课程盒子本身也按此处理，
+                        // 否则「点别的课切卡」会和「点哪都退出」冲突）。
+                        if (addingSchedule != null) {
+                            addingSchedule = null
+                        } else if (scheduleDetailId != null) {
+                            scheduleDetailId = null
+                        } else if (detailCourse != null) {
+                            // 已开着课程卡时点另一个课程盒子 → 直接切到那门课
+                            detailCourse = course
+                            isCollapsing = false
+                        } else {
+                            detailCourse = course
+                        }
+                    },
                     onBlankSlotAdd = { day, period, week ->
-                        // 点空白格 → 导航栏原地变形为「添加日程」表单（#14：与点课同动画）。
-                        //
-                        // 必须先收起已打开的详情卡：详情态的整屏消费层声明在本层之前，
-                        // 正常情况下点击会被它吃成「取消卡片」；这里既然回调进来了，
-                        // 就说明用户意图是「加日程」，要把卡片一并收起，
-                        // 否则会同时存在 detailCourse 与 addingSchedule（前者优先，表单开不出来）。
-                        detailCourse = null
-                        isCollapsing = false
-                        addingSchedule = Triple(day, period, week)
+                        // 点空白格：**任何卡片开着时，第一下都只是退出卡片**
+                        // （维护者 2026-11-11："在课程时点击后面的除课程盒子外其他区域
+                        //   都是退出课程卡片"）。卡片都关着时才真正添加日程。
+                        if (addingSchedule != null) {
+                            addingSchedule = null
+                        } else if (scheduleDetailId != null) {
+                            scheduleDetailId = null
+                        } else if (detailCourse != null) {
+                            detailCourse = null
+                            isCollapsing = false
+                        } else {
+                            addingSchedule = Triple(day, period, week)
+                        }
                     },
                     onSettings = { placeholderHint = "设置：本期占位，未实现" },
                     onUpdateSchedule = { placeholderHint = "更新课表：本期占位，未实现" },
@@ -494,22 +515,6 @@ fun MainShell() {
                     onScheduleClick = { sc ->
                         scheduleDetailId = if (scheduleDetailId == sc.id) null else sc.id
                     },
-                )
-            }
-
-            // 【日程展开态】点任意位置退出（维护者：「点击后面任意位置退出」）。
-            //
-            // 注意这里**必须盖在课表之上**，与详情卡相反：
-            // 详情卡要放行课程盒子（点别的课切卡），而日程开态要求「点哪都退出」，
-            // 放到底层会被课表空白格的 clickable 先命中、变成弹添加表单。
-            if (scheduleDetailId != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) { scheduleDetailId = null },
                 )
             }
 
@@ -682,6 +687,23 @@ fun MainShell() {
                 .featheredEdge(colors.navBar.colorItem, barCorner)
                 .clip(RoundedCornerShape(barCorner))
                 .background(colors.navBar.colorContainer)
+                // 卡片形态下，底栏容器本身**消费点击**：容器就是卡片本体，
+                // 落在它上面的点击必须停在这里，不能穿透到底下的「卡片外退出层」，
+                // 否则点卡片内部也会退出（维护者明确要求「卡片内部不退出」）。
+                //
+                // 放这里而不是放在各个卡片内容里：卡片内容高度会随形态变化，
+                // 内容之外的容器留白同样是「卡片内部」，也得消费掉。
+                // 横杠等子控件的 pointerInput 在更内层，命中测试先给子节点，拖拽不受影响。
+                .then(
+                    if (barMode != BarMode.Normal && barMode != BarMode.Input) {
+                        Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { /* 只消费，不动作 */ }
+                    } else {
+                        Modifier
+                    },
+                )
                 // 上报底栏占位（供内容页做底部避让）。
                 //
                 // 为什么不再上报「顶边 y 坐标」：
@@ -752,6 +774,12 @@ fun MainShell() {
                         com.nongyu.appplus.ui.timetable.ScheduleDetailContent(
                             entry = sc,
                             uiScale = uiScale,
+                            // 行内编辑即时落库：直接替换列表里同 id 的那条。
+                            // scheduleDetailId 不变，卡片保持打开状态不闪。
+                            onUpdate = { updated ->
+                                val idx = addedSchedules.indexOfFirst { it.id == updated.id }
+                                if (idx >= 0) addedSchedules[idx] = updated
+                            },
                             onClose = { scheduleDetailId = null },
                             onHandleDragDown = { scheduleDetailId = null },
                             modifier = Modifier.fillMaxSize(),

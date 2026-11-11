@@ -82,6 +82,11 @@ fun ScheduleFormContent(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // 卡片内部消费点击：不消费会穿透到「卡片外退出层」，点卡片内部就退出了
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            ) { }
             .padding(horizontal = s(16.dp), vertical = s(2.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

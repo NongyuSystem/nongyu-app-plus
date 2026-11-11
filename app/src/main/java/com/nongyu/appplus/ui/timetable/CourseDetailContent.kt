@@ -103,6 +103,17 @@ fun CourseDetailContent(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // 「卡片内部不退出」的关键：卡片本身要**消费掉**落在它范围内的点击，
+            // 否则点击会穿透到下面那层「卡片外退出层」，表现就是点卡片内部也退出。
+            //
+            // 之前删过一次这个消费层（当时是为了修「第二次上划收不到手势」），
+            // 那次错的是「加在整卡根部、把横杠的 pointerInput 也盖住了」。
+            // 现在横杠的 pointerInput 在子节点上、声明更靠内，
+            // 命中测试会先给子节点，横杠照常可拖。
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            ) { /* 只消费，不动作 */ }
             .padding(horizontal = s(18.dp), vertical = s(4.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
