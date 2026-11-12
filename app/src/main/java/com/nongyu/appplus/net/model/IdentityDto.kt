@@ -19,6 +19,24 @@ data class HealthzDto(
     val status: String? = null,
 )
 
+/**
+ * `GET /status` —— 运维依赖探针（现行契约 §2.3）。
+ *
+ * 与 [HealthzDto] 不同：`/healthz` 只报进程可达、不探下游；`/status` **如实上报**
+ * Postgres / Redis / 缓存熔断器 / 当前存储实现。状态码恒 200，真实情况放 body 里。
+ *
+ * 全部字段可空：后端 `StatusProbe` 未配置的探针会返回 `"unknown"`，不会缺字段崩客户端。
+ * 这是**唯二免 NY1 签名**的路径之一（另一个是 `/healthz`），见 `AppSignInterceptor`。
+ */
+@Serializable
+data class StatusDto(
+    val process: String? = null,
+    val postgres: String? = null,
+    val redis: String? = null,
+    val breaker: String? = null,
+    val storage: String? = null,
+)
+
 /** `POST /identity/mailcode/send` —— 公开。 */
 @Serializable
 data class MailCodeAckDto(
@@ -61,6 +79,57 @@ data class UserDto(
     val major: String? = null,
     val className: String? = null,
     val grade: String? = null,
+)
+
+/**
+ * `POST /identity/login` 的请求体（现行契约 `docs/后端接口与NY1签名对接契约.md` §3.1）。
+ *
+ * ## 四种登录方式
+ * `method` 取 `school` / `password` / `mailcode` / `idcard`。
+ * **只有 `school` 能注册新账号**；其余三种账号不存在时后端回 400 `need_school_auth`，
+ * 引导先走 `school`。
+ *
+ * ## 一期的主力字段：`goAdminTgt`
+ * `school` 方式客户端只做一次统一登录、交一张 `goAdminTgt`（55 字符的统一身份认证
+ * 全局登录态 cookie）即可，后端全权完成后续换票与 13 组档案取数。
+ * `xsgzToken` 不传也行 —— 后端会自己用 tgt 换。
+ *
+ * 字段全部可空 + 默认 `null`：调用方只填本次方式需要的字段即可。
+ * 不要给任何字段写非空类型，否则四种方式无法共用同一个 DTO。
+ */
+@Serializable
+data class LoginRequestDto(
+    val method: String? = null,
+    val deviceId: String? = null,
+    /** 统一身份认证的全局登录态 cookie；school 方式必填。 */
+    val goAdminTgt: String? = null,
+    /** 学工系统 access token；可选，后端会自己用 tgt 换。 */
+    val xsgzToken: String? = null,
+    val schoolMethod: String? = null,
+    val studentNo: String? = null,
+    val password: String? = null,
+    val phone: String? = null,
+    val code: String? = null,
+    val wechatCode: String? = null,
+    val email: String? = null,
+    val ticket: String? = null,
+    val cookie: String? = null,
+    /** idcard 方式：身份证后四位。 */
+    val idCardSuffix4: String? = null,
+    /** idcard 方式：姓名首字母。 */
+    val nameInitials: String? = null,
+)
+
+/**
+ * `POST /identity/logout/all` 的响应：`{"ok":true,"revoked":n}`。
+ *
+ * 后端 `logoutAllHandler` 吊销该用户 **App 域**全部会话，`revoked` 是被吊销的会话数。
+ * 与 `/identity/logout`（只吊销当前会话、`{"ok":true}`）不同，别复用 [LogoutAckDto]。
+ */
+@Serializable
+data class LogoutAllAckDto(
+    val ok: Boolean? = null,
+    val revoked: Int? = null,
 )
 
 /**

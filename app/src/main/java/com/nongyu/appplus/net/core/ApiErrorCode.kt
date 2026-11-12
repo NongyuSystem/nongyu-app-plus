@@ -100,6 +100,23 @@ object ApiErrorCode {
     /** 缓存层未配置（503，如未配 Redis/Store）。 */
     const val CACHE_UNAVAILABLE = "cache_unavailable"
 
+    // ---------- (G) NY1 请求签名（backend-plus `internal/server/appsign.go`，契约 §1.4） ----------
+
+    /**
+     * 签名校验失败（401）。触发很多：缺头 / 头格式错 / 未知 kid / 时间戳越窗 /
+     * 签名不匹配 / nonce 重放 / body 不可读。
+     *
+     * ⚠️ 这个码的形状是 `{"code":"app_sign_invalid"}`（**无 message**），
+     * 与 identity/中间件那一族相同。别指望有 message。
+     */
+    const val APP_SIGN_INVALID = "app_sign_invalid"
+
+    /** 请求体超过 1 MiB（413）。 */
+    const val APP_SIGN_TOO_LARGE = "app_sign_too_large"
+
+    /** nonce 存储不可用（503）。后端 **fail-closed**，不放行。 */
+    const val APP_SIGN_UNAVAILABLE = "app_sign_unavailable"
+
     // ---------- 兜底 ----------
 
     /**
@@ -113,6 +130,7 @@ object ApiErrorCode {
         TARGET_DENIED, BLOCKED_REDIRECT, TICKET_EXPIRED, CAMPUS_UNREACHABLE, INVALID_PRESENCE,
         AUTH_UNAVAILABLE, RATE_LIMITED, INVALID_REQUEST, NOT_FOUND, BAD_REQUEST,
         CACHE_MISS, SCHEMA_REJECTED, PAYLOAD_TOO_LARGE, REFRESH_TOO_SOON, CACHE_UNAVAILABLE,
+        APP_SIGN_INVALID, APP_SIGN_TOO_LARGE, APP_SIGN_UNAVAILABLE,
     )
 
     /**

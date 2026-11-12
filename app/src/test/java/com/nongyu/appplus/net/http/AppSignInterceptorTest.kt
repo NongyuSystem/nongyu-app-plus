@@ -25,8 +25,12 @@ class AppSignInterceptorTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         val body = "{\"email\":\"a@b.c\"}"
         val signer = AppRequestSigner.dev()
+        // 这里用裸 OkHttp Request，没有 Retrofit 的 Invocation tag，
+        // AuthInterceptor 会把它当成「需鉴权端点」。给一个非空 token 让它放行，
+        // 本用例测的是「签名头 + body 完整性」，token 不是被测对象。
+        // （现行契约里 /identity/login/admin 是公开端点，但裸请求带不了 @PublicEndpoint 注解。）
         val client = OkHttpFactory.build(
-            tokenProvider = AuthTokenProvider { null },
+            tokenProvider = AuthTokenProvider { "TEST-TOKEN" },
             sessionInvalidListener = SessionInvalidListener {},
             loggingEnabled = false,
             requestSigner = signer,
