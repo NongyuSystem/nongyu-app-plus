@@ -7,6 +7,8 @@ import com.nongyu.appplus.net.core.ApiFailure
 import com.nongyu.appplus.net.model.LoginDto
 import com.nongyu.appplus.net.model.LoginRequestDto
 import com.nongyu.appplus.net.model.NetJson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -39,7 +41,10 @@ object PasswordLoginUseCase {
         studentNo: String,
         password: String,
         deviceId: String,
-    ): PasswordLoginResult {
+    ): PasswordLoginResult = withContext(Dispatchers.IO) {
+        // 全程在 IO：网络请求 + MinimalSessionStore.writeToken 内部的 runBlocking（Keystore/
+        // DataStore 磁盘 IO）都不落在主线程（NetHolder 守卫 2）。
+        val appContext = context.applicationContext
         val dto = LoginRequestDto(
             method = "password",
             deviceId = deviceId,
@@ -49,8 +54,8 @@ object PasswordLoginUseCase {
         val text = NetJson.instance.encodeToString(LoginRequestDto.serializer(), dto)
         val body = text.toRequestBody("application/json".toMediaType())
 
-        return when (val outcome = NetHolder.api(context).login(body)) {
-            is ApiCall.Outcome.Success -> onSuccess(context, outcome.value)
+        when (val outcome = NetHolder.api(appContext).login(body)) {
+            is ApiCall.Outcome.Success -> onSuccess(appContext, outcome.value)
             is ApiCall.Outcome.Failure -> PasswordLoginResult.Failure(outcome.failure)
         }
     }

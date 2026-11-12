@@ -100,6 +100,8 @@ fun LoginCenterScreen() {
     var account by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
+    // 就地行内提示（票 #92）：失败文案显示在表单内，而非底部全局提示
+    var inlineMessage by remember { mutableStateOf<String?>(null) }
 
     val mainSize = 73.dp
     val sideSize = 70.dp
@@ -225,6 +227,9 @@ fun LoginCenterScreen() {
                     account = no
                     password = pwd
                 },
+                inlineMessage = inlineMessage,
+                savedAccount = account,
+                savedPassword = password,
             )
         }
 
@@ -235,13 +240,11 @@ fun LoginCenterScreen() {
                 if (submitting) return@LoginArrowButton
                 // 票 #92：只有「平台登录 · 账密」这一格接了真登录（S4/S7 接其余方式）
                 if (uiState.selectedMethod != LoginMethod.PLATFORM_PASSWORD) {
-                    hint = "该登录方式尚未接入"
-                    hintTick++
+                    // 其余方式由 S4/S7 接入（票 #92 范围外），不臆造文案
                     return@LoginArrowButton
                 }
                 submitting = true
-                hint = "登录中…"
-                hintTick++
+                inlineMessage = null
                 scope.launch {
                     val result = PasswordLoginUseCase(
                         context = appContext,
@@ -252,25 +255,24 @@ fun LoginCenterScreen() {
                     submitting = false
                     when (result) {
                         is com.nongyu.appplus.login.session.PasswordLoginResult.Success -> {
-                            // 成功：用例已写凭证并切主界面；学籍信息暂缺只给一次轻提示
-                            hint = if (result.profileIncomplete) {
-                                "部分学籍信息暂未同步，下次登录会重试"
-                            } else {
-                                ""
-                            }
+                            // 成功：用例已写凭证并切主界面。登录页随即移出组合，
+                            // profileIncomplete 的轻提示由主界面侧承接（S5 转场票），
+                            // 本票不在会立刻消失的登录页里放无效提示（code-review Spec 轴 #4）。
+                            inlineMessage = null
                         }
                         is com.nongyu.appplus.login.session.PasswordLoginResult.Failure -> {
                             val action = LoginFailurePolicy.decide(result.failure)
                             val code = (result.failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
                             when (action) {
                                 LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
-                                    // 自动切统一身份认证 tab（不清空输入、不弹窗）
+                                    // 自动切统一身份认证 tab；account/password 保留在 UI state，
+                                    // 并由 savedAccount/savedPassword 回灌表单，不清空输入（票 #92）
                                     uiState = LoginCenterUiState.initial()
-                                    hint = LoginFailurePolicy.messageOf(code).orEmpty()
+                                    inlineMessage = LoginFailurePolicy.messageOf(code)
                                 }
                                 LoginFailureAction.SHOW_MESSAGE ->
-                                    hint = LoginFailurePolicy.messageOf(code).orEmpty()
-                                LoginFailureAction.SILENT -> hint = ""
+                                    inlineMessage = LoginFailurePolicy.messageOf(code)
+                                LoginFailureAction.SILENT -> inlineMessage = null
                             }
                         }
                     }

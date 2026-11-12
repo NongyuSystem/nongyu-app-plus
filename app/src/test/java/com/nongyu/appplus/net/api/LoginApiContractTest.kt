@@ -10,6 +10,8 @@ import com.nongyu.appplus.net.model.LoginRequestDto
 import com.nongyu.appplus.net.model.NetJson
 import com.nongyu.appplus.net.sign.AppRequestSigner
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
@@ -100,14 +102,14 @@ class LoginApiContractTest {
         assertEquals("POST", req.method)
         assertEquals("/identity/login", req.path)
 
-        // 请求体：四个字段，且不出现 schoolMethod / wechatCode
+        // 请求体：**恰好 4 个字段**，值正确，且不出现 schoolMethod / wechatCode
         val sent = req.body.readUtf8()
-        assertTrue(sent.contains("\"method\":\"password\""))
-        assertTrue(sent.contains("\"studentNo\":\"20231234\""))
-        assertTrue(sent.contains("\"password\":\"secret\""))
-        assertTrue(sent.contains("\"deviceId\":\"device-uuid-1\""))
-        assertTrue(!sent.contains("schoolMethod"))
-        assertTrue(!sent.contains("wechatCode"))
+        val sentJson = NetJson.instance.parseToJsonElement(sent).jsonObject
+        assertEquals(setOf("method", "studentNo", "password", "deviceId"), sentJson.keys.toSet())
+        assertEquals("password", sentJson["method"]!!.jsonPrimitive.content)
+        assertEquals("20231234", sentJson["studentNo"]!!.jsonPrimitive.content)
+        assertEquals("secret", sentJson["password"]!!.jsonPrimitive.content)
+        assertEquals("device-uuid-1", sentJson["deviceId"]!!.jsonPrimitive.content)
 
         // 公开端点：不挂 Bearer
         assertEquals(null, req.getHeader("Authorization"))
@@ -120,34 +122,44 @@ class LoginApiContractTest {
         assertEquals("dev", req.getHeader(AppRequestSigner.HEADER_KEY_ID))
     }
 
-    @Test
-    fun `need_school_auth 失败被分类为 Http 且保留 code`() = runTest {
-        server.enqueue(
-            MockResponse().setResponseCode(400)
-                .setBody("""{"code":"need_school_auth"}"""),
-        )
 
+    // ---------- 失败码分流：门面把各类失败原样分类成 ApiFailure.Http ----------
+
+    private fun assertFailureCode(status: Int, body: String, expectedStatus: Int, expectedCode: String) = runTest {
+        server.enqueue(MockResponse().setResponseCode(status).setBody(body))
         val outcome = api().login(passwordBody())
-
         assertTrue(outcome is ApiCall.Outcome.Failure)
         val failure = (outcome as ApiCall.Outcome.Failure).failure
         assertTrue(failure is com.nongyu.appplus.net.core.ApiFailure.Http)
-        assertEquals("need_school_auth", (failure as com.nongyu.appplus.net.core.ApiFailure.Http).code)
-        assertEquals(400, failure.status)
+        failure as com.nongyu.appplus.net.core.ApiFailure.Http
+        assertEquals(expectedStatus, failure.status)
+        assertEquals(expectedCode, failure.code)
     }
 
     @Test
-    fun `签名错误 401 被分类为 Http 且不挂 Bearer`() = runTest {
-        server.enqueue(
-            MockResponse().setResponseCode(401)
-                .setBody("""{"code":"app_sign_invalid"}"""),
-        )
+    fun `bad_credentials 分流`() = assertFailureCode(401, """{"code":"bad_credentials"}""", 401, "bad_credentials")
 
-        val outcome = api().login(passwordBody())
+    @Test
+    fun `too_many_attempts 分流`() = assertFailureCode(429, """{"code":"too_many_attempts"}""", 429, "too_many_attempts")
 
-        assertTrue(outcome is ApiCall.Outcome.Failure)
-        val failure = (outcome as ApiCall.Outcome.Failure).failure
-        assertTrue(failure is com.nongyu.appplus.net.core.ApiFailure.Http)
-        assertEquals("app_sign_invalid", (failure as com.nongyu.appplus.net.core.ApiFailure.Http).code)
-    }
+    @Test
+    fun `rate_limited 分流`() = assertFailureCode(429, """{"code":"rate_limited"}""", 429, "rate_limited")
+
+    @Test
+    fun `login_method_unbound 分流`() = assertFailureCode(400, """{"code":"login_method_unbound"}""", 400, "login_method_unbound")
+
+    @Test
+    fun `user_disabled 分流`() = assertFailureCode(403, """{"code":"user_disabled"}""", 403, "user_disabled")
+
+    @Test
+    fun `invalid_request 分流`() = assertFailureCode(400, """{"code":"invalid_request"}""", 400, "invalid_request")
+
+    @Test
+    fun `need_school_auth 分流`() = assertFailureCode(400, """{"code":"need_school_auth"}""", 400, "need_school_auth")
+
+    @Test
+    fun `5xx 分流为 Http 且保留 internal_error`() = assertFailureCode(500, """{"code":"internal_error"}""", 500, "internal_error")
+
+    @Test
+    fun `app_sign_invalid 分流`() = assertFailureCode(401, """{"code":"app_sign_invalid"}""", 401, "app_sign_invalid")
 }

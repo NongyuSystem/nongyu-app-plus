@@ -25,17 +25,44 @@ sealed interface LoginFailureAction {
  *
  * ## 判定口径（规格 #89 文案表 / 票 #92 验收判据）
  * - `need_school_auth` → [LoginFailureAction.SWITCH_TO_CAMPUS_SSO]；
- * - 6 种业务码（`bad_credentials` / `too_many_attempts` / `rate_limited` /
- *   `login_method_unbound` / `user_disabled` / `forbidden` / `invalid_request` /
- *   `internal_error`）→ [LoginFailureAction.SHOW_MESSAGE]；
- * - **其余一切**（`app_sign_*`、5xx、超时、无网、解析失败、取消、未知码）
+ * - [MESSAGES] 表内的业务码 → [LoginFailureAction.SHOW_MESSAGE] + 对应固定文案；
+ * - **其余一切**（5xx、`app_sign_*`、超时、无网、解析失败、取消、未知码）
  *   → [LoginFailureAction.SILENT]，零提示。
+ *
+ * ## 单一真源
+ * [MESSAGES] 是「哪些码要出声 + 出什么声」的唯一表；[MESSAGE_CODES] 由它的 keys 派生，
+ * 不存在两处各列一遍的重复（code-review 两轴都点过这个 smell）。
  *
  * ## 为什么独立成纯函数
  * 文案映射与「哪类失败该出声」是易错且会反复改的策略，必须能纯 JVM 测；
  * 网络层 [ApiCall] 只负责把失败分类成 [ApiFailure]，不掺 UI 决策。
  */
 object LoginFailurePolicy {
+
+    /** 「业务码 → 就地行内文案」唯一映射表。文案来自规格 #89 的对照表，是独立真源。 */
+    private val MESSAGES: Map<String, String> = mapOf(
+        ApiErrorCode.BAD_CREDENTIALS to "账号或密码不正确，请重试",
+        ApiErrorCode.TOO_MANY_ATTEMPTS to "尝试次数过多，请稍后再试",
+        ApiErrorCode.RATE_LIMITED to "操作过于频繁，请稍后再试",
+        ApiErrorCode.LOGIN_METHOD_UNBOUND to "该登录方式尚未绑定，请先完成学校统一身份认证",
+        ApiErrorCode.USER_DISABLED to "账号暂不可用，请联系管理员",
+        ApiErrorCode.FORBIDDEN to "账号暂不可用，请联系管理员",
+        ApiErrorCode.INTERNAL_ERROR to "登录失败，请稍后重试",
+        ApiErrorCode.INVALID_REQUEST to "登录失败，请稍后重试",
+    )
+
+    /** `need_school_auth` 单独一条：它要切认证域，不归「出声」一类。 */
+    private const val NEED_SCHOOL_AUTH_MESSAGE =
+        "该账号尚未在农屿建立，请先完成学校统一身份认证"
+
+    private val MESSAGE_CODES: Set<String> get() = MESSAGES.keys
+
+    /** 签名层错误码：一律零提示（不是用户能改的错误）。 */
+    private val APP_SIGN_CODES = setOf(
+        ApiErrorCode.APP_SIGN_INVALID,
+        ApiErrorCode.APP_SIGN_TOO_LARGE,
+        ApiErrorCode.APP_SIGN_UNAVAILABLE,
+    )
 
     /** 把一次登录失败映射成 UI 动作。 */
     fun decide(failure: ApiFailure): LoginFailureAction = when (failure) {
@@ -64,39 +91,10 @@ object LoginFailurePolicy {
 
     /**
      * 按 code 返回固定文案；不在表内返回 `null`（调用方据此判定是否显示）。
-     *
-     * 文案来自规格 #89 的「code → 中文文案」对照表，是独立真源，不参与计算。
+     * `need_school_auth` 也有文案（切 tab 时一并显示），但它不进 [MESSAGES]。
      */
     fun messageOf(code: String?): String? = when (code) {
-        ApiErrorCode.NEED_SCHOOL_AUTH -> "该账号尚未在农屿建立，请先完成学校统一身份认证"
-        ApiErrorCode.BAD_CREDENTIALS -> "账号或密码不正确，请重试"
-        ApiErrorCode.TOO_MANY_ATTEMPTS -> "尝试次数过多，请稍后再试"
-        ApiErrorCode.RATE_LIMITED -> "操作过于频繁，请稍后再试"
-        ApiErrorCode.LOGIN_METHOD_UNBOUND -> "该登录方式尚未绑定，请先完成学校统一身份认证"
-        ApiErrorCode.USER_DISABLED,
-        ApiErrorCode.FORBIDDEN,
-        -> "账号暂不可用，请联系管理员"
-        ApiErrorCode.INTERNAL_ERROR,
-        "invalid_request",
-        -> "登录失败，请稍后重试"
-        else -> null
+        ApiErrorCode.NEED_SCHOOL_AUTH -> NEED_SCHOOL_AUTH_MESSAGE
+        else -> MESSAGES[code]
     }
-
-    private val MESSAGE_CODES = setOf(
-        ApiErrorCode.BAD_CREDENTIALS,
-        ApiErrorCode.TOO_MANY_ATTEMPTS,
-        ApiErrorCode.RATE_LIMITED,
-        ApiErrorCode.LOGIN_METHOD_UNBOUND,
-        ApiErrorCode.USER_DISABLED,
-        ApiErrorCode.FORBIDDEN,
-        ApiErrorCode.INTERNAL_ERROR,
-        "invalid_request",
-    )
-
-    /** 签名层错误码：一律零提示（不是用户能改的错误）。 */
-    private val APP_SIGN_CODES = setOf(
-        ApiErrorCode.APP_SIGN_INVALID,
-        ApiErrorCode.APP_SIGN_TOO_LARGE,
-        ApiErrorCode.APP_SIGN_UNAVAILABLE,
-    )
 }
