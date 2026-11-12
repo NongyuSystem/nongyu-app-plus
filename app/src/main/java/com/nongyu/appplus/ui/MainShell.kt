@@ -26,8 +26,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import com.nongyu.appplus.design.ModalScrim
-import com.nongyu.appplus.ui.timetable.TimetableRuler
-import com.nongyu.appplus.ui.timetable.rememberWaterTilt
+import com.nongyu.appplus.timetable.ui.TimetableRuler
+import com.nongyu.appplus.timetable.ui.rememberWaterTilt
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -95,7 +95,24 @@ import com.nongyu.appplus.icon.NavIconStrokes
 import com.nongyu.appplus.icon.drawNavIcon
 import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.design.NongyuTheme
-import com.nongyu.appplus.ui.timetable.CourseEntry
+import com.nongyu.appplus.timetable.model.CourseEntry
+import com.nongyu.appplus.timetable.logic.COURSE_TIMES
+import com.nongyu.appplus.timetable.logic.TimetableGeometry
+import com.nongyu.appplus.timetable.data.MockCourseCommentRepository
+import com.nongyu.appplus.timetable.data.CourseUserStore
+import com.nongyu.appplus.timetable.data.weekOfTerm
+import com.nongyu.appplus.timetable.data.MOCK_COURSES
+import com.nongyu.appplus.timetable.ui.ScheduleFormContent
+import com.nongyu.appplus.timetable.ui.classDaysOf
+import com.nongyu.appplus.timetable.ui.CourseCalendar
+import com.nongyu.appplus.timetable.ui.CourseDetailContent
+import com.nongyu.appplus.timetable.ui.weeksLabelOf
+import com.nongyu.appplus.timetable.ui.LocationEditDialog
+import com.nongyu.appplus.timetable.ui.WeekEditDialog
+import com.nongyu.appplus.timetable.ui.LocationNavDialog
+import com.nongyu.appplus.timetable.ui.ScheduleDetailContent
+import com.nongyu.appplus.timetable.ui.TimetableGrid
+import com.nongyu.appplus.timetable.ui.TimetableScreen
 
 /**
  * 主框架与导航壳（概念验证版 0.0.1test）。
@@ -120,7 +137,7 @@ private val TABS = listOf("全部", "课表", "探索", "个人")
  * 纯判定、不依赖 Android/Compose，放在这里便于以后挪进数据层加单测。
  */
 private fun isPeriodEnded(period: Int): Boolean {
-    val end = com.nongyu.appplus.ui.timetable.COURSE_TIMES
+    val end = com.nongyu.appplus.timetable.logic.COURSE_TIMES
         .getOrNull(period - 1)?.end ?: return false
     val parts = end.split(":")
     if (parts.size != 2) return false
@@ -155,7 +172,7 @@ private enum class DetailStage { Brief, Full, FullDelete }
 fun MainShell() {
     val colors = NongyuTheme.colors
     val context = LocalContext.current
-    val courseUserStore = remember { com.nongyu.appplus.ui.timetable.CourseUserStore(context) }
+    val courseUserStore = remember { com.nongyu.appplus.timetable.data.CourseUserStore(context) }
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
@@ -196,7 +213,7 @@ fun MainShell() {
     // 点空白格添加的日程（#18 第 6 项）：状态放 Shell，TimetableScreen 只负责渲染。
     // 本期内存态、不持久化（与 MOCK_COURSES 口径一致）。
     val addedSchedules = remember {
-        androidx.compose.runtime.mutableStateListOf<com.nongyu.appplus.ui.timetable.ScheduleEntry>()
+        androidx.compose.runtime.mutableStateListOf<com.nongyu.appplus.timetable.model.ScheduleEntry>()
     }
 
     // 添加日程表单的横杠下拉累计位移（dp，正=向下）
@@ -216,7 +233,7 @@ fun MainShell() {
         if (courseId != null) {
             courseUserStore.locationOverride(
                 courseId,
-                com.nongyu.appplus.ui.timetable.LocationScope.Once,
+                com.nongyu.appplus.timetable.data.LocationScope.Once,
             )
         } else null
     }
@@ -285,7 +302,7 @@ fun MainShell() {
     var comments by remember(courseId) {
         mutableStateOf(
             if (courseId != null) {
-                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository.list(courseId)
+                com.nongyu.appplus.timetable.data.MockCourseCommentRepository.list(courseId)
             } else emptyList(),
         )
     }
@@ -524,7 +541,7 @@ fun MainShell() {
             }
 
             if (selectedTab == 1) {
-                com.nongyu.appplus.ui.timetable.TimetableScreen(
+                com.nongyu.appplus.timetable.ui.TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
                     deletedIds = deletedIds,
                     schedules = addedSchedules,
@@ -803,7 +820,7 @@ fun MainShell() {
                 BarMode.AddSchedule -> {
                     val slot = addingSchedule
                     if (slot != null) {
-                        com.nongyu.appplus.ui.timetable.ScheduleFormContent(
+                        com.nongyu.appplus.timetable.ui.ScheduleFormContent(
                             initialDay = slot.first,
                             initialPeriod = slot.second,
                             week = slot.third,
@@ -833,7 +850,7 @@ fun MainShell() {
                 BarMode.ScheduleDetail -> {
                     val sc = addedSchedules.firstOrNull { it.id == scheduleDetailId }
                     if (sc != null) {
-                        com.nongyu.appplus.ui.timetable.ScheduleDetailContent(
+                        com.nongyu.appplus.timetable.ui.ScheduleDetailContent(
                             entry = sc,
                             uiScale = uiScale,
                             // 行内编辑即时落库：直接替换列表里同 id 的那条。
@@ -851,7 +868,7 @@ fun MainShell() {
                 BarMode.Detail -> {
                     val course = detailCourse
                     if (course != null) {
-                        com.nongyu.appplus.ui.timetable.CourseDetailContent(
+                        com.nongyu.appplus.timetable.ui.CourseDetailContent(
                             course = course,
                             uiScale = uiScale,
                             fullStage = detailStage != DetailStage.Brief,
@@ -866,7 +883,7 @@ fun MainShell() {
                                 }
                                 collapseDetail()
                             },
-                            otherSlots = com.nongyu.appplus.ui.timetable.MOCK_COURSES
+                            otherSlots = com.nongyu.appplus.timetable.data.MOCK_COURSES
                                 .filter { it.name == course.name && it.id != course.id },
                             onDismiss = { detailCourse = null },
                             // 地点：优先今日按天覆盖，其次通用覆盖，最后原始 room
@@ -877,7 +894,7 @@ fun MainShell() {
                                     courseUserStore.setTeacherOverride(course.id, v)
                                 }
                             },
-                            weekText = com.nongyu.appplus.ui.timetable.weeksLabelOf(course),
+                            weekText = com.nongyu.appplus.timetable.ui.weeksLabelOf(course),
                             onWeekEdit = { showWeekEdit = true },
                             attendance = effectiveAttendance,
                             onAttendanceToggle = { p ->
@@ -891,15 +908,15 @@ fun MainShell() {
                             onNoteChange = { text -> noteText = text },
                             comments = comments,
                             onCommentAdd = { text ->
-                                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                com.nongyu.appplus.timetable.data.MockCourseCommentRepository
                                     .add(course.id, text)
-                                comments = com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                comments = com.nongyu.appplus.timetable.data.MockCourseCommentRepository
                                     .list(course.id)
                             },
                             onCommentRemove = { i ->
-                                com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                com.nongyu.appplus.timetable.data.MockCourseCommentRepository
                                     .remove(course.id, i)
-                                comments = com.nongyu.appplus.ui.timetable.MockCourseCommentRepository
+                                comments = com.nongyu.appplus.timetable.data.MockCourseCommentRepository
                                     .list(course.id)
                             },
                             onLocationEdit = { showLocationEdit = true },
@@ -1185,7 +1202,7 @@ fun MainShell() {
             // 课表几何映射：滑动时间 / 松手节次 / 流水位置全部走它，
             // 于是与右侧课程行严格对齐（密度不均匀：45 分钟一节课 vs 150 分钟午休）。
             val geometry = remember(rulerHeight) {
-                com.nongyu.appplus.ui.timetable.TimetableGeometry
+                com.nongyu.appplus.timetable.logic.TimetableGeometry
                     .build(totalHeightDp = rulerHeight.value)
             }
             TimetableRuler(
@@ -1199,7 +1216,7 @@ fun MainShell() {
                     addingSchedule = Triple(
                         today.dayOfWeek.value - 1,
                         period,
-                        com.nongyu.appplus.ui.timetable.weekOfTerm(today),
+                        com.nongyu.appplus.timetable.data.weekOfTerm(today),
                     )
                 },
                 onDragStateChange = { rulerDragging = it },
@@ -1218,11 +1235,11 @@ fun MainShell() {
         val dlgCourse = detailCourse
         val dlgClassDays = remember(dlgCourse?.id) {
             if (dlgCourse != null) {
-                com.nongyu.appplus.ui.timetable.classDaysOf(dlgCourse)
+                com.nongyu.appplus.timetable.ui.classDaysOf(dlgCourse)
             } else emptySet()
         }
         if (showLocationEdit && dlgCourse != null) {
-            com.nongyu.appplus.ui.timetable.LocationEditDialog(
+            com.nongyu.appplus.timetable.ui.LocationEditDialog(
                 courseName = dlgCourse.name,
                 currentLocation = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,
@@ -1234,7 +1251,7 @@ fun MainShell() {
                         if (days.isEmpty()) {
                             courseUserStore.setLocationOverride(
                                 dlgCourse.id,
-                                com.nongyu.appplus.ui.timetable.LocationScope.Once,
+                                com.nongyu.appplus.timetable.data.LocationScope.Once,
                                 newLocation,
                             )
                         }
@@ -1244,9 +1261,9 @@ fun MainShell() {
             )
         }
         if (showWeekEdit && dlgCourse != null) {
-            com.nongyu.appplus.ui.timetable.WeekEditDialog(
+            com.nongyu.appplus.timetable.ui.WeekEditDialog(
                 courseName = dlgCourse.name,
-                weekSummary = com.nongyu.appplus.ui.timetable.weeksLabelOf(dlgCourse),
+                weekSummary = com.nongyu.appplus.timetable.ui.weeksLabelOf(dlgCourse),
                 uiScale = uiScale,
                 classDays = dlgClassDays,
                 initialExceptions = exceptionIsoDays.mapNotNull {
@@ -1262,7 +1279,7 @@ fun MainShell() {
             )
         }
         if (showLocationNav && dlgCourse != null) {
-            com.nongyu.appplus.ui.timetable.LocationNavDialog(
+            com.nongyu.appplus.timetable.ui.LocationNavDialog(
                 courseName = dlgCourse.name,
                 location = locDay ?: locGeneral ?: dlgCourse.room,
                 uiScale = uiScale,

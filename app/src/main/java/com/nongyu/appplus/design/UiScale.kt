@@ -1,5 +1,6 @@
 package com.nongyu.appplus.design
 
+
 /**
  * 屏宽自适应基准与换算（全工程唯一出处）。
  *
