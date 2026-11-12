@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.icon
+package com.nongyu.appplus.icon
 
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset

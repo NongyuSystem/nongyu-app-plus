@@ -48,8 +48,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.nongyu.appplus.ui.theme.NongyuColors
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.design.NongyuColors
+import com.nongyu.appplus.design.NongyuTheme
 
 /**
  * 登录中心（票 #91）—— 圆形登录方式切换器。

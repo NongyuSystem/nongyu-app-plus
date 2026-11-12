@@ -1,5 +1,6 @@
 package com.nongyu.appplus.ui.timetable
 
+import com.nongyu.appplus.design.uiScaleFor
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,7 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.design.NongyuTheme
 import java.time.LocalDate
 
 /**
@@ -107,7 +108,7 @@ fun TimetableScreen(
             .fillMaxSize()
             .background(colors.surface.colorBackground),
     ) {
-        val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
+        val uiScale = uiScaleFor(maxWidth.value)
         val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val breathPx = with(density) { (BOTTOM_BREATH * uiScale).toPx() }
         val gridHeight: Dp = if (navOccupiedPx != null && navOccupiedPx > 0f) {

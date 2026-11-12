@@ -286,7 +286,7 @@ class SkinPackTest {
 
         // 交给渲染层后：被丢弃的两项回落到内置默认，另两项照用。
         val payload = planned.toPayload()
-        val strokes = com.nongyu.appplus.ui.icon.NavIconStrokes.resolve(
+        val strokes = com.nongyu.appplus.icon.NavIconStrokes.resolve(
             payload = payload,
             builtIn = builtIn,
         )
@@ -447,7 +447,7 @@ class SkinPackTest {
             assertEquals(
                 "对 $v 两份判据结论不一致",
                 SkinPackPlanner.sanitizeStroke(v),
-                com.nongyu.appplus.ui.icon.NavIconStrokes.sanitize(v),
+                com.nongyu.appplus.icon.NavIconStrokes.sanitize(v),
             )
         }
     }

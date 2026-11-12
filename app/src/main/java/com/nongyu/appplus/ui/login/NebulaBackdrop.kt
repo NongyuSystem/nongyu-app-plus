@@ -29,7 +29,7 @@ import kotlin.math.sin
  *
  * ## 为什么不用图片
  * 全部 `Canvas` + `radialGradient` 矢量绘制，无图片资源、无第三方库；
- * 颜色由调用方传入（来自 [com.nongyu.appplus.ui.theme.NongyuColors] 的色板）。
+ * 颜色由调用方传入（来自 [com.nongyu.appplus.design.NongyuColors] 的色板）。
  *
  * ## 性能
  * 光斑数量固定（[NEBULA_BLOBS] 常量），每帧只是几次 `drawCircle`，

@@ -2,7 +2,7 @@ package com.nongyu.appplus.skin
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
-import com.nongyu.appplus.ui.theme.NongyuColors
+import com.nongyu.appplus.design.NongyuColors
 
 /**
  * **皮肤数据源接口 —— 本工程的唯一主接缝**（规格 #33 Implementation Decisions）。

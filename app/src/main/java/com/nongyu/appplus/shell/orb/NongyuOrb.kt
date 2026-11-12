@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.ai
+package com.nongyu.appplus.shell.orb
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.design.NongyuTheme
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin

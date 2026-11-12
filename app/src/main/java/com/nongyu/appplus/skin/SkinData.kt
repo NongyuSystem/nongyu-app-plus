@@ -1,6 +1,6 @@
 package com.nongyu.appplus.skin
 
-import com.nongyu.appplus.ui.theme.NongyuColors
+import com.nongyu.appplus.design.NongyuColors
 
 /**
  * 皮肤数据源（唯一主接缝）的**数据载体**。

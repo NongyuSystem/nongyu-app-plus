@@ -1,7 +1,7 @@
 package com.nongyu.appplus.skin
 
 import androidx.compose.ui.graphics.Color
-import com.nongyu.appplus.ui.theme.NongyuColors
+import com.nongyu.appplus.design.NongyuColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull

@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.design.NongyuTheme
 import java.time.LocalDate
 
 /**

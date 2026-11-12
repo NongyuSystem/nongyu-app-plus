@@ -35,7 +35,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nongyu.appplus.ui.theme.NongyuColors
+import com.nongyu.appplus.design.NongyuColors
 
 /**
  * 登录表单盒（票 #91）。

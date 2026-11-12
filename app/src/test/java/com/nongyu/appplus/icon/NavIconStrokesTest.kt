@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.icon
+package com.nongyu.appplus.icon
 
 import com.nongyu.appplus.skin.BuiltInSkin
 import com.nongyu.appplus.skin.BuiltInSkinSource

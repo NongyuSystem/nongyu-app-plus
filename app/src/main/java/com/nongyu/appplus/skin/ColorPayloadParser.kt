@@ -1,7 +1,7 @@
 package com.nongyu.appplus.skin
 
 import androidx.compose.ui.graphics.Color
-import com.nongyu.appplus.ui.theme.NongyuColors
+import com.nongyu.appplus.design.NongyuColors
 
 /**
  * 色值段解析的**纯逻辑层**（票 #37 / 规格 #33）。

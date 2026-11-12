@@ -32,7 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.design.NongyuTheme
 
 /**
  * 日程展开卡（票 #14 的日程卡「开」态），**字段可直接编辑并即时保存**。

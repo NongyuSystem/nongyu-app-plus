@@ -5,7 +5,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.nongyu.appplus.ui.login.LoginCenterScreen
 import com.nongyu.appplus.ui.login.LoginDestination
 import com.nongyu.appplus.ui.login.LoginSessionHolder
-import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
+import com.nongyu.appplus.design.NongyuAppPlusTheme
 
 /**
  * 应用根组件。

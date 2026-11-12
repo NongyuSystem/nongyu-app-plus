@@ -393,7 +393,7 @@ object SkinPackPlanner {
      * 线宽系数合法性判据的**唯一真源**（票 #57 ④）。
      *
      * `skin/` 是数据层、`ui/icon/` 是渲染层，方向应当是渲染层依赖数据层：
-     * [com.nongyu.appplus.ui.icon.NavIconStrokes.sanitize] 直接调用本函数，
+     * [com.nongyu.appplus.icon.NavIconStrokes.sanitize] 直接调用本函数，
      * 不再自带一份阈值常量，避免两处 0f / 1f 漂移。
      * 判据：有限（排除 NaN / Infinity）、严格落在 `(0, 1]` 内。
      */

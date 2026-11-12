@@ -11,7 +11,7 @@ import com.nongyu.appplus.net.NetHolder
 import com.nongyu.appplus.net.NetStartupProbe
 import com.nongyu.appplus.skin.FileSkinSource
 import com.nongyu.appplus.ui.NongyuApp
-import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
+import com.nongyu.appplus.design.NongyuAppPlusTheme
 
 /**
  * 应用唯一入口 Activity。

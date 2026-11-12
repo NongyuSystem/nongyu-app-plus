@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.common
+package com.nongyu.appplus.design
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box

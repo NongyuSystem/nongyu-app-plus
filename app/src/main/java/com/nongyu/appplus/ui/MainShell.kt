@@ -1,5 +1,6 @@
 package com.nongyu.appplus.ui
 
+import com.nongyu.appplus.design.uiScaleFor
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -24,7 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
-import com.nongyu.appplus.ui.common.ModalScrim
+import com.nongyu.appplus.design.ModalScrim
 import com.nongyu.appplus.ui.timetable.TimetableRuler
 import com.nongyu.appplus.ui.timetable.rememberWaterTilt
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,12 +89,12 @@ import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.skin.LocalSkinResolution
 import com.nongyu.appplus.skin.LocalSkinSource
 import com.nongyu.appplus.skin.NavIconKey
-import com.nongyu.appplus.ui.ai.NongyuOrb
-import com.nongyu.appplus.ui.icon.NavIconGeometry
-import com.nongyu.appplus.ui.icon.NavIconStrokes
-import com.nongyu.appplus.ui.icon.drawNavIcon
-import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
-import com.nongyu.appplus.ui.theme.NongyuTheme
+import com.nongyu.appplus.shell.orb.NongyuOrb
+import com.nongyu.appplus.icon.NavIconGeometry
+import com.nongyu.appplus.icon.NavIconStrokes
+import com.nongyu.appplus.icon.drawNavIcon
+import com.nongyu.appplus.design.NongyuAppPlusTheme
+import com.nongyu.appplus.design.NongyuTheme
 import com.nongyu.appplus.ui.timetable.CourseEntry
 
 /**
@@ -450,7 +451,7 @@ fun MainShell() {
         // 这里以 411dp（典型手机）为基准，按屏宽缩放，并夹在合理区间内。
         // 上限压到 1.25：手机上 1.0，720dp 的平板/模拟器上约 1.25，
         // 避免大画布上整套 UI 被等比放大得过于笨重（之前 1.55 明显过大）。
-        val uiScale = (maxWidth.value / 411f).coerceIn(0.85f, 1.25f)
+        val uiScale = uiScaleFor(maxWidth.value)
         fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
         val navHeight = s(62.dp)
