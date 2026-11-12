@@ -1,5 +1,12 @@
 package com.nongyu.appplus.login.ui
 
+import kotlinx.coroutines.launch
+import com.nongyu.appplus.login.session.PasswordLoginUseCase
+import com.nongyu.appplus.login.session.DeviceIdStore
+import com.nongyu.appplus.login.model.LoginFailurePolicy
+import com.nongyu.appplus.login.model.LoginFailureAction
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
 import com.nongyu.appplus.login.ui.NebulaBackdrop
 import com.nongyu.appplus.login.ui.LoginFormBox
 import com.nongyu.appplus.login.model.LoginMethod
@@ -81,12 +88,18 @@ import com.nongyu.appplus.design.NongyuTheme
 @Composable
 fun LoginCenterScreen() {
     val colors = NongyuTheme.colors
+    val appContext = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
     var uiState by remember { mutableStateOf(LoginCenterUiState.initial()) }
     var expanded by remember { mutableStateOf(false) }
     // 底部提示文案（点击任意圆时更新，空串表示不显示）
     var hint by remember { mutableStateOf("") }
     // 提示的自增序号，用于「同样文案再次点击」也能重新计时
     var hintTick by remember { mutableStateOf(0) }
+    // 平台登录账密输入（票 #92）：表单通过回调上报，UI 持有用于提交
+    var account by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var submitting by remember { mutableStateOf(false) }
 
     val mainSize = 73.dp
     val sideSize = 70.dp
@@ -208,6 +221,10 @@ fun LoginCenterScreen() {
             LoginFormBox(
                 method = uiState.selectedMethod,
                 colors = colors,
+                onCredentialsChanged = { no, pwd ->
+                    account = no
+                    password = pwd
+                },
             )
         }
 
@@ -215,8 +232,50 @@ fun LoginCenterScreen() {
         LoginArrowButton(
             colors = colors,
             onClick = {
+                if (submitting) return@LoginArrowButton
+                // 票 #92：只有「平台登录 · 账密」这一格接了真登录（S4/S7 接其余方式）
+                if (uiState.selectedMethod != LoginMethod.PLATFORM_PASSWORD) {
+                    hint = "该登录方式尚未接入"
+                    hintTick++
+                    return@LoginArrowButton
+                }
+                submitting = true
                 hint = "登录中…"
                 hintTick++
+                scope.launch {
+                    val result = PasswordLoginUseCase(
+                        context = appContext,
+                        studentNo = account,
+                        password = password,
+                        deviceId = DeviceIdStore.getOrCreate(appContext),
+                    )
+                    submitting = false
+                    when (result) {
+                        is com.nongyu.appplus.login.session.PasswordLoginResult.Success -> {
+                            // 成功：用例已写凭证并切主界面；学籍信息暂缺只给一次轻提示
+                            hint = if (result.profileIncomplete) {
+                                "部分学籍信息暂未同步，下次登录会重试"
+                            } else {
+                                ""
+                            }
+                        }
+                        is com.nongyu.appplus.login.session.PasswordLoginResult.Failure -> {
+                            val action = LoginFailurePolicy.decide(result.failure)
+                            val code = (result.failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                            when (action) {
+                                LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
+                                    // 自动切统一身份认证 tab（不清空输入、不弹窗）
+                                    uiState = LoginCenterUiState.initial()
+                                    hint = LoginFailurePolicy.messageOf(code).orEmpty()
+                                }
+                                LoginFailureAction.SHOW_MESSAGE ->
+                                    hint = LoginFailurePolicy.messageOf(code).orEmpty()
+                                LoginFailureAction.SILENT -> hint = ""
+                            }
+                        }
+                    }
+                    hintTick++
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)

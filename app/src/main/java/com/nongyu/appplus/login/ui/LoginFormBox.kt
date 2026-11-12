@@ -61,6 +61,8 @@ fun LoginFormBox(
     method: LoginMethod,
     colors: NongyuColors,
     modifier: Modifier = Modifier,
+    /** 平台登录账密输入变化上报（票 #92）；其它方式不上报。 */
+    onCredentialsChanged: (studentNo: String, password: String) -> Unit = { _, _ -> },
 ) {
     Column(
         modifier = modifier
@@ -72,8 +74,17 @@ fun LoginFormBox(
         when (method) {
             LoginMethod.PLATFORM_PASSWORD -> {
                 FormTitle("平台内账号密码", colors)
-                FormField("请输入账号", colors)
-                FormField("请输入密码", colors, isPassword = true)
+                // 票 #92：账密两格的值上报给 UI，供登录用例组装请求
+                var studentNo by remember { mutableStateOf("") }
+                var password by remember { mutableStateOf("") }
+                FormField("请输入账号", colors, value = studentNo) {
+                    studentNo = it
+                    onCredentialsChanged(studentNo, password)
+                }
+                FormField("请输入密码", colors, isPassword = true, value = password) {
+                    password = it
+                    onCredentialsChanged(studentNo, password)
+                }
             }
 
             LoginMethod.CAMPUS_PASSWORD -> {
@@ -135,8 +146,11 @@ private fun FormField(
     colors: NongyuColors,
     isPassword: Boolean = false,
     modifier: Modifier = Modifier,
+    value: String? = null,
+    onValueChange: (String) -> Unit = {},
 ) {
-    var text by remember { mutableStateOf("") }
+    var internalText by remember { mutableStateOf("") }
+    val text = value ?: internalText
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val showPlaceholder = !focused && text.isEmpty()
@@ -174,7 +188,10 @@ private fun FormField(
             }
             BasicTextField(
                 value = text,
-                onValueChange = { text = it },
+                onValueChange = {
+                    if (value == null) internalText = it
+                    onValueChange(it)
+                },
                 singleLine = true,
                 textStyle = androidx.compose.ui.text.TextStyle(
                     color = colors.surface.colorText,
