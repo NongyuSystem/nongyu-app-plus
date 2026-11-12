@@ -98,6 +98,12 @@ import com.nongyu.appplus.design.NongyuTheme
 import com.nongyu.appplus.timetable.model.CourseEntry
 import com.nongyu.appplus.timetable.logic.COURSE_TIMES
 import com.nongyu.appplus.timetable.logic.isPeriodEnded
+import com.nongyu.appplus.timetable.logic.NOTE_DEBOUNCE_MS
+import com.nongyu.appplus.timetable.logic.mergeAttendance
+import com.nongyu.appplus.timetable.logic.noteChanged
+import com.nongyu.appplus.timetable.logic.resolveLocationLabel
+import com.nongyu.appplus.timetable.logic.resolveTeacherLabel
+import com.nongyu.appplus.timetable.logic.shouldPersistNote
 import com.nongyu.appplus.shell.BarMode
 import com.nongyu.appplus.shell.DetailStage
 import com.nongyu.appplus.shell.DismissTarget
@@ -236,39 +242,43 @@ fun MainShell() {
     // 备注：**不用 collectAsState 直接喂给 TextField**。
     // 那样每次输入都要等 DataStore 回读，写入与回读会打架（实测重启后丢值）。
     // 正确做法：本地 mutableState 做 UI 真源，打开卡片时从持久层读一次，
-    // 之后每次改动既更新本地、又异步落盘。
+    // 之后每次改动既更新本地、又异步落盘。「该不该落盘」的判据住在
+    // timetable/logic/CourseDetailRules.kt（shouldPersistNote / noteChanged），有单测。
     var noteText by remember(courseId) { mutableStateOf("") }
     // true = 初始化读取已完成，之后的改动才允许落盘（避免把空串覆盖掉已存的值）。
     var noteReady by remember(courseId) { mutableStateOf(false) }
+    // 已落盘的备注值，用于跳过无意义写入。
+    var notePersisted by remember(courseId) { mutableStateOf("") }
     LaunchedEffect(courseId) {
         if (courseId != null) {
-            noteText = courseUserStore.noteOnce(courseId)
+            val loaded = courseUserStore.noteOnce(courseId)
+            noteText = loaded
+            notePersisted = loaded
             noteReady = true
         } else {
             noteText = ""
+            notePersisted = ""
             noteReady = false
         }
     }
     // 输入停止 250ms 后统一落盘：既不会每个字符都起一个写协程（竞态），
     // 也不会因为 Flow 回读把输入框内容拉回去。
     LaunchedEffect(noteText, courseId, noteReady) {
-        if (noteReady && courseId != null) {
-            delay(250)
-            courseUserStore.setNote(courseId, noteText)
+        if (shouldPersistNote(noteReady, courseId) && noteChanged(notePersisted, noteText)) {
+            delay(NOTE_DEBOUNCE_MS)
+            courseUserStore.setNote(courseId!!, noteText)
+            notePersisted = noteText
         }
     }
 
     // 考勤：period -> 是否已考勤。默认按「课程结束时刻 < 现在」判定已考勤；
     // 持久层里有显式记录时以记录为准（用户点过就听用户的）。
+    // 合并优先级住在 logic/mergeAttendance（有单测：显式记录必须压过时间判定）。
     var attendanceOverrides by remember(courseId) {
         mutableStateOf<Map<Int, Boolean>>(emptyMap())
     }
     val effectiveAttendance: Map<Int, Boolean> = remember(courseId, attendanceOverrides) {
-        val c = detailCourse
-        if (c == null) emptyMap()
-        else (c.startPeriod..c.endPeriod).associateWith { p ->
-            attendanceOverrides[p] ?: isPeriodEnded(p)
-        }
+        mergeAttendance(detailCourse, attendanceOverrides) { p -> isPeriodEnded(p) }
     }
 
     // 评论（mock 后端，进程内可增删）
