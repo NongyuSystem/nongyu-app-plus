@@ -20,7 +20,7 @@ import org.junit.Test
  * [CasApi] 契约层测试（票 #95）：MockWebServer 验证四条 `/api/v1` 端点形状、
  * **不带农屿 NY1 签名头**、整套 cookie 收集、账密/短信两条路径各自产出 tgt。
  *
- * 不访问真实学校 URL、不含任何真实凭据值（验收判据最后一条）。
+ * 不访问真实统一身份认证平台 URL、不含任何真实凭据值（验收判据最后一条）。
  */
 class CasApiContractTest {
 
@@ -113,16 +113,40 @@ class CasApiContractTest {
 
     // ---------- 与农屿后端隔离 ----------
 
-    @Test
-    fun `四条端点都不带 NY1 签名头与 Bearer`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(okEnvelope()))
-        api.captcha("APPID-TEST")
-        val req = server.takeRequest()
+    private fun assertNoNongyuHeaders(req: okhttp3.mockwebserver.RecordedRequest) {
         assertNull(req.getHeader("X-Nongyu-Key-Id"))
         assertNull(req.getHeader("X-Nongyu-Timestamp"))
         assertNull(req.getHeader("X-Nongyu-Nonce"))
         assertNull(req.getHeader("X-Nongyu-Signature"))
         assertNull(req.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `captcha 不带 NY1 签名头与 Bearer`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(okEnvelope()))
+        api.captcha("APPID-TEST")
+        assertNoNongyuHeaders(server.takeRequest())
+    }
+
+    @Test
+    fun `cas login 不带 NY1 签名头与 Bearer`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(okEnvelope()))
+        api.login(body("""{"appid":"A","code":"c","number":"n","password":"p","uuid":"u"}"""))
+        assertNoNongyuHeaders(server.takeRequest())
+    }
+
+    @Test
+    fun `sms send 不带 NY1 签名头与 Bearer`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(okEnvelope()))
+        api.sendSms(body("""{"uuid":"u","code":"c","type":"login","phone":"p"}"""))
+        assertNoNongyuHeaders(server.takeRequest())
+    }
+
+    @Test
+    fun `loginByPhone 不带 NY1 签名头与 Bearer`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(okEnvelope()))
+        api.loginByPhone(body("""{"code":"c","phone":"p","appid":"A"}"""))
+        assertNoNongyuHeaders(server.takeRequest())
     }
 
     // ---------- cookie 收集 / 两条路径各自拿 tgt ----------
@@ -164,10 +188,10 @@ class CasApiContractTest {
         assertFalse(jar.toCredential().isUsable)
     }
 
-    // ---------- 学校侧错误不伪装成农屿错误码 ----------
+    // ---------- 统一身份认证平台错误不伪装成农屿错误码 ----------
 
     @Test
-    fun `code 非 200 时原样保留学校侧 msg`() = runTest {
+    fun `code 非 200 时原样保留统一身份认证平台 msg`() = runTest {
         val envelope = """{"requestId":"r","code":500,"msg":"验证码错误","data":null}"""
         server.enqueue(MockResponse().setResponseCode(200).setBody(envelope))
         val response = api.captcha("APPID-TEST")

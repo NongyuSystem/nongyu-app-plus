@@ -25,7 +25,7 @@ import javax.crypto.spec.SecretKeySpec
  * 本客户端以后端 `casdecrypt.go` 为准（票 #95 要求「与后端契约一致」）。
  *
  * ## 容错
- * 任何一步失败都返回 `null`，不抛异常 —— 学校侧响应格式不稳定，
+ * 任何一步失败都返回 `null`，不抛异常 —— 统一身份认证平台响应格式不稳定，
  * 解密失败应表现为「拿不到验证码 / 登录失败」，而不是让协程崩掉。
  */
 object CasDecrypt {
@@ -65,10 +65,11 @@ object CasDecrypt {
     /**
      * 拆信封：`code == 200` 且 `data` 非空才解密，否则返回 `null`。
      *
-     * 泛型 `T` 仅为调用方标注期望类型（便于阅读），实际返回解密后的明文字串，
-     * 由调用方自行用 `NetJson` 解析成具体 payload。这样解密层不依赖序列化框架细节。
+     * 返回**解密后的原始明文**。验证码接口的明文是
+     * `"data:image/png;base64,XXXX"`（**带 JSON 引号**，知识库「要剥两层」），
+     * 调用方需自行 `trim('"')` 后再用；本层不擅自剥，保持「解密」职责单一。
      */
-    fun <T : Any> unwrap(envelope: CasEnvelope, @Suppress("UNUSED_PARAMETER") type: kotlin.reflect.KClass<T>): String? {
+    fun unwrap(envelope: CasEnvelope): String? {
         if (envelope.code != 200) return null
         val data = envelope.data ?: return null
         val plain = decrypt(envelope.requestId, data) ?: return null

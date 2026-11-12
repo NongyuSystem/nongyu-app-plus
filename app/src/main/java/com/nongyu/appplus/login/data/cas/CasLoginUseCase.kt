@@ -3,26 +3,35 @@ package com.nongyu.appplus.login.data.cas
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import retrofit2.Response
 
 /**
  * 统一身份认证登录用例（票 #95）。
  *
- * ## 两条独立路径
- * - 账密：`fetchCaptcha()` → `loginWithPassword(学号, 密码, 图形码)`
- * - 短信：`fetchCaptcha()` → `loginWithPhone(手机号, 图形码, 短信码)`（内部先 `sms/send` 再 `loginByPhone`）
+ * ## 验证码一次性（知识库实证）
+ * 取码会下发 uuid，重新取码即换 uuid、旧码立即作废。因此**取码与提交必须成对**：
+ * 调用方先用 [fetchCaptcha] 拿 [CasCaptcha]（把 image 给用户看），再把**同一个**
+ * [CasCaptcha.uuid] 连同用户输入的码一起交给 [loginWithPassword] / [sendSmsCode] /
+ * [loginWithPhone]。本用例**不在登录方法内部重取验证码**（重取会让用户输入的码
+ * 配上新 uuid，真站必回「验证码错误」）。
  *
- * 两条路径都各自从登录响应的 `Set-Cookie` 拿 `go-admin-tgt` + 整套同域 cookie，
- * 产出 [CasCredential]，供 #96 交给 `POST /identity/login { method=school, goAdminTgt, cookie }`。
+ * ## 三条可独立调用的链路（供 UI 分别触发）
+ * - [fetchCaptcha]：取图形验证码
+ * - [sendSmsCode]：发短信码（UI 可单独做「发送中…／60s 倒计时／重新获取」）
+ * - [loginWithPassword]（账密）/ [loginWithPhone]（短信）：各自完成登录并产出凭据
  *
- * ## 学校侧错误
- * `code != 200` 时直接把 `msg` 原样透出（如「验证码错误」「操作频繁」），
- * **不映射**成农屿的 `bad_credentials` / `rate_limited` 等码（验收判据）。
+ * 账面与短信两条路径各自从**自身登录响应的 Set-Cookie** 拿 `go-admin-tgt` +
+ * 整套同域 cookie；每条路径开始前清空 cookie 罐，避免前次登录的残留串味。
+ *
+ * ## 失败口径
+ * - `code != 200`：把统一身份认证平台 `msg` 原样透出，**不映射**成农屿错误码；
+ * - 弱网 / 超时 / 空响应：`message` 为**空串**（规格 #89 User Story 21「弱网时登录失败不给任何提示」），
+ *   不臆造中文文案。
  *
  * ## 不做什么
- * - 不做 OCR（验证码靠人识别）
- * - 不访问真实学校 URL（baseUrl 由 [CasApiFactory] 注入，本类不含真站地址）
- * - 不记录任何真实凭据值
- * - 不把单枚 tgt 当可用登录态（[CasCredential.isUsable] 判定）
+ * 不做 OCR、不写真站 baseUrl（由 [CasApiFactory] 注入）、不记录真实凭据值、
+ * 不把单枚 tgt 当可用登录态（[CasCredential.isUsable] 判定）。
  */
 class CasLoginUseCase(
     private val api: CasApi,
@@ -31,90 +40,87 @@ class CasLoginUseCase(
 ) {
 
     companion object {
-        /**
-         * 教务系统在统一身份认证平台注册的应用标识。
-         * 真源：旧 RN 工具包 `core/login/cas.ts` `CAS_APPID`（来自 `caslogin.asp` 的 302 Location）。
-         */
+        /** 教务系统在统一身份认证平台注册的应用标识（旧 RN 工具包 `CAS_APPID`）。 */
         const val CAS_APPID = "b54a2f27-f7ba-4b91-bbf0-3b2b12244d14"
     }
 
-    /** 取一张图形验证码并解密出 data URI 与 uuid。 */
+    /** 取一张图形验证码，明文**剥掉 JSON 引号**后返回 data URI。 */
     suspend fun fetchCaptcha(): CasCaptchaResult {
-        val envelope = call { api.captcha(CAS_APPID) } ?: return CasCaptchaResult.Failure("验证码获取失败，请重试")
+        val envelope = call { api.captcha(CAS_APPID) }
+            ?: return CasCaptchaResult.Failure("")
         if (envelope.code != 200) {
-            return CasCaptchaResult.Failure(envelope.msg ?: "验证码获取失败，请重试")
+            return CasCaptchaResult.Failure(envelope.msg.orEmpty())
         }
         val uuid = envelope.id
-        val image = CasDecrypt.unwrap(envelope, String::class)
+        // 知识库「要剥两层」：解密明文是 "data:image/png;base64,..."，带 JSON 引号
+        val raw = CasDecrypt.unwrap(envelope)
+        val image = raw?.trim()?.trim('"')?.trim()
         if (uuid.isNullOrBlank() || image == null || !image.startsWith("data:image")) {
-            return CasCaptchaResult.Failure(envelope.msg ?: "验证码获取失败，请重试")
+            return CasCaptchaResult.Failure(envelope.msg.orEmpty())
         }
-        return CasCaptchaResult.Success(uuid, image)
+        return CasCaptchaResult.Success(CasCaptcha(uuid, image))
     }
 
-    /** 账密登录。先取验证码（本方法内部完成），再提交 `cas/login`。 */
+    /**
+     * 发短信验证码。**独立步骤**：UI 拿到成功后自行做倒计时，再调 [loginWithPhone]。
+     *
+     * @param captcha 与用户当前所看图片对应的验证码（uuid 必须来自同一张图）
+     * @param captchaCode 用户针对该图输入的图形码
+     */
+    suspend fun sendSmsCode(phone: String, captcha: CasCaptcha, captchaCode: String): CasSmsSendResult {
+        val body = jsonBody(
+            json.encodeToString(
+                CasSmsSendBody.serializer(),
+                CasSmsSendBody(captcha.uuid, captchaCode, phone = phone),
+            ),
+        )
+        val envelope = call { api.sendSms(body) }
+            ?: return CasSmsSendResult.Failure("")
+        return if (envelope.code == 200) {
+            CasSmsSendResult.Success
+        } else {
+            CasSmsSendResult.Failure(
+                envelope.msg.orEmpty(),
+                needRefreshCaptcha = true,
+            )
+        }
+    }
+
+    /** 账密登录：用调用方传入的 [captcha]（同一 uuid）提交，不重取验证码。 */
     suspend fun loginWithPassword(
         studentNo: String,
         password: String,
+        captcha: CasCaptcha,
         captchaCode: String,
     ): CasLoginResult {
-        val captcha = fetchCaptcha()
-        if (captcha is CasCaptchaResult.Failure) {
-            return CasLoginResult.Failure(captcha.message)
-        }
-        val uuid = (captcha as CasCaptchaResult.Success).uuid
-
+        jar.clear()
         val body = jsonBody(
             json.encodeToString(
                 CasPasswordLoginBody.serializer(),
-                CasPasswordLoginBody(CAS_APPID, captchaCode, studentNo, password, uuid),
+                CasPasswordLoginBody(CAS_APPID, captchaCode, studentNo, password, captcha.uuid),
             ),
         )
         val envelope = call { api.login(body) }
-            ?: return CasLoginResult.Failure("统一身份认证登录失败")
+            ?: return CasLoginResult.Failure("")
         if (envelope.code != 200) {
-            return CasLoginResult.Failure(
-                envelope.msg ?: "统一身份认证登录失败",
-                needRefreshCaptcha = true,
-            )
+            return CasLoginResult.Failure(envelope.msg.orEmpty(), needRefreshCaptcha = true)
         }
         return credentialOrFailure()
     }
 
-    /** 短信登录：先发短信码，再用码登录；图形验证码由本方法内部先取。 */
-    suspend fun loginWithPhone(
-        phone: String,
-        captchaCode: String,
-        smsCode: String,
-    ): CasLoginResult {
-        val captcha = fetchCaptcha()
-        if (captcha is CasCaptchaResult.Failure) {
-            return CasLoginResult.Failure(captcha.message)
-        }
-        val uuid = (captcha as CasCaptchaResult.Success).uuid
-
-        val sendBody = jsonBody(
-            json.encodeToString(
-                CasSmsSendBody.serializer(),
-                CasSmsSendBody(uuid, captchaCode, phone = phone),
-            ),
-        )
-        val send = call { api.sendSms(sendBody) }
-            ?: return CasLoginResult.Failure("短信发送失败")
-        if (send.code != 200) {
-            return CasLoginResult.Failure(send.msg ?: "短信发送失败", needRefreshCaptcha = true)
-        }
-
-        val loginBody = jsonBody(
+    /** 短信登录：只做 `loginByPhone`，不重取验证码、不重发短信。 */
+    suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult {
+        jar.clear()
+        val body = jsonBody(
             json.encodeToString(
                 CasPhoneLoginBody.serializer(),
                 CasPhoneLoginBody(smsCode, phone, CAS_APPID),
             ),
         )
-        val envelope = call { api.loginByPhone(loginBody) }
-            ?: return CasLoginResult.Failure("短信登录失败")
+        val envelope = call { api.loginByPhone(body) }
+            ?: return CasLoginResult.Failure("")
         if (envelope.code != 200) {
-            return CasLoginResult.Failure(envelope.msg ?: "短信登录失败", needRefreshCaptcha = true)
+            return CasLoginResult.Failure(envelope.msg.orEmpty(), needRefreshCaptcha = true)
         }
         return credentialOrFailure()
     }
@@ -134,11 +140,10 @@ class CasLoginUseCase(
         }
     }
 
-    /** 统一反序列化信封；失败返回 null。 */
-    private suspend fun call(block: suspend () -> retrofit2.Response<okhttp3.ResponseBody>): CasEnvelope? =
+    /** 统一反序列化信封；失败/空响应返回 null（由调用方产出「零提示」文案）。 */
+    private suspend fun call(block: suspend () -> Response<ResponseBody>): CasEnvelope? =
         try {
-            val response = block()
-            val text = response.body()?.string().orEmpty()
+            val text = block().body()?.string().orEmpty()
             if (text.isBlank()) null
             else json.decodeFromString(CasEnvelope.serializer(), text)
         } catch (e: Exception) {

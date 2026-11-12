@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
  *
  * - `requestId`：32 位 hex，参与派生解密密钥
  * - `code`：业务码，**只有 200 才解密 data**；非 200 时 data 通常为空
- * - `msg`：学校侧错误文案（如「验证码错误」「未登录」），**原样透出**，不映射成农屿错误码
+ * - `msg`：统一身份认证平台错误文案（如「验证码错误」「未登录」），**原样透出**，不映射成农屿错误码
  * - `data`：加密体的 base64 字符串；`code != 200` 或 null 时不解密
  * - `id`：仅 `GET /api/v1/captcha` 返回，是图形验证码的 uuid
  *

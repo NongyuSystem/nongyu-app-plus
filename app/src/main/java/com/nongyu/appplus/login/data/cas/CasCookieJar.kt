@@ -29,7 +29,8 @@ class CasCookieJar : CookieJar {
     }
 
     @Synchronized
-    override fun loadForRequest(url: HttpUrl): List<Cookie> = store.values.toList()
+    override fun loadForRequest(url: HttpUrl): List<Cookie> =
+        store.values.filter { it.matches(url) }
 
     /** 拼成 `name=value; name=value` 形式，供 `cookie` 字段原样透传。 */
     @Synchronized

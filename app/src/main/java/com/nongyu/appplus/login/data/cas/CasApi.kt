@@ -8,11 +8,11 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 
 /**
- * 统一身份认证平台（学校侧）四条端点（票 #95）。
+ * 统一身份认证平台（统一身份认证平台）四条端点（票 #95）。
  *
  * ## 与 `net/` 的隔离
  * 本接口由 [CasApiFactory] 用**独立 OkHttp client** 装配：
- * - 不挂 `AppSignInterceptor`（学校 CAS 请求**不带农屿 NY1 签名头**）
+ * - 不挂 `AppSignInterceptor`（统一身份认证平台 请求**不带农屿 NY1 签名头**）
  * - 不挂 `AuthInterceptor`（不携带农屿 Bearer）
  * - 不复用 `NetHolder` / `NongyuGateWay` 的任何装配
  *

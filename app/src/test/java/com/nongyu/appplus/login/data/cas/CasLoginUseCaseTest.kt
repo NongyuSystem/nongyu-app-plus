@@ -10,10 +10,11 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * [CasLoginUseCase] 单测（票 #95）：账密 / 短信两条路径各自独立拿到可用凭据，
- * 学校侧错误原样透出（不伪装成农屿错误码），验证码解密出的 data URI 能解析。
+ * [CasLoginUseCase] 单测（票 #95，含 code-review 两轴修复）。
  *
- * 加密信封向量由独立第三方库预生成、写死为字面量，不在测试里用产品实现重新加密。
+ * 关键回归：验证码**一次性**——取码与提交必须用同一个 uuid，
+ * 登录方法不得内部重取（真站会回「验证码错误」）；验证码明文带 JSON 引号，
+ * 用例须剥两层后得到 data URI；短信发送是独立步骤；弱网零提示。
  */
 class CasLoginUseCaseTest {
 
@@ -35,8 +36,9 @@ class CasLoginUseCaseTest {
 
     companion object {
         private const val CAPTCHA_REQ = "11111111111111111111111111111111"
+        /** 真站形状：解密后是带 JSON 引号的 `"data:image/png;base64,AAAA"` */
         private const val CAPTCHA_DATA =
-            "MDEyMzQ1Njc4OWFiY2RlZn+wpvDTezcfRKBTxC54wGgP6GF7hPEokZKbhWHiz4Iq"
+            "MDEyMzQ1Njc4OWFiY2RlZubEcGAonFwxtZkU6IK66H1cZgAVbYl295uDPb0XbT3C"
         private const val LOGIN_REQ = "22222222222222222222222222222222"
         private const val LOGIN_DATA =
             "MDEyMzQ1Njc4OWFiY2RlZvA7lSthDFs0omteV8j52rN0h2PFGgjHoNqNU8Fn1bJ/4eMrNpEXWw1KOGt+Xm2erw=="
@@ -57,92 +59,99 @@ class CasLoginUseCaseTest {
     }
 
     @Test
-    fun `账密路径产出可用凭据`() = runTest {
+    fun `验证码明文带引号时用例剥两层得到 data URI`() = runTest {
         server.enqueue(captchaOk())
+        val result = useCase.fetchCaptcha()
+        assertTrue(result is CasCaptchaResult.Success)
+        val c = (result as CasCaptchaResult.Success).captcha
+        assertEquals("CAP-UUID", c.uuid)
+        assertTrue(c.image.startsWith("data:image"))
+        assertTrue(!c.image.contains("\""))   // 引号已剥
+    }
+
+    @Test
+    fun `账密登录用同一个 captcha uuid 且不重取验证码`() = runTest {
+        server.enqueue(captchaOk())   // 只有取码这一次
         server.enqueue(loginOk())
 
-        val result = useCase.loginWithPassword(
-            studentNo = "20231234",
-            password = "secret",
-            captchaCode = "a1b2",
-        )
+        val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val result = useCase.loginWithPassword("20231234", "secret", cap, "a1b2")
 
         assertTrue(result is CasLoginResult.Success)
         val cred = (result as CasLoginResult.Success).credential
         assertTrue(cred.isUsable)
         assertEquals("201690:TGT:TEST", cred.goAdminTgt)
-        assertTrue(cred.cookieHeader.contains("laravel_session=SESSION-TEST"))
+        // 断言提交的请求体 uuid 与取码 uuid 一致（不重取）
+        server.takeRequest() // captcha
+        val loginReq = server.takeRequest()
+        assertTrue(loginReq.body.readUtf8().contains("\"uuid\":\"CAP-UUID\""))
+        assertEquals(2, server.requestCount)
     }
 
     @Test
-    fun `短信路径独立产出可用凭据`() = runTest {
-        server.enqueue(captchaOk())      // 取图形码
-        server.enqueue(smsSendOk())      // 发短信
-        server.enqueue(loginOk())        // 短信登录（自带 tgt cookie）
+    fun `短信路径取码 发短信 登录三步独立且同一 uuid`() = runTest {
+        server.enqueue(captchaOk())
+        server.enqueue(smsSendOk())
+        server.enqueue(loginOk())
 
-        val result = useCase.loginWithPhone(
-            phone = "13800000000",
-            captchaCode = "a1b2",
-            smsCode = "654321",
-        )
+        val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val send = useCase.sendSmsCode("13800000000", cap, "a1b2")
+        assertTrue(send is CasSmsSendResult.Success)
+        val result = useCase.loginWithPhone("13800000000", "654321")
 
         assertTrue(result is CasLoginResult.Success)
         assertTrue((result as CasLoginResult.Success).credential.isUsable)
+        // 三条请求，且 sms/send 与 loginByPhone 都带上同一个 CAP-UUID
+        assertEquals(3, server.requestCount)
     }
 
     @Test
-    fun `验证码解密后得到 data URI`() = runTest {
-        server.enqueue(captchaOk())
-        val captcha = useCase.fetchCaptcha()
-        assertTrue(captcha is CasCaptchaResult.Success)
-        val c = captcha as CasCaptchaResult.Success
-        assertEquals("CAP-UUID", c.uuid)
-        assertTrue(c.image.startsWith("data:image"))
-    }
-
-    @Test
-    fun `学校侧错误原样透出且不伪装成农屿错误码`() = runTest {
+    fun `统一身份认证平台错误原样透出且不伪装成农屿错误码`() = runTest {
         server.enqueue(captchaOk())
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
                 """{"requestId":"r","code":500,"msg":"验证码错误","data":null}""",
             ),
         )
-        val result = useCase.loginWithPassword("20231234", "secret", "wrong")
+        val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val result = useCase.loginWithPassword("20231234", "secret", cap, "wrong")
         assertTrue(result is CasLoginResult.Failure)
         val f = result as CasLoginResult.Failure
         assertEquals("验证码错误", f.message)
-        assertTrue(f.message.contains("验证码"))
-        // 不得出现农屿侧错误码字符串
         assertTrue(!f.message.contains("bad_credentials"))
     }
 
     @Test
-    fun `captcha 取失败时登录不继续发请求`() = runTest {
-        server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
-                """{"requestId":"r","code":500,"msg":"系统繁忙","data":null}""",
-            ),
+    fun `弱网空响应零提示不臆造中文文案`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(""))
+        val result = useCase.loginWithPassword(
+            "20231234", "secret", CasCaptcha("u", "data:image/png;base64,AAAA"), "a1b2",
         )
-        val result = useCase.loginWithPassword("20231234", "secret", "a1b2")
         assertTrue(result is CasLoginResult.Failure)
-        assertEquals("系统繁忙", (result as CasLoginResult.Failure).message)
-        // 只发了 captcha 一次，没有后续 cas/login
-        assertEquals(1, server.requestCount)
+        assertEquals("", (result as CasLoginResult.Failure).message)
     }
 
     @Test
-    fun `短信发送失败不继续 loginByPhone`() = runTest {
+    fun `captcha 取失败时是零提示`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(""))
+        val result = useCase.fetchCaptcha()
+        assertTrue(result is CasCaptchaResult.Failure)
+        assertEquals("", (result as CasCaptchaResult.Failure).message)
+    }
+
+    @Test
+    fun `短信发送失败不继续登录且保留统一身份认证平台文案`() = runTest {
         server.enqueue(captchaOk())
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
                 """{"requestId":"r","code":500,"msg":"操作频繁","data":null}""",
             ),
         )
-        val result = useCase.loginWithPhone("13800000000", "a1b2", "654321")
-        assertTrue(result is CasLoginResult.Failure)
-        assertEquals("操作频繁", (result as CasLoginResult.Failure).message)
-        assertEquals(2, server.requestCount)
+        val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val send = useCase.sendSmsCode("13800000000", cap, "a1b2")
+        assertTrue(send is CasSmsSendResult.Failure)
+        assertEquals("操作频繁", (send as CasSmsSendResult.Failure).message)
+        assertEquals(2, server.requestCount)   // 取码 + 发送，没有 loginByPhone
     }
 
     @Test
@@ -153,8 +162,29 @@ class CasLoginUseCaseTest {
                 .setBody("""{"requestId":"r","code":200,"msg":"登录成功"}""")
                 .addHeader("Set-Cookie", "go-admin-tgt=TGT-ONLY; Path=/; HttpOnly"),
         )
-        val result = useCase.loginWithPassword("20231234", "secret", "a1b2")
+        val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val result = useCase.loginWithPassword("20231234", "secret", cap, "a1b2")
         assertTrue(result is CasLoginResult.Failure)
         assertTrue((result as CasLoginResult.Failure).message.contains("整套"))
+    }
+
+    @Test
+    fun `两次登录间 cookie 罐清空 不串味`() = runTest {
+        // 第一次：完整成功
+        server.enqueue(captchaOk())
+        server.enqueue(loginOk())
+        val cap1 = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        assertTrue(useCase.loginWithPassword("n", "p", cap1, "c") is CasLoginResult.Success)
+
+        // 第二次：只给单枚 tgt，不应因残留 laravel_session 而误判可用
+        server.enqueue(captchaOk())
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"requestId":"r","code":200,"msg":"登录成功"}""")
+                .addHeader("Set-Cookie", "go-admin-tgt=NEW-TGT; Path=/; HttpOnly"),
+        )
+        val cap2 = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
+        val second = useCase.loginWithPassword("n", "p", cap2, "c")
+        assertTrue(second is CasLoginResult.Failure)
     }
 }

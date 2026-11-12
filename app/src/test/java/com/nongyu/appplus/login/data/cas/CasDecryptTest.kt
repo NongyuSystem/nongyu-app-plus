@@ -69,12 +69,18 @@ class CasDecryptTest {
     @Test
     fun `code 非 200 时信封 data 不解密`() {
         val envelope = CasEnvelope(requestId = REQUEST_ID, code = 500, msg = "未登录", data = DATA_B64, id = null)
-        assertNull(CasDecrypt.unwrap(envelope, String::class))
+        assertNull(CasDecrypt.unwrap(envelope))
     }
 
     @Test
     fun `code 200 且 data 为 null 时不解密`() {
         val envelope = CasEnvelope(requestId = REQUEST_ID, code = 200, msg = "登录成功", data = null, id = null)
-        assertNull(CasDecrypt.unwrap(envelope, String::class))
+        assertNull(CasDecrypt.unwrap(envelope))
+    }
+
+    @Test
+    fun `unwrap 返回原始明文不擅自剥引号`() {
+        val envelope = CasEnvelope(requestId = REQUEST_ID, code = 200, data = DATA_B64, id = null)
+        assertEquals(PLAIN, CasDecrypt.unwrap(envelope))
     }
 }
