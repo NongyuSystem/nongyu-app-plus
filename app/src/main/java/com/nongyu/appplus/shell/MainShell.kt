@@ -107,19 +107,15 @@ import com.nongyu.appplus.timetable.ui.LocationNavDialog
 import com.nongyu.appplus.timetable.ui.TimetableScreen
 
 /**
- * 主框架与导航壳（概念验证版 0.0.1test）。
+ * 主框架与导航壳。
  *
- * 依据 #5 已答结论 + #10 农小屿三态定义：
- * - 底栏贴底、2+2 分列（全部/课表 · 探索/个人），中间留空给正中凸起的 AI 圆。
- * - 四个页面全白留空；冷启动默认「全部」，用零依赖 rememberSaveable 记住当前 Tab。
- * - 长按圆球：黄绿流动瞬间加速 + 球体微放大 + 后景全屏 dim，激活态最高层。
- * - 点按圆球：扩开覆盖原导航栏 → 四按钮淡出 → 变形为输入框（无左侧圆点），
- *   退出（返回键 / 再次点按）反向动画。
+ * 只做「读状态 → 传参 → 调回调」的**组合**，不实现任何具体功能：
+ * 路由、底栏五形态、命中层级顺序、星云球状态、时间条置顶，都在这里接线；
+ * 规则与内容分别在 `shell/ShellState.kt`、`shell/BarHeight.kt`、`shell/CardIntent.kt`、
+ * `shell/bar/`、`shell/orb/`、`shell/dialogs/` 与 `timetable/logic/`。
  *
- * 每个导航按钮的差异化动画按用户要求推迟，本版不做。
- * 语音转文字 / 后端 agent / 网络层不在本原型范围（用户「之后的事后面会说」）。
+ * 改动前必读 `docs/specs/界面层.md` §4（边界）与 §8（事故档案）。
  */
-
 private val TABS = listOf("全部", "课表", "探索", "个人")
 
 // 考勤默认态的判定已下沉到 timetable/logic/PeriodEnded.kt（可单测），
@@ -135,11 +131,7 @@ fun MainShell() {
     var mode by rememberSaveable { mutableStateOf(OrbMode.Idle) }
     var inputText by rememberSaveable { mutableStateOf("") }
 
-    // 点哪门课 → 导航栏**原地变形**为课程详情卡（票 #16 决策）。
-    //
-    // 为什么状态放 Shell：导航栏是自绘的、在 Shell 里，详情卡要「占据导航栏位置」，
-    // 所以选中态必须提升到 Shell，子页面只负责上报点击。
-    // 这与既有「导航栏变形为标签胶囊 / 输入条」是同一套做法。
+    // 详见 docs/specs/界面层.md §8.5 状态与副作用 / 为何课程详情状态必须提升到 Shell
     var detailCourse by remember { mutableStateOf<CourseEntry?>(null) }
 
     // 详情卡形态（简介 / 详情），拖横杠在两者间吸附。每次打开卡片回到简介态。
@@ -217,11 +209,7 @@ fun MainShell() {
     // 已删除课程 id：贯穿切周链路过滤，防止切周后「复活」
     val deletedIds by courseUserStore.deletedIds().collectAsState(initial = emptySet())
 
-    // 备注：**不用 collectAsState 直接喂给 TextField**。
-    // 那样每次输入都要等 DataStore 回读，写入与回读会打架（实测重启后丢值）。
-    // 正确做法：本地 mutableState 做 UI 真源，打开卡片时从持久层读一次，
-    // 之后每次改动既更新本地、又异步落盘。「该不该落盘」的判据住在
-    // timetable/logic/CourseDetailRules.kt（shouldPersistNote / noteChanged），有单测。
+    // 详见 docs/specs/界面层.md §8.5 A 备注不能用 collectAsState 直接喂 TextField
     var noteText by remember(courseId) { mutableStateOf("") }
     // true = 初始化读取已完成，之后的改动才允许落盘（避免把空串覆盖掉已存的值）。
     var noteReady by remember(courseId) { mutableStateOf(false) }
@@ -312,10 +300,7 @@ fun MainShell() {
     }
     var rulerFocus by remember { mutableStateOf<Float?>(null) }
     var rulerFocusHeld by remember { mutableStateOf<Float?>(null) }
-    // 松手后延时清除。key 只盯 rulerDragging：
-    // 之前同时盯 rulerFocus 和 rulerDragging，两个状态在 onDragEnd 里连续写，
-    // 可能出现「focus 已 null 但 dragging 仍 true」的一帧，导致清除分支不触发，
-    // 时间文字就一直挂在屏幕上（实测反馈）。
+    // 详见 docs/specs/界面层.md §8.5 B 时间文字清除 effect 的 key 只盯 rulerDragging
     LaunchedEffect(rulerDragging) {
         if (!rulerDragging && rulerFocusHeld != null) {
             delay(1600)
@@ -336,12 +321,7 @@ fun MainShell() {
         }
     }
 
-    // 图标线宽来自**皮肤资源段**（票 #38 / ADR-0005 Q1=A）：逐资源回落内置默认。
-    // 内置默认皮肤下这四个值都是 BuiltInSkin.BUILT_IN_ICON_STROKE（0.085f），
-    // 与改造前 drawNavIcon 里的 `s * 0.085f` 完全一致 —— 因此视觉不变。
-    // 注意：这里**不再调用** skin.resolve()。启动路径上的解析只发生一次
-    // （MainActivity 在 setContent 前完成，ADR-0006），此处只读取已解析好的结果。
-    // 曾在此处再 resolve 一次，导致冷启动多做一遍磁盘读 + 一遍日志。
+    // 详见 docs/specs/界面层.md §8.5 C 图标线宽只读已解析结果，不要在此再 resolve()
     val skin = LocalSkinSource.current
     val resolution = LocalSkinResolution.current
     val iconStrokes = remember(skin, resolution) {
@@ -351,10 +331,7 @@ fun MainShell() {
         )
     }
 
-    // 雷达波：状态切换时的圆环反馈。
-    // - 进入激活态（变黑）：从球心**向外扩散**并淡出
-    // - 退出激活态（变亮）：从外侧**向内回收**到球体（呼应"能量收回"，不是再释放一次）
-    // pulseKey 每次自增重跑动画；pulseExpand 标记本轮方向。
+    // 详见 docs/specs/界面层.md §8.3 C 雷达波方向语义
     var pulseKey by remember { mutableIntStateOf(0) }
     var pulseExpand by remember { mutableStateOf(true) }
     val pulse = remember { Animatable(0f) }
@@ -371,13 +348,7 @@ fun MainShell() {
         }
     }
 
-    // 全屏 dim —— **只在长按态（Listening）出现**。
-    //
-    // 输入态（Input）不再整屏压暗：输入栏本身就在底栏里，
-    // 整屏压暗会把输入栏一起压灰（历史上输入栏浮在上层所以没暴露）。
-    // 输入态需要的是「底栏可见 + 背后课表变暗」，后者由下面的 inputScrim 单独一层负责。
-    // 只保留这一层：曾经在底栏内部用 drawWithContent 又补过一层 longPressDim，
-    // 两层叠加导致过暗（维护者一直要求删掉，本次删除）。
+    // 详见 docs/specs/界面层.md §8.3 E dim 只在长按态出现，且只保留一层
     val dimAlpha by animateFloatAsState(
         targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
         animationSpec = tween(300),
@@ -423,22 +394,14 @@ fun MainShell() {
             .fillMaxSize()
             .background(colors.surface.colorBackground),
     ) {
-        // 尺寸自适应：固定 dp 在不同 dp 宽度的设备上观感差异极大
-        // （蓝叠 1920x1080@240dpi = 1280dp 宽，手机 1080x2400@420dpi ≈ 411dp 宽，
-        //   同一组固定 dp 在大屏上显得很小、在小屏上显得很大）。
-        // 这里以 411dp（典型手机）为基准，按屏宽缩放，并夹在合理区间内。
-        // 上限压到 1.25：手机上 1.0，720dp 的平板/模拟器上约 1.25，
-        // 避免大画布上整套 UI 被等比放大得过于笨重（之前 1.55 明显过大）。
+        // 详见 docs/specs/界面层.md §8.6 A uiScale 基准 411dp、上限 1.25
         val uiScale = uiScaleFor(maxWidth.value)
         fun s(dp: Dp): Dp = (dp.value * uiScale).dp
 
         val navHeight = s(62.dp)
         val navPadding = s(18.dp)
         val navCorner = s(20.dp)
-        // 球体也必须参与缩放，否则其他元素变大、球固定 120dp 会显得变小
-        // 球体也要跟随导航栏一起缩：导航栏已从 74dp 降到 62dp，
-        // 球若仍保持 120dp 会接近导航栏高度的 2 倍，视觉上明显过大。
-        // 96dp 视觉上仍偏大（光晕外扩使观感大于几何尺寸），再收到 78dp。
+        // 详见 docs/specs/界面层.md §8.6 B 球体也必须参与缩放
         val orbSize = s(78.dp)
         // 输入框与导航栏完全同步（高/圆角/边距全部跟随 uiScale）
         val inputHeight by animateDpAsState(
@@ -454,10 +417,7 @@ fun MainShell() {
         val iconSize = s(30.dp)
         val labelSize = (8f * uiScale).sp
 
-        // 底栏占位高度（像素）：内容区底部必须让出的量（需求 15）。
-        // 必须实测：底栏高度与内边距都乘了 uiScale，写死 dp 会随屏宽漂移。
-        // 取的是**底栏节点自身高度**（含竖直 padding 的外框），不是顶边坐标 ——
-        // 顶边还要再做坐标系换算，历史上两次都算错（一次少让出被遮、一次多让出留白过大）。
+        // 详见 docs/specs/界面层.md §8.4 B 占位上报的是底栏自身高度，不是顶边坐标
         var navOccupiedHeight by remember { mutableStateOf<Float?>(null) }
 
         // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
@@ -472,16 +432,7 @@ fun MainShell() {
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
-            // 【卡片外退出层】三种形态规则统一（维护者 2026-11-11 拍板）：
-            //   课程卡 / 日程卡 / 添加日程：点「卡片之外」退出，点「卡片之内」不退出。
-            //
-            // 实现要点：这层是**全屏**的，但声明位置在**底栏之前**。
-            // Compose 命中测试「后声明的先命中」，而卡片本体就住在底栏里
-            // （底栏声明在上面几行之后），所以：
-            //   - 落在卡片上的点击 → 底栏先命中，这层收不到 → 卡片内部不退出 ✅
-            //   - 落在其余区域     → 只有这层能接 → 退出 ✅
-            // 之前两版都不对：放整屏最顶（底栏之后）会连卡片内部一起吃掉；
-            // 干脆不放则卡片外无处接收点击（点了没反应）。
+            // 详见 docs/specs/界面层.md §8.1 B 卡片外退出层：全屏 + 声明在底栏之前
             val dismissAction: (() -> Unit)? = when (dismissTargetOf(barMode)) {
                 DismissTarget.Detail -> ({ collapseDetail() })
                 DismissTarget.ScheduleDetail -> ({ scheduleDetailId = null })
@@ -579,15 +530,7 @@ fun MainShell() {
             }
         }
 
-        // 全屏 dim：**必须画在底栏之前**。
-        //
-        // 历史上它画在底栏之后（为了"把导航栏一起压暗"），那时输入框是浮在 dim 之上的
-        // 独立控件，所以没问题。现在输入态与详情态都住进底栏本体，
-        // 若仍画在底栏之后，整块底栏会被这层近乎不透明的遮罩完全盖住 ——
-        // 表现就是「点星云球后什么都没出现」（实测屏幕变成整片深灰）。
-        // 输入态的压暗层：同样画在底栏**之前**，于是它压暗课表、不压底栏。
-        // 维护者要求「长按时导航栏要变暗」——长按那层（dimAlpha）已经画在底栏之后，
-        // 会把底栏一起压暗；这层只服务输入态，两者互不干扰。
+        // 详见 docs/specs/界面层.md §8.1 A dim 必须画在底栏之前
         if (inputScrimAlpha > 0f) {
             Box(
                 modifier = Modifier
@@ -597,25 +540,7 @@ fun MainShell() {
             )
         }
 
-        // ---------- 底部：导航栏 ⇄ 课程详情卡（原地变形）----------
-        //
-        // 票 #16 决策：**导航栏原地拉高成详情卡**，中间星云球淡出。
-        // 不跟旧农屿的 BottomSheet、也不跟它的全屏宽——这一条是明文采纳需求原文的。
-        //
-        // 实现要点（与既有「导航栏变形为标签胶囊」同一套）：
-        // - 容器高度 `animateDpAsState` 在「栏高」与「详情卡高」之间插值，
-        //   所以是**真的拉高**，不是淡入一个新卡片；
-        // - 两种形态用 `AnimatedContent` 交叉淡入，避免内容跳变；
-        // - 圆角、虚化边界、背景色两种形态共用，视觉上才像同一个东西变形。
-        // barMode 已提前到「四个页面」之前定义（内容区的空白点击分层需要它）。
-        // ---- 星云球「溶解 / 汇聚」动画（维护者要求）----
-        //
-        // 方向语义：
-        // - 导航栏进入变形（Input / Detail）时，球**溶解**：粒子外散 + 透明度渐隐；
-        // - 回到常态时，球**汇聚**：从四周收拢回球心并显形。
-        //
-        // 用 Animatable 而不是 animateFloatAsState，是因为要区分「正向/反向」
-        // 两个不同时长（溶解略快、汇聚略慢，收拢感更自然）。
+        // 详见 docs/specs/界面层.md §8.2 底栏原地变形与星云球溶解/汇聚的完整说明
         val dissolve = remember { Animatable(0f) }
         LaunchedEffect(barMode) {
             if (barMode == BarMode.Normal) {
@@ -649,24 +574,11 @@ fun MainShell() {
             navHeight = navHeight,
         )
 
-        // ---- 高度 / 圆角：全部由 Animatable + spring 驱动 ----
-        //
-        // 为什么不用 animateDpAsState：它每帧读一次 animationSpec，
-        // 拖拽期用 tween(0) 跟手、松手那帧若 spec 仍是 0 就会瞬间跳变，
-        // 表现为「上划/下降没有动画」。改用显式 Animatable：
-        //   - 拖拽中：snapTo（零延迟，纯跟手）
-        //   - 吸附 / 打开 / 退出收拢：animateTo(spring)（有弹性过渡）
-        // 两者路径完全分开，不会互相吞掉。
+        // 详见 docs/specs/界面层.md §8.2 A 必须用显式 Animatable，不能用 animateDpAsState
         val density = LocalDensity.current
         val targetPx = with(density) { targetDetailHeight.toPx() }
         val barHeightPx = remember { Animatable(with(density) { navHeight.toPx() }) }
-        // key 必须包含 detailStage：上划吸附到 Full 时 barMode 仍是 Detail、
-        // isCollapsing 仍是 false，若只盯这两个 key，effect 不会重跑，
-        // 高度就停在简介态 —— 这正是「上划/下降没有动画」的另一半根因。
-        //
-        // 第 2 步解耦：旧 key 里还有 addingSchedule、scheduleDetailId，
-        // 但这两者的信息已由 barMode 承载（见 deriveBarMode），属冗余 key，
-        // 会让同一变化触发多条重跑路径。现固定为 4 个真正的输入。
+        // 详见 docs/specs/界面层.md §8.2 B effect 的 key 必须含 detailStage，且只含真正的输入
         LaunchedEffect(barMode, isCollapsing, detailStage, isDragging) {
             // 形态切换 / 吸附 / 开始退出：走弹簧动画（拖拽中除外）
             if (!isDragging) {
@@ -689,10 +601,7 @@ fun MainShell() {
         }
         val barHeight = with(density) { barHeightPx.value.toDp() }
 
-        // 形态进度 0..1：**在 briefHeight -> fullHeight 这段归一化**。
-        // 用 navHeight 做分母会让简介态就有约 0.24 的进度，
-        // 导致胶囊半透明、K-V 提前浮现（两种形态糊在一起）。
-        // 这里让简介态 = 0（胶囊满、K-V 无），详情态 = 1（胶囊无、K-V 满）。
+        // 详见 docs/specs/界面层.md §8.2 C 形态进度在 brief -> full 这段归一化
         val expandProgress = with(density) {
             val briefPx = barMetrics.brief.toPx()
             val fullPx = barMetrics.full.toPx()
@@ -724,21 +633,11 @@ fun MainShell() {
                 .padding(horizontal = navPadding, vertical = s(18.dp))
                 .fillMaxWidth()
                 .height(barHeight)
-                // 这里**不能**用 .alpha(navAlpha)：
-                // navAlpha 的语义是「导航项该不该显示」，它若作用在整个容器上，
-                // 会把输入态 / 详情态的内容一起干掉。
-                // 历史上输入框浮在这层之外所以没暴露，现在它住进容器就立刻被隐藏。
-                // 正确做法：容器始终不透明，只让下面的导航项自己淡出（见 BarMode.Normal 分支）。
+                // 详见 docs/specs/界面层.md §8.4 A 不能用 .alpha(navAlpha) 作用于整个容器
                 .featheredEdge(colors.navBar.colorItem, barCorner)
                 .clip(RoundedCornerShape(barCorner))
                 .background(colors.navBar.colorContainer)
-                // 卡片形态下，底栏容器本身**消费点击**：容器就是卡片本体，
-                // 落在它上面的点击必须停在这里，不能穿透到底下的「卡片外退出层」，
-                // 否则点卡片内部也会退出（维护者明确要求「卡片内部不退出」）。
-                //
-                // 放这里而不是放在各个卡片内容里：卡片内容高度会随形态变化，
-                // 内容之外的容器留白同样是「卡片内部」，也得消费掉。
-                // 横杠等子控件的 pointerInput 在更内层，命中测试先给子节点，拖拽不受影响。
+                // 详见 docs/specs/界面层.md §8.1 C 底栏容器自己消费点击（卡片外退出层不能接管）
                 .then(
                     if (barMode != BarMode.Normal && barMode != BarMode.Input) {
                         Modifier.clickable(
@@ -749,25 +648,9 @@ fun MainShell() {
                         Modifier
                     },
                 )
-                // 上报底栏占位（供内容页做底部避让）。
-                //
-                // 为什么不再上报「顶边 y 坐标」：
-                // 之前用 positionInRoot / boundsInRoot 取顶边，再在内容页里做坐标换算，
-                // 两次都出现了偏差（一次少让出、一次多让出），因为 padding 与子树坐标
-                // 叠加后极易算错，且不同机型表现不一致。
-                // 改为直接上报**底栏自身在外层 Box 中的高度**：
-                // 它就是「内容区底部必须让出的像素数」，无需任何坐标换算。
+                // 详见 docs/specs/界面层.md §8.4 B 上报底栏自身高度，不做坐标换算
                 .onGloballyPositioned { coords ->
-                    // 只在**常态、且高度动画已经稳定**时上报占位高度。
-                    //
-                    // 两个条件缺一不可：
-                    // 1. barMode == Normal：点开详情卡（62->128dp）时不该推动课表
-                    //    （弹出版挤压，之前已修）。
-                    // 2. barHeight == navHeight：退出详情卡时 barMode **立刻**回到 Normal，
-                    //    但 barHeight 还在 128->62dp 的 340ms 动画途中。
-                    //    若此时无条件上报，会逐帧把中间高度传给课表，
-                    //    整张课表跟着一帧一帧改大小 —— 就是「退回时瞬间变大小、弹一下」。
-                    //    等动画落回 navHeight 再上报，值与此前一致，不会触发重组。
+                    // 详见 docs/specs/界面层.md §8.4 C 只在常态 + 高度动画稳定时上报占位
                     if (barMode == BarMode.Normal && barHeight == navHeight) {
                         val h = coords.size.height.toFloat()
                         if (h > 0f && h != navOccupiedHeight) navOccupiedHeight = h
@@ -960,10 +843,7 @@ fun MainShell() {
 
         // ---- 时间条（页面级 overlay）----
         if (selectedTab == 1) {
-            // 位置与高度**全部用实测值**（TimetableGrid 上报的节次行范围）。
-            // 手算公式已连续错两次（漏底栏占位、漏工具条预留），
-            // 而这段区域还受状态栏、表头、各种 padding 影响，永远算不全。
-            // 实测值天然包含所有偏移，所以这里只做一次 dp 换算。
+            // 详见 docs/specs/界面层.md §8.5 D 位置必须用 TimetableGrid 上报的实测值
             val rulerTop = with(density) { periodTopPx.toDp() }
             val rulerHeight = with(density) { periodHeightPx.toDp() }
             // 课表几何映射：滑动时间 / 松手节次 / 流水位置全部走它，
