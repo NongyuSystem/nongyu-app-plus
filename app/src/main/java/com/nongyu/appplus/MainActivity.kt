@@ -10,7 +10,7 @@ import com.nongyu.appplus.login.model.VerificationResult
 import com.nongyu.appplus.net.NetHolder
 import com.nongyu.appplus.net.NetStartupProbe
 import com.nongyu.appplus.skin.FileSkinSource
-import com.nongyu.appplus.ui.NongyuApp
+import com.nongyu.appplus.NongyuApp
 import com.nongyu.appplus.design.NongyuAppPlusTheme
 
 /**

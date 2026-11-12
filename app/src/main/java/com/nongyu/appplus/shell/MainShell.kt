@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui
+package com.nongyu.appplus.shell
 
 import com.nongyu.appplus.design.uiScaleFor
 import androidx.activity.compose.BackHandler
@@ -97,6 +97,13 @@ import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.design.NongyuTheme
 import com.nongyu.appplus.timetable.model.CourseEntry
 import com.nongyu.appplus.timetable.logic.COURSE_TIMES
+import com.nongyu.appplus.timetable.logic.isPeriodEnded
+import com.nongyu.appplus.shell.BarMode
+import com.nongyu.appplus.shell.DetailStage
+import com.nongyu.appplus.shell.DismissTarget
+import com.nongyu.appplus.shell.OrbMode
+import com.nongyu.appplus.shell.deriveBarMode
+import com.nongyu.appplus.shell.dismissTargetOf
 import com.nongyu.appplus.timetable.logic.TimetableGeometry
 import com.nongyu.appplus.timetable.data.MockCourseCommentRepository
 import com.nongyu.appplus.timetable.data.CourseUserStore
@@ -130,43 +137,9 @@ import com.nongyu.appplus.timetable.ui.TimetableScreen
 
 private val TABS = listOf("全部", "课表", "探索", "个人")
 
-/**
- * 第 [period] 节是否已经结束（用于考勤默认态）。
- *
- * 取 COURSE_TIMES 里该节的**结束时刻**，与当前系统时间比较。
- * 纯判定、不依赖 Android/Compose，放在这里便于以后挪进数据层加单测。
- */
-private fun isPeriodEnded(period: Int): Boolean {
-    val end = com.nongyu.appplus.timetable.logic.COURSE_TIMES
-        .getOrNull(period - 1)?.end ?: return false
-    val parts = end.split(":")
-    if (parts.size != 2) return false
-    val endMin = (parts[0].toIntOrNull() ?: return false) * 60 +
-        (parts[1].toIntOrNull() ?: return false)
-    val now = java.time.LocalTime.now()
-    return now.hour * 60 + now.minute >= endMin
-}
+// 考勤默认态的判定已下沉到 timetable/logic/PeriodEnded.kt（可单测），
+// 此处直接用，不再保留 UI 层副本。
 
-private enum class OrbMode { Idle, Listening, Input }
-
-/**
- * 底部条的三形态。三者**共用同一个容器**，靠高度/圆角/内容切换实现「原地变形」：
- * - [Normal]：常规导航栏（2+2 + 中间星云球）
- * - [Input]：输入态（导航项淡出，原地变输入栏）
- * - [Detail]：课程详情卡（导航项与星云球都溶解，拉高展示课程信息）
- */
-private enum class BarMode { Normal, Input, Detail, AddSchedule, ScheduleDetail }
-
-/**
- * 课程详情卡的四态（维护者 2026-11-10 拍板）：
- * - [BarMode.Normal] = 无详情卡（常态导航栏）
- * - [Brief] = 简介态（三胶囊）
- * - [Full] = 详情态（K-V + 考勤/评论/备注）
- * - [FullDelete] = 详情态再上划一档，最底部出现「删除这天的这节课」
- *
- * 拖拽横杠在四档之间逐档吸附；拖到最底退出回到 Normal。
- */
-private enum class DetailStage { Brief, Full, FullDelete }
 
 @Composable
 fun MainShell() {
@@ -501,15 +474,13 @@ fun MainShell() {
 
         // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
         // （原先定义在底栏段落里，那里太晚，内容区拿不到。）
-        val barMode = when {
-            // 添加日程优先于详情卡：从工具条/空白格进入表单时不该同时开详情卡
-            addingSchedule != null -> BarMode.AddSchedule
-            // 日程展开态次之：它也要占用导航栏位置来显示日程明细
-            scheduleDetailId != null -> BarMode.ScheduleDetail
-            detailCourse != null -> BarMode.Detail
-            mode == OrbMode.Input -> BarMode.Input
-            else -> BarMode.Normal
-        }
+        // 优先级规则住在 shell/ShellState.kt（deriveBarMode），那里有单测钉顺序。
+        val barMode = deriveBarMode(
+            addingSchedule = addingSchedule,
+            scheduleDetailId = scheduleDetailId,
+            hasDetailCourse = detailCourse != null,
+            orbMode = mode,
+        )
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(modifier = Modifier.fillMaxSize()) {
@@ -523,11 +494,11 @@ fun MainShell() {
             //   - 落在其余区域     → 只有这层能接 → 退出 ✅
             // 之前两版都不对：放整屏最顶（底栏之后）会连卡片内部一起吃掉；
             // 干脆不放则卡片外无处接收点击（点了没反应）。
-            val dismissAction: (() -> Unit)? = when (barMode) {
-                BarMode.Detail -> ({ collapseDetail() })
-                BarMode.ScheduleDetail -> ({ scheduleDetailId = null })
-                BarMode.AddSchedule -> ({ addingSchedule = null })
-                else -> null
+            val dismissAction: (() -> Unit)? = when (dismissTargetOf(barMode)) {
+                DismissTarget.Detail -> ({ collapseDetail() })
+                DismissTarget.ScheduleDetail -> ({ scheduleDetailId = null })
+                DismissTarget.AddSchedule -> ({ addingSchedule = null })
+                DismissTarget.None -> null
             }
             if (dismissAction != null) {
                 Box(
