@@ -9,11 +9,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import com.nongyu.appplus.design.ModalScrim
@@ -23,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,10 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -64,7 +58,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.skin.LocalSkinResolution
 import com.nongyu.appplus.skin.LocalSkinSource
-import com.nongyu.appplus.shell.orb.NongyuOrb
 import com.nongyu.appplus.icon.NavIconStrokes
 import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.design.NongyuTheme
@@ -81,6 +74,7 @@ import com.nongyu.appplus.shell.bar.ScheduleDetailCardContent
 import com.nongyu.appplus.shell.bar.InputBarContent
 import com.nongyu.appplus.shell.bar.NavRowContent
 import com.nongyu.appplus.shell.bar.featheredEdge
+import com.nongyu.appplus.shell.orb.OrbHost
 import com.nongyu.appplus.shell.BarMetrics
 import com.nongyu.appplus.shell.BarMode
 import com.nongyu.appplus.shell.barTargetHeight
@@ -926,121 +920,23 @@ fun MainShell() {
             }
         }
 
-        // 长按态的全屏 dim：画在底栏之后，把整条导航栏也一起压暗
-        if (dimAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(dimAlpha)
-                    .background(Color(0xFF0A140F)),
-            )
-        }
-
-        // 全屏雷达波：进入时向外扩散、退出时向内回收。
-        // 画在 dim 之后、球体之前 —— 压在暗色后景上、位于球体下层。
-        if (pulse.value > 0f && pulse.value < 1f) {
-            val pv = pulse.value
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val cx = size.width / 2f
-                // 圆心与球心保持一致：用与球 Box 相同的偏移比例
-                val cy = size.height - (orbSize.value * 0.22f).dp.toPx() - (orbSize / 2).toPx()
-                val maxR = kotlin.math.hypot(size.width.toDouble(), size.height.toDouble()).toFloat()
-                val r0 = (orbSize / 2).toPx()              // 球体边缘
-                // 浅绿波纹：暗底上不能用深品牌绿，否则显得很脏很沉。
-                val ringColor = Color(0xFF7FD9A8)
-
-                val r: Float
-                val ringAlpha: Float
-                if (pulseExpand) {
-                    // 扩散：球 → 整屏，随扩散淡出
-                    val ease = 1f - (1f - pv) * (1f - pv)  // easeOut，前段冲得快
-                    r = r0 + ease * maxR
-                    ringAlpha = (1f - pv) * 0.34f
-                } else {
-                    // 回收：整屏 → 球，越靠近球体越亮，末段快速收敛
-                    val ease = pv * pv                     // easeIn，后段收得快
-                    r = r0 + (1f - ease) * maxR
-                    ringAlpha = pv * 0.34f
-                }
-
-                // 一圈亮环 + 一圈更宽更淡的伴随环，形成雷达波纹
-                drawCircle(
-                    color = ringColor.copy(alpha = ringAlpha),
-                    radius = r,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 2.5.dp.toPx()),
-                )
-                drawCircle(
-                    color = ringColor.copy(alpha = ringAlpha * 0.40f),
-                    radius = r * 0.86f,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 9.dp.toPx()),
-                )
-            }
-        }
-
-        // 正中凸起的农小屿星云球（激活态为最高层）。
-        // 手势状态机：按下 → 超过长按阈值进入 Listening（加速 + 放大 + 全屏 dim）；
-        // 手指抬起 / 手势取消时**必定**复位到 Idle（onPress 的 tryAwaitRelease 兜底）。
-        // 短按才切换 Input（扩开为输入框）。二者互斥，避免长按态卡死。
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // 凸起偏移量按球径比例：球小则凸起少，避免球浮在导航栏之上脱节
-                .offset(y = (orbSize.value * -0.22f).dp)
-                .size(orbSize)
-                .scale(orbScale * orbDissolveScale)
-                .alpha(orbAlpha * orbDissolveAlpha)
-                // 不 clip(CircleShape)：星云球边缘在渲染层已羽化到透明，
-                // 硬裁剪会把软边切成 3D 球的硬圆轮廓。
-                // 星云球只在**常态**接收触摸。
-                //
-                // 否则球的手势区会盖在课程表底部（球是浮在内容之上的），
-                // 在课程卡片上点按/长按会被判成星云球的操作（维护者反馈）。
-                // 输入态/详情态时球本来就在溶解，也不需要交互。
-                .then(
-                    if (barMode == BarMode.Normal) {
-                        Modifier.pointerInput(Unit) {
-                            // longPressed 记录本轮手势是否已判为长按，避免长按后又误触发 onTap。
-                            var longPressed = false
-                            detectTapGestures(
-                                onPress = {
-                                    longPressed = false
-                                    // 按下后等待释放；抬手 / 移出 / 手势取消都会返回。
-                                    // 只有长按态需要「松手后恢复」，点按态(Input)要保留。
-                                    tryAwaitRelease()
-                                    if (longPressed) {
-                                        mode = OrbMode.Idle
-                                        pulseExpand = false   // 变亮：波向内回收
-                                        pulseKey++
-                                    }
-                                },
-                                onLongPress = {
-                                    longPressed = true
-                                    mode = OrbMode.Listening
-                                    pulseExpand = true        // 变黑：波向外扩散
-                                    pulseKey++
-                                },
-                                onTap = {
-                                    if (!longPressed) {
-                                        mode = if (mode == OrbMode.Input) OrbMode.Idle else OrbMode.Input
-                                    }
-                                },
-                            )
-                        }
-                    } else {
-                        Modifier
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            NongyuOrb(
-                diameter = orbSize,
-                speed = if (mode == OrbMode.Listening) 2.2f else 0.25f,
-                // 激活态有全屏 dim，球边缘要消融进暗背景，不能留灰白亮边。
-                dimmed = active,
-            )
-        }
+        // 星云球宿主（dim + 雷达波 + 球体 + 手势状态机）已搬到 shell/orb/OrbHost.kt。
+        // 层级顺序 dim -> 雷达波 -> 球体 由 OrbHost 内部保证，不能调换。
+        OrbHost(
+            orbSize = orbSize,
+            scale = orbScale * orbDissolveScale,
+            alpha = orbAlpha * orbDissolveAlpha,
+            dimAlpha = dimAlpha,
+            pulse = pulse.value,
+            pulseExpand = pulseExpand,
+            mode = mode,
+            onModeChange = { mode = it },
+            onPulse = { expand ->
+                pulseExpand = expand
+                pulseKey++
+            },
+            enabled = barMode == BarMode.Normal,
+        )
 
         // ---- 票 #60：拖时间条时的遮罩 ----
         // 位置必须在**星云球之后**：维护者要求遮板也要遮住星云球。
