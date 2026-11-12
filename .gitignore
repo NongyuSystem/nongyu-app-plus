@@ -71,6 +71,13 @@ release/
 ### 临时截图（像素比对用，不入库）###
 shots/
 
+### 根目录调试产物（UI dump / 截图，不入库）###
+# adb uiautomator dump 导出的 *.xml 与截图最容易随手丢在根目录。
+# 只挡仓库根目录，不挡 app/src/main/res/ 下的正式资源与 docs/ 下的素材。
+# 已有产物统一放在 .dsh-tmp/debug-artifacts-<日期>/ 下（该目录已忽略）。
+/*.png
+/*.xml
+
 ### IDE 本地配置 ###
 .idea/
 
