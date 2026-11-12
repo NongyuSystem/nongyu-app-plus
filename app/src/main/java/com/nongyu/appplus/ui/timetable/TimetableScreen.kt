@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -137,7 +138,36 @@ fun TimetableScreen(
                 kotlinx.coroutines.delay(30_000L)
             }
         }
-        val waterFraction = remember(nowMinute) { TimetableAxis.fractionOf(nowMinute) }
+
+        // 节次行的实测屏幕范围（由 TimetableGrid 通过 onPeriodColumnBounds 上报）。
+        // 这里必须自己也留一份：流水位置要用它做坐标换算，光上报给 Shell 不够。
+        var periodTopPx by remember { mutableFloatStateOf(0f) }
+        var periodHeightPx by remember { mutableFloatStateOf(0f) }
+
+        val screenHeightPx = constraints.maxHeight.toFloat()
+
+        // 流水水面高度：**占整屏比例**（WaterLine 的 surfacePercent 就是这个口径）。
+        //
+        // 这里踩过两个叠在一起的坑，都必须同时避开：
+        // 1. 用过 TimetableAxis（真实分钟等分）—— 但课表是 10 节等高行 + 固定 dp 缝，
+        //    45 分钟一节课与 150 分钟午休的密度差一个数量级，按分钟等分必然错位。
+        //    正解是 TimetableGeometry 的分段线性映射。
+        // 2. 算出的比例是「在节次行内」的 0..1，而 surfacePercent 要的是「在整屏内」的 0..1。
+        //    直接把前者当后者用，水面会整体上移一大截（实测 9:20 落在第 1 节上方）。
+        //    必须换算：屏幕坐标 = 节次行顶边 + 行内比例 × 节次行高度，再除以屏高。
+        val waterFraction = remember(nowMinute, periodTopPx, periodHeightPx, screenHeightPx) {
+            if (periodHeightPx <= 1f || screenHeightPx <= 1f) {
+                // 首帧尚未测量出来：先给 0，等测量完成后自动重算
+                0f
+            } else {
+                val geo = TimetableGeometry.build(
+                    totalHeightDp = with(density) { periodHeightPx.toDp() }.value,
+                )
+                val withinRow = geo.fractionAtTime(nowMinute)
+                val screenY = periodTopPx + withinRow * periodHeightPx
+                (screenY / screenHeightPx).coerceIn(0f, 1f)
+            }
+        }
         val tiltDegrees = rememberWaterTilt()
 
         // 票 #60 需求 4：进入课表页的入场动画（单一进度，避免多段 LaunchedEffect 打架）
@@ -278,7 +308,12 @@ fun TimetableScreen(
                     // 视觉上流水仍只升到当前时间（由 WaterLine 自己控制），
                     // 卡片揭幕走完整列，两者各管各的。
                     cardAppear = 1f - 1.2f * seg(0.00f, 0.55f),
-                    onPeriodColumnBounds = onPeriodColumnBounds,
+                    onPeriodColumnBounds = { top, h ->
+                        // 本页自己要留一份用于流水换算；同时照旧上报给 Shell（时间条定位要用）
+                        periodTopPx = top
+                        periodHeightPx = h
+                        onPeriodColumnBounds(top, h)
+                    },
                     onWeekHeaderClick = { showJumpDialog = true },
                     modifier = Modifier.fillMaxSize(),
                 )
