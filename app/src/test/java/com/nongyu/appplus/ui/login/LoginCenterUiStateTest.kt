@@ -1,4 +1,4 @@
-package com.nongyu.appplus.feature.login
+package com.nongyu.appplus.ui.login
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

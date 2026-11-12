@@ -1,4 +1,4 @@
-package com.nongyu.appplus.feature.login
+package com.nongyu.appplus.ui.login
 
 import android.content.Context
 import android.util.Log

@@ -2,9 +2,9 @@ package com.nongyu.appplus.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
-import com.nongyu.appplus.feature.login.LoginCenterScreen
-import com.nongyu.appplus.feature.login.LoginDestination
-import com.nongyu.appplus.feature.login.LoginSessionHolder
+import com.nongyu.appplus.ui.login.LoginCenterScreen
+import com.nongyu.appplus.ui.login.LoginDestination
+import com.nongyu.appplus.ui.login.LoginSessionHolder
 import com.nongyu.appplus.ui.theme.NongyuAppPlusTheme
 
 /**

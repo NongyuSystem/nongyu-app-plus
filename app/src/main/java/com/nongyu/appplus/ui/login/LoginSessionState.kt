@@ -1,4 +1,4 @@
-package com.nongyu.appplus.feature.login
+package com.nongyu.appplus.ui.login
 
 /**
  * 根节点渲染去向。只有两种：主界面或登录中心 —— **没有「检查中」态**（票 #90）。

@@ -1,4 +1,4 @@
-package com.nongyu.appplus.feature.login
+package com.nongyu.appplus.ui.login
 
 /**
  * 认证域（票 #91）。取值与 `GLOSSARY.md` 一致：统一身份认证 / 平台登录。
