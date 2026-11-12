@@ -4,6 +4,7 @@ import com.nongyu.appplus.net.api.IdentityApi
 import com.nongyu.appplus.net.core.ApiCall
 import com.nongyu.appplus.net.core.UrlBuilder
 import com.nongyu.appplus.net.model.HealthzDto
+import com.nongyu.appplus.net.model.LoginDto
 import com.nongyu.appplus.net.model.MailCodeAckDto
 import com.nongyu.appplus.net.model.NetJson
 import com.nongyu.appplus.net.model.ProfileDto
@@ -33,7 +34,7 @@ import retrofit2.Response
  * `GET /identity/me`（需 Bearer、非公开端点），故门面随之扩一条 `me()`。
  * 这是后一期的范围调整，不表示 school/presence 域已可调用。
  */
-class NongyuApi internal constructor(
+class NongyuGateWay internal constructor(
     private val identity: IdentityApi,
     private val baseUrl: String,
 ) {
@@ -54,6 +55,20 @@ class NongyuApi internal constructor(
      */
     suspend fun sendMailCode(body: RequestBody): ApiCall.Outcome<MailCodeAckDto> =
         call("POST", "/identity/mailcode/send") { identity.sendMailCode(body) }
+
+    /**
+     * `POST /identity/login` —— 四种登录方式共用（票 #92 起由门面暴露）。
+     *
+     * **公开端点**（不挂 Bearer）但**仍要 NY1 签名**：「公开 ≠ 免签名」，见
+     * `docs/后端接口与NY1签名对接契约.md §1.4`。
+     *
+     * @param body 已序列化好的 `LoginRequestDto` 请求体；调用方按登录方式填对应字段
+     *   （平台账密 = `method=password` + `studentNo` + `password` + `deviceId`）。
+     *
+     * 成功响应 [LoginDto]：`expiresAt` 是 **Unix 秒 Long**。
+     */
+    suspend fun login(body: RequestBody): ApiCall.Outcome<LoginDto> =
+        call("POST", "/identity/login") { identity.login(body) }
 
     /**
      * `GET /identity/me` —— 需 Bearer。用于启动校验：首帧之后由后台发起，

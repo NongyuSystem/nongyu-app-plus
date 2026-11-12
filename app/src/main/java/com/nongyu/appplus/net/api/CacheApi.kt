@@ -16,13 +16,13 @@ import retrofit2.http.Query
 /**
  * 回传缓存子域（后端 `jiaowu.RegisterCache`，规格 §3.6）。
  *
- * ## 为什么不并入 [NongyuApi]
+ * ## 为什么不并入 [NongyuGateWay]
  * 两者鉴权口径、失败形状、数据用途都不同：
- * - `NongyuApi` 只管身份域 3 个公开端点，成功就是裸 DTO；
+ * - `NongyuGateWay` 只管身份域 3 个公开端点，成功就是裸 DTO；
  * - 本接口的 GET **同一个 200 有两条形状**（命中 / `cache_miss`），
  *   必须靠 [CacheGetResponse.discriminate] 判别，不能套用 `ApiCall` 的常规分流。
  *
- * 独立成接口也避免把 `NongyuApi` 变成垃圾桶。装配由 `NetHolder.cache()` 提供，
+ * 独立成接口也避免把 `NongyuGateWay` 变成垃圾桶。装配由 `NetHolder.cache()` 提供，
  * 一期仍不构造 [SchoolApi] / [PresenceApi] 实例。
  *
  * ## 鉴权

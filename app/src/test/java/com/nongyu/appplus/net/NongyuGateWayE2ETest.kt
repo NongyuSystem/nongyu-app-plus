@@ -29,7 +29,7 @@ import retrofit2.Retrofit
  * 用 MockWebServer 而不是真后端：`#46` 已证明真后端起不来（Postgres 口令未知）
  * 且 12 组端点全缺，一个「跑不起来就跳过」的契约测试等于没有。
  */
-class NongyuApiE2ETest {
+class NongyuGateWayE2ETest {
 
     private lateinit var server: MockWebServer
 
@@ -44,8 +44,8 @@ class NongyuApiE2ETest {
         server.shutdown()
     }
 
-    /** 用 MockWebServer 的地址造一个真的 NongyuApi（走完整装配链路，除 NetHolder 的 Context 依赖）。 */
-    private fun api(token: String? = "TOKEN-ABC"): Pair<NongyuApi, MutableList<String>> {
+    /** 用 MockWebServer 的地址造一个真的 NongyuGateWay（走完整装配链路，除 NetHolder 的 Context 依赖）。 */
+    private fun api(token: String? = "TOKEN-ABC"): Pair<NongyuGateWay, MutableList<String>> {
         val logs = mutableListOf<String>()
         val logger = NongyuLogger.of { _, msg, _ -> logs += msg }
 
@@ -61,7 +61,7 @@ class NongyuApiE2ETest {
             .client(client)
             .addConverterFactory(NetJson.converterFactory())
             .build()
-        return NongyuApi(retrofit.create(IdentityApi::class.java), baseUrl) to logs
+        return NongyuGateWay(retrofit.create(IdentityApi::class.java), baseUrl) to logs
     }
 
     // ---------- 成功路径：路径拼装 + DTO 反序列化 ----------

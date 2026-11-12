@@ -35,7 +35,7 @@ import retrofit2.Retrofit
  * ADR-0006 的约束是对整条启动路径的，不只是皮肤。
  *
  * ## 一期构造范围
- * [NongyuApi] 只持有 [IdentityApi]；[SchoolApi] / [PresenceApi] 只定义接口、不构造实例
+ * [NongyuGateWay] 只持有 [IdentityApi]；[SchoolApi] / [PresenceApi] 只定义接口、不构造实例
  * （属「客户端直连学校」的独立平面，out of scope）。
  *
  * **例外**：[CacheApi]（回传缓存 3 条路由）已纳入一期，由 [cache] 单独暴露，
@@ -44,7 +44,7 @@ import retrofit2.Retrofit
 object NetHolder {
 
     @Volatile
-    private var initialized: NongyuApi? = null
+    private var initialized: NongyuGateWay? = null
 
     /** 共享的 Retrofit 实例，`api()` 与 `cache()` 复用它（避免重复建 OkHttp 连接池）。 */
     @Volatile
@@ -94,13 +94,13 @@ object NetHolder {
      *
      * @param context 用来建会话存储。传 `applicationContext`，不要传 Activity（防泄漏）。
      */
-    fun api(context: Context): NongyuApi =
+    fun api(context: Context): NongyuGateWay =
         initialized ?: synchronized(this) {
             initialized ?: build(context.applicationContext).also { initialized = it }
         }
 
     /**
-     * 回传缓存接口（规格 §3.6）。**独立入口，不并入 [NongyuApi]**。
+     * 回传缓存接口（规格 §3.6）。**独立入口，不并入 [NongyuGateWay]**。
      *
      * 与 [api] 共享同一个 [Retrofit] / OkHttp 连接池；若 [api] 已装配，这里不再重复构建。
      * 三条路由都需要 Bearer，无票时由 `AuthInterceptor` 本地短路。
@@ -115,16 +115,16 @@ object NetHolder {
     }
 
     /** 仅供测试：注入一个预构造的实例，绕过 Keystore 与网络装配。 */
-    internal fun overrideForTest(api: NongyuApi?) {
+    internal fun overrideForTest(api: NongyuGateWay?) {
         synchronized(this) { initialized = api }
     }
 
     /** 测试用：读取当前是否已装配（验证惰性）。 */
     internal fun isInitialized(): Boolean = initialized != null
 
-    private fun build(context: Context): NongyuApi {
+    private fun build(context: Context): NongyuGateWay {
         val retrofit = buildRetrofit(context).also { retrofitRef = it }
-        return NongyuApi(
+        return NongyuGateWay(
             identity = retrofit.create(IdentityApi::class.java),
             baseUrl = retrofit.baseUrl().toString(),
         )

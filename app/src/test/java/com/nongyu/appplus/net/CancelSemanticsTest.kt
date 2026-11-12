@@ -145,7 +145,7 @@ class CancelSemanticsTest {
         server.shutdown() // 释放挂起的连接
     }
 
-    private fun buildApi(): NongyuApi {
+    private fun buildApi(): NongyuGateWay {
         val client = com.nongyu.appplus.net.api.http.OkHttpFactory.build(
             tokenProvider = com.nongyu.appplus.net.auth.AuthTokenProvider { "T" },
             sessionInvalidListener = com.nongyu.appplus.net.auth.SessionInvalidListener { },
@@ -157,7 +157,7 @@ class CancelSemanticsTest {
             .client(client)
             .addConverterFactory(com.nongyu.appplus.net.model.NetJson.converterFactory())
             .build()
-        return NongyuApi(
+        return NongyuGateWay(
             identity = retrofit.create(com.nongyu.appplus.net.api.IdentityApi::class.java),
             baseUrl = baseUrl,
         )

@@ -38,7 +38,7 @@ import retrofit2.http.Path
  * 登录、发验证码这些公开端点也不例外。
  *
  * ## 本文件只定义接口，不决定构造范围
- * 哪些端点在 [NongyuApi] 门面里实际暴露，由门面自己决定；这里保持完整映射。
+ * 哪些端点在 [NongyuGateWay] 门面里实际暴露，由门面自己决定；这里保持完整映射。
  */
 interface IdentityApi {
 

@@ -23,7 +23,7 @@ import retrofit2.http.Streaming
  * —— 这里做的是「地址编码 + 换票」，不保管用户教务账密。
  * 「客户端直连学校」是 out of scope 的独立网络平面。
  *
- * 接口先定义好，等 future effort 落地时直接可用；`NongyuApi` 一期不持有它。
+ * 接口先定义好，等 future effort 落地时直接可用；`NongyuGateWay` 一期不持有它。
  *
  * ## 路径不写前导斜杠
  * 与 [IdentityApi] 同一规则：`@GET("school/address")`。
