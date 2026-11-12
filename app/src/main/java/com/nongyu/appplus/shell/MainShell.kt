@@ -78,7 +78,17 @@ import com.nongyu.appplus.shell.orb.OrbHost
 import com.nongyu.appplus.shell.BarMetrics
 import com.nongyu.appplus.shell.BarMode
 import com.nongyu.appplus.shell.barTargetHeight
+import com.nongyu.appplus.shell.dialogs.CourseLocationEditDialog
+import com.nongyu.appplus.shell.dialogs.CourseLocationNavDialog
+import com.nongyu.appplus.shell.dialogs.CourseWeekEditDialog
+import com.nongyu.appplus.shell.dialogs.currentLocationOf
+import com.nongyu.appplus.timetable.data.LocationScope
 import com.nongyu.appplus.shell.DetailSnap
+import com.nongyu.appplus.shell.ClickIntent
+import com.nongyu.appplus.shell.OpenCard
+import com.nongyu.appplus.shell.currentOpenCard
+import com.nongyu.appplus.shell.resolveBlankSlotClick
+import com.nongyu.appplus.shell.resolveCourseClick
 import com.nongyu.appplus.shell.snapDetailStage
 import com.nongyu.appplus.shell.DetailStage
 import com.nongyu.appplus.shell.DismissTarget
@@ -490,41 +500,46 @@ fun MainShell() {
             }
 
             if (selectedTab == 1) {
-                com.nongyu.appplus.timetable.ui.TimetableScreen(
+                // 点击规则住在 shell/CardIntent.kt（有单测）。两个入口语义**不同**：
+                // - 点课程盒子：课程卡开着 → 直接切卡（不要求点两下）
+                // - 点空白格：课程卡开着 → 直接清空（立即，不走收拢动画）
+                val openCard = currentOpenCard(
+                    addingSchedule = addingSchedule,
+                    scheduleDetailId = scheduleDetailId,
+                    hasDetailCourse = detailCourse != null,
+                )
+                fun applyIntent(intent: ClickIntent) {
+                    when (intent) {
+                        ClickIntent.Dismiss -> when (openCard) {
+                            OpenCard.AddSchedule -> addingSchedule = null
+                            OpenCard.ScheduleDetail -> scheduleDetailId = null
+                            // 点课程盒子时退出走收拢动画（高度动画跑完再切内容）
+                            OpenCard.DetailCourse -> collapseDetail()
+                            OpenCard.None -> Unit
+                        }
+                        ClickIntent.DismissDetailImmediately -> {
+                            detailCourse = null
+                            isCollapsing = false
+                        }
+                        is ClickIntent.OpenDetail -> {
+                            detailCourse = intent.course
+                            isCollapsing = false
+                        }
+                        is ClickIntent.OpenAddSchedule -> {
+                            addingSchedule = Triple(intent.day, intent.period, intent.week)
+                        }
+                    }
+                }
+
+                TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
                     deletedIds = deletedIds,
                     schedules = addedSchedules,
                     onCourseClick = { course ->
-                        // 点课程盒子：只有「课程卡/日程卡/表单」都关着时才打开课程卡；
-                        // 任一卡片开着时，点课程盒子= 先退出当前卡片（维护者要求：
-                        // 课程卡开时点课程盒子之外的区域都退出，课程盒子本身也按此处理，
-                        // 否则「点别的课切卡」会和「点哪都退出」冲突）。
-                        if (addingSchedule != null) {
-                            addingSchedule = null
-                        } else if (scheduleDetailId != null) {
-                            scheduleDetailId = null
-                        } else if (detailCourse != null) {
-                            // 已开着课程卡时点另一个课程盒子 → 直接切到那门课
-                            detailCourse = course
-                            isCollapsing = false
-                        } else {
-                            detailCourse = course
-                        }
+                        applyIntent(resolveCourseClick(openCard, course))
                     },
                     onBlankSlotAdd = { day, period, week ->
-                        // 点空白格：**任何卡片开着时，第一下都只是退出卡片**
-                        // （维护者 2026-11-11："在课程时点击后面的除课程盒子外其他区域
-                        //   都是退出课程卡片"）。卡片都关着时才真正添加日程。
-                        if (addingSchedule != null) {
-                            addingSchedule = null
-                        } else if (scheduleDetailId != null) {
-                            scheduleDetailId = null
-                        } else if (detailCourse != null) {
-                            detailCourse = null
-                            isCollapsing = false
-                        } else {
-                            addingSchedule = Triple(day, period, week)
-                        }
+                        applyIntent(resolveBlankSlotClick(openCard, day, period, week))
                     },
                     onSettings = { placeholderHint = "设置：本期占位，未实现" },
                     onUpdateSchedule = { placeholderHint = "更新课表：本期占位，未实现" },
@@ -981,61 +996,60 @@ fun MainShell() {
         }
 
         // ---- 地点 / 周次 / 导航 三个子窗体 ----
-        // 地点与周次共用 CourseCalendar：都先选「生效天」，再改值；
-        // 需上课的天由 classDaysOf(course) 算出并标主题色。
+        // 参数布线住在 shell/dialogs/CourseDialogs.kt，地点回落链只算一次。
         val dlgCourse = detailCourse
         val dlgClassDays = remember(dlgCourse?.id) {
-            if (dlgCourse != null) {
-                com.nongyu.appplus.timetable.ui.classDaysOf(dlgCourse)
-            } else emptySet()
+            if (dlgCourse != null) classDaysOf(dlgCourse) else emptySet()
         }
-        if (showLocationEdit && dlgCourse != null) {
-            com.nongyu.appplus.timetable.ui.LocationEditDialog(
-                courseName = dlgCourse.name,
-                currentLocation = locDay ?: locGeneral ?: dlgCourse.room,
-                uiScale = uiScale,
-                classDays = dlgClassDays,
-                onConfirm = { newLocation, days ->
-                    coroutineScope.launch {
-                        courseUserStore.setLocationForDays(dlgCourse.id, days, newLocation)
-                        // 未选天时退回通用覆盖，保证至少有值生效
-                        if (days.isEmpty()) {
-                            courseUserStore.setLocationOverride(
-                                dlgCourse.id,
-                                com.nongyu.appplus.timetable.data.LocationScope.Once,
-                                newLocation,
-                            )
+        if (dlgCourse != null) {
+            val dlgLocation = currentLocationOf(locDay, locGeneral, dlgCourse)
+            if (showLocationEdit) {
+                CourseLocationEditDialog(
+                    course = dlgCourse,
+                    currentLocation = dlgLocation,
+                    uiScale = uiScale,
+                    classDays = dlgClassDays,
+                    onConfirm = { newLocation, days ->
+                        coroutineScope.launch {
+                            courseUserStore.setLocationForDays(dlgCourse.id, days, newLocation)
+                            // 未选天时退回通用覆盖，保证至少有值生效
+                            if (days.isEmpty()) {
+                                courseUserStore.setLocationOverride(
+                                    dlgCourse.id,
+                                    LocationScope.Once,
+                                    newLocation,
+                                )
+                            }
                         }
-                    }
-                },
-                onDismiss = { showLocationEdit = false },
-            )
-        }
-        if (showWeekEdit && dlgCourse != null) {
-            com.nongyu.appplus.timetable.ui.WeekEditDialog(
-                courseName = dlgCourse.name,
-                weekSummary = com.nongyu.appplus.timetable.ui.weeksLabelOf(dlgCourse),
-                uiScale = uiScale,
-                classDays = dlgClassDays,
-                initialExceptions = exceptionIsoDays.mapNotNull {
-                    runCatching { java.time.LocalDate.parse(it) }.getOrNull()
-                }.toSet(),
-                onConfirm = { days ->
-                    exceptionIsoDays = days
-                    coroutineScope.launch {
-                        courseUserStore.setExceptionDays(dlgCourse.id, days)
-                    }
-                },
-                onDismiss = { showWeekEdit = false },
-            )
-        }
-        if (showLocationNav && dlgCourse != null) {
-            com.nongyu.appplus.timetable.ui.LocationNavDialog(
-                courseName = dlgCourse.name,
-                location = locDay ?: locGeneral ?: dlgCourse.room,
-                uiScale = uiScale,
-                onDismiss = { showLocationNav = false },
-            )
+                    },
+                    onDismiss = { showLocationEdit = false },
+                )
+            }
+            if (showWeekEdit) {
+                CourseWeekEditDialog(
+                    course = dlgCourse,
+                    uiScale = uiScale,
+                    classDays = dlgClassDays,
+                    initialExceptions = exceptionIsoDays.mapNotNull {
+                        runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+                    }.toSet(),
+                    onConfirm = { days ->
+                        exceptionIsoDays = days
+                        coroutineScope.launch {
+                            courseUserStore.setExceptionDays(dlgCourse.id, days)
+                        }
+                    },
+                    onDismiss = { showWeekEdit = false },
+                )
+            }
+            if (showLocationNav) {
+                CourseLocationNavDialog(
+                    course = dlgCourse,
+                    location = dlgLocation,
+                    uiScale = uiScale,
+                    onDismiss = { showLocationNav = false },
+                )
+            }
         }
 
     }
