@@ -4,7 +4,7 @@ import com.nongyu.appplus.net.auth.AuthTokenProvider
 import com.nongyu.appplus.net.auth.SessionInvalidListener
 import com.nongyu.appplus.net.core.ApiErrorCode
 import com.nongyu.appplus.net.core.NongyuLogger
-import com.nongyu.appplus.net.http.OkHttpFactory
+import com.nongyu.appplus.net.api.http.OkHttpFactory
 import com.nongyu.appplus.net.model.NetJson
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json

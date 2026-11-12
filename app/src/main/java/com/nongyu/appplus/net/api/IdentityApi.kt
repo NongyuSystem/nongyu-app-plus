@@ -1,6 +1,6 @@
 package com.nongyu.appplus.net.api
 
-import com.nongyu.appplus.net.http.PublicEndpoint
+import com.nongyu.appplus.net.api.http.PublicEndpoint
 import com.nongyu.appplus.net.model.HealthzDto
 import com.nongyu.appplus.net.model.LoginDto
 import com.nongyu.appplus.net.model.LogoutAckDto

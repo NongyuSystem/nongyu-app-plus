@@ -7,9 +7,9 @@ import com.nongyu.appplus.net.auth.DefaultSessionInvalidListener
 import com.nongyu.appplus.net.auth.MinimalSessionStore
 import com.nongyu.appplus.net.auth.SessionStore
 import com.nongyu.appplus.net.auth.SessionInvalidListener
-import com.nongyu.appplus.net.http.AndroidLogger
+import com.nongyu.appplus.net.api.http.AndroidLogger
 import com.nongyu.appplus.BuildConfig
-import com.nongyu.appplus.net.http.OkHttpFactory
+import com.nongyu.appplus.net.api.http.OkHttpFactory
 import com.nongyu.appplus.net.sign.AppRequestSigner
 import com.nongyu.appplus.net.model.NetJson
 import okhttp3.OkHttpClient

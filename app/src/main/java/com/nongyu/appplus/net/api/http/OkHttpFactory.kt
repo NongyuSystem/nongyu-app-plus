@@ -1,4 +1,4 @@
-package com.nongyu.appplus.net.http
+package com.nongyu.appplus.net.api.http
 
 import com.nongyu.appplus.net.auth.AuthTokenProvider
 import com.nongyu.appplus.net.auth.SessionInvalidListener

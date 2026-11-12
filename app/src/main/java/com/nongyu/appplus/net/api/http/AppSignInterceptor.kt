@@ -1,4 +1,4 @@
-package com.nongyu.appplus.net.http
+package com.nongyu.appplus.net.api.http
 
 import com.nongyu.appplus.net.sign.AppRequestSigner
 import okhttp3.Interceptor
@@ -17,7 +17,7 @@ import okio.Buffer
  * 其它一切请求都要签名，**包括登录、发验证码这些「公开」端点**：
  * 「公开」只是不需要 `Authorization: Bearer`，不等于免签名。
  *
- * 注意这与 [com.nongyu.appplus.net.http.PublicEndpoint] 是两套概念：
+ * 注意这与 [com.nongyu.appplus.net.api.http.PublicEndpoint] 是两套概念：
  * 那个注解只决定要不要挂令牌，不决定要不要签名。
  */
 class AppSignInterceptor(

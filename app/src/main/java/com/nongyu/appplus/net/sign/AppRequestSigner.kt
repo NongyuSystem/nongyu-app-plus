@@ -10,7 +10,7 @@ import javax.crypto.spec.SecretKeySpec
  * NY1 请求签名。与 `nongyu-backend-plus` 的 `server.SignAppRequest` 逐字节对齐。
  *
  * 这层证明「请求来自持有当前密钥的客户端」，不证明用户是谁。用户令牌仍由
- * [com.nongyu.appplus.net.http.AuthInterceptor] 挂 `Authorization`。
+ * [com.nongyu.appplus.net.api.http.AuthInterceptor] 挂 `Authorization`。
  *
  * 无 GMS 设备做不到平台证明，这把密钥进 APK 后可被提取。目标是可轮换
  * （换 kid），不是不可提取。不要把字符串拆开当成保管手段。

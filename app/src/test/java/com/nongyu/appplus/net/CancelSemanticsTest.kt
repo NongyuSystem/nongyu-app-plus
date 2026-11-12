@@ -146,7 +146,7 @@ class CancelSemanticsTest {
     }
 
     private fun buildApi(): NongyuApi {
-        val client = com.nongyu.appplus.net.http.OkHttpFactory.build(
+        val client = com.nongyu.appplus.net.api.http.OkHttpFactory.build(
             tokenProvider = com.nongyu.appplus.net.auth.AuthTokenProvider { "T" },
             sessionInvalidListener = com.nongyu.appplus.net.auth.SessionInvalidListener { },
             loggingEnabled = false,

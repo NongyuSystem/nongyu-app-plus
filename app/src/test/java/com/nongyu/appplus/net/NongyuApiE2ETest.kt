@@ -6,7 +6,7 @@ import com.nongyu.appplus.net.auth.SessionInvalidListener
 import com.nongyu.appplus.net.core.ApiCall
 import com.nongyu.appplus.net.core.ApiFailure
 import com.nongyu.appplus.net.core.NongyuLogger
-import com.nongyu.appplus.net.http.OkHttpFactory
+import com.nongyu.appplus.net.api.http.OkHttpFactory
 import com.nongyu.appplus.net.model.NetJson
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse

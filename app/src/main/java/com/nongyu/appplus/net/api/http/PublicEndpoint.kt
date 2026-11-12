@@ -1,4 +1,4 @@
-package com.nongyu.appplus.net.http
+package com.nongyu.appplus.net.api.http
 
 /**
  * 标记「公开端点」—— 无 token 时也照发，且不挂 `Authorization: Bearer` 头。
