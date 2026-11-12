@@ -46,7 +46,6 @@ fun barTargetHeight(
             }
             (base.value + dragDp).coerceAtLeast(navHeight.value).dp
         }
-        BarMode.ExplorationPage -> metrics.exploration
         BarMode.Normal, BarMode.Input -> navHeight
     }
 }
@@ -68,8 +67,6 @@ data class BarMetrics(
     val addSchedule: Dp,
     /** 日程明细卡 */
     val scheduleDetail: Dp,
-    /** 探索页底栏（占位实验形态） */
-    val exploration: Dp,
 )
 
 /** 松手后三档吸附的去向。 */

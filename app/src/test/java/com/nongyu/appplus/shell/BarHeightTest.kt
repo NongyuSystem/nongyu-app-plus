@@ -18,7 +18,6 @@ class BarHeightTest {
         fullDelete = 384.dp,
         addSchedule = 392.dp,
         scheduleDetail = 210.dp,
-        exploration = 120.dp,
     )
     private val navHeight = 62.dp
 

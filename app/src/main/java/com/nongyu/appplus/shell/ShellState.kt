@@ -12,20 +12,15 @@ package com.nongyu.appplus.shell
 enum class OrbMode { Idle, Listening, Input }
 
 /**
- * 底部条的六形态。六者**共用同一个容器**，靠高度/圆角/内容切换实现「原地变形」：
+ * 底部条的五形态。五者**共用同一个容器**，靠高度/圆角/内容切换实现「原地变形」：
  *
  * - [Normal]：常规导航栏（2+2 + 中间星云球）
  * - [Input]：输入态（导航项淡出，原地变输入栏）
  * - [Detail]：课程详情卡（导航项与星云球都溶解，拉高展示课程信息）
  * - [AddSchedule]：添加日程表单（从工具条或空白格进入）
  * - [ScheduleDetail]：已存在日程的明细卡
- * - [ExplorationPage]：探索页专用底栏（**实验性占位**，见下）
- *
- * > [ExplorationPage] 是 2026-11-12 为验证「新增一种底栏变形要散动多少处」而加的占位形态，
- * > 目前没有任何入口会得到它（[deriveBarMode] 不返回此值）。它的价值在于：
- * > **加一个枚举值会让所有 `when` 编译报错**，从而精确量出耦合点数量。
  */
-enum class BarMode { Normal, Input, Detail, AddSchedule, ScheduleDetail, ExplorationPage }
+enum class BarMode { Normal, Input, Detail, AddSchedule, ScheduleDetail }
 
 /**
  * 课程详情卡的四档（维护者 2026-11-10 拍板）：
@@ -72,13 +67,12 @@ fun deriveBarMode(
  * 三种形态规则统一（维护者 2026-11-11 拍板）：点「卡片之外」退出、点「卡片之内」不退出。
  * 返回 `null` 表示当前形态不需要「卡片外退出层」（Normal / Input 各自另有处理）。
  */
-enum class DismissTarget { Detail, ScheduleDetail, AddSchedule, Exploration, None }
+enum class DismissTarget { Detail, ScheduleDetail, AddSchedule, None }
 
 /** [BarMode] → 卡片外点击应退出谁。纯映射，独立成函数便于单测锁定。 */
 fun dismissTargetOf(barMode: BarMode): DismissTarget = when (barMode) {
     BarMode.Detail -> DismissTarget.Detail
     BarMode.ScheduleDetail -> DismissTarget.ScheduleDetail
     BarMode.AddSchedule -> DismissTarget.AddSchedule
-    BarMode.ExplorationPage -> DismissTarget.Exploration
     BarMode.Normal, BarMode.Input -> DismissTarget.None
 }

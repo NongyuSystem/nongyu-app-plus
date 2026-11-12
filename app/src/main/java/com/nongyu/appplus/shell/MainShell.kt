@@ -70,7 +70,6 @@ import com.nongyu.appplus.timetable.logic.shouldPersistNote
 import com.nongyu.appplus.timetable.logic.toggledAttendance
 import com.nongyu.appplus.shell.bar.DetailCardContent
 import com.nongyu.appplus.shell.bar.AddScheduleCardContent
-import com.nongyu.appplus.shell.bar.ExplorationBarPlaceholder
 import com.nongyu.appplus.shell.bar.ScheduleDetailCardContent
 import com.nongyu.appplus.shell.bar.InputBarContent
 import com.nongyu.appplus.shell.bar.NavRowContent
@@ -438,7 +437,6 @@ fun MainShell() {
                 DismissTarget.Detail -> ({ collapseDetail() })
                 DismissTarget.ScheduleDetail -> ({ scheduleDetailId = null })
                 DismissTarget.AddSchedule -> ({ addingSchedule = null })
-                DismissTarget.Exploration -> ({ selectedTab = 0 })
                 DismissTarget.None -> null
             }
             if (dismissAction != null) {
@@ -566,8 +564,6 @@ fun MainShell() {
             addSchedule = s(392.dp),
             // 日程展开卡：只展示明细，比课程详情矮
             scheduleDetail = s(210.dp),
-            // 探索页底栏（占位实验形态）
-            exploration = s(120.dp),
         )
         val targetDetailHeight = barTargetHeight(
             barMode = barMode,
@@ -617,7 +613,6 @@ fun MainShell() {
                 BarMode.Detail -> s(26.dp)
                 BarMode.AddSchedule -> s(26.dp)
                 BarMode.ScheduleDetail -> s(26.dp)
-                BarMode.ExplorationPage -> s(26.dp)
                 BarMode.Input -> navCorner
                 BarMode.Normal -> navCorner
             },
@@ -799,10 +794,6 @@ fun MainShell() {
                         iconStrokes = iconStrokes,
                         s = ::s,
                     )
-                }
-                BarMode.ExplorationPage -> {
-                    // 占位实验形态：验证新增底栏变形的改动面（见 界面层.md）。
-                    ExplorationBarPlaceholder(uiScale = uiScale, s = ::s)
                 }
                 }
             }
