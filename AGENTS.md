@@ -48,6 +48,15 @@ Windows 下用 `gradlew.bat`。详细版本约束与踩坑见 `README.md`（尤�
 纯逻辑层（`net/core`）**不得 import `android.*`** —— 否则纯 JVM 单测无法覆盖决策逻辑，
 详见 `docs/specs/网络层-N2-N5-实施记录.md` §3.1。
 
+## 包结构（硬约束）
+
+顶层包必须是一个**单数、具名的能力域**（`login` / `timetable` / `skin` / `net` / `shell` / `design` / `icon`），
+**没有 `ui/` 中间包**（ADR-0008）。包内按 `model / logic / data / ui` 分层，
+依赖方向固定 `model ← logic ← data ← ui`，且 `design ← ui`。
+
+`*/model/`、`*/logic/` **禁止** import `android.*` 与 `androidx.compose.*`（否则无法纯 JVM 测）。
+改包结构前先读 `docs/specs/界面层.md`；新增顶层包要先写 ADR。
+
 ## Agent skills
 
 ### Issue tracker
