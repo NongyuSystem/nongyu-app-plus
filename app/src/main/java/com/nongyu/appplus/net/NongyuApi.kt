@@ -6,6 +6,7 @@ import com.nongyu.appplus.net.core.UrlBuilder
 import com.nongyu.appplus.net.model.HealthzDto
 import com.nongyu.appplus.net.model.MailCodeAckDto
 import com.nongyu.appplus.net.model.NetJson
+import com.nongyu.appplus.net.model.ProfileDto
 import okhttp3.RequestBody
 import retrofit2.Response
 
@@ -26,6 +27,11 @@ import retrofit2.Response
  * ## 一期不接 UI
  * 规格 §2.4 守卫 1：**禁止在 Composable / Activity 上访问 [NetHolder]**。
  * 等加 ViewModel 后由 ViewModel 调本类。
+ *
+ * ## 门面范围（票 #90 口径变更）
+ * 原「一期只暴露 3 条公开端点」是骨架期口径。票 #90 起启动校验需要
+ * `GET /identity/me`（需 Bearer、非公开端点），故门面随之扩一条 `me()`。
+ * 这是后一期的范围调整，不表示 school/presence 域已可调用。
  */
 class NongyuApi internal constructor(
     private val identity: IdentityApi,
@@ -48,6 +54,13 @@ class NongyuApi internal constructor(
      */
     suspend fun sendMailCode(body: RequestBody): ApiCall.Outcome<MailCodeAckDto> =
         call("POST", "/identity/mailcode/send") { identity.sendMailCode(body) }
+
+    /**
+     * `GET /identity/me` —— 需 Bearer。用于启动校验：首帧之后由后台发起，
+     * 结果只做事后纠正（票 #90 / 规格 #89）。失败分类仍由 [ApiCall] 集中处理。
+     */
+    suspend fun me(): ApiCall.Outcome<ProfileDto> =
+        call("GET", "/identity/me") { identity.me() }
 
     /**
      * 统一的调用包装。三项集中处理，业务方法里不再重复：

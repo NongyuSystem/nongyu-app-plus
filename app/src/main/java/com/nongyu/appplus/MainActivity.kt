@@ -4,6 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.nongyu.appplus.feature.login.LoginSessionHolder
+import com.nongyu.appplus.feature.login.SessionStartupVerifier
+import com.nongyu.appplus.feature.login.VerificationResult
+import com.nongyu.appplus.net.NetHolder
 import com.nongyu.appplus.net.NetStartupProbe
 import com.nongyu.appplus.skin.FileSkinSource
 import com.nongyu.appplus.ui.NongyuApp
@@ -50,6 +54,16 @@ class MainActivity : ComponentActivity() {
         )
         val resolution = skin.resolve()
 
+        // 票 #90：会话失效时（含业务请求 401 兜底）驱动根节点回登录中心。
+        // UI → net 注入，net 层不反向依赖 UI。
+        NetHolder.setOnSessionInvalidUi {
+            LoginSessionHolder.onVerified(VerificationResult.SESSION_ENDED)
+        }
+
+        // 票 #90：首帧前用会话存储判定落地去向（只读本地，不碰网络，ADR-0006）。
+        // 同一 SessionStore 实例由 NetHolder 持有，供 token 来源 / 失效分流 / 校验复用。
+        LoginSessionHolder.initialize(NetHolder.sessionStore(applicationContext))
+
         setContent {
             NongyuAppPlusTheme(
                 colors = resolution.palette(),
@@ -69,5 +83,9 @@ class MainActivity : ComponentActivity() {
         // 为什么安全：schedule() 内部用 Choreographer.postFrameCallback 等首帧，
         // 再切到协程里发请求；失败只记日志，绝不影响可用性。
         NetStartupProbe.schedule(owner = this, context = applicationContext)
+
+        // 票 #90：首帧之后打一次 GET /identity/me 做事后纠正（同样不延长开屏）。
+        // 401 会话结束 → 走既有失效分流清凭证并切回登录中心；其余乐观放行、零提示。
+        SessionStartupVerifier.schedule(owner = this, context = applicationContext)
     }
 }

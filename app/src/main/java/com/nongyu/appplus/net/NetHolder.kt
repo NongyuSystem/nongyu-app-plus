@@ -6,6 +6,7 @@ import com.nongyu.appplus.net.api.IdentityApi
 import com.nongyu.appplus.net.auth.DefaultSessionInvalidListener
 import com.nongyu.appplus.net.auth.MinimalSessionStore
 import com.nongyu.appplus.net.auth.SessionStore
+import com.nongyu.appplus.net.auth.SessionInvalidListener
 import com.nongyu.appplus.net.http.AndroidLogger
 import com.nongyu.appplus.BuildConfig
 import com.nongyu.appplus.net.http.OkHttpFactory
@@ -48,6 +49,45 @@ object NetHolder {
     /** 共享的 Retrofit 实例，`api()` 与 `cache()` 复用它（避免重复建 OkHttp 连接池）。 */
     @Volatile
     private var retrofitRef: Retrofit? = null
+
+    /** 会话存储（票 #90）：同一实例供 token 来源、失效分流、启动校验共用，避免第二套真源。 */
+    @Volatile
+    private var sessionStoreRef: SessionStore? = null
+
+    /** 失效分流（票 #90）：启动校验判会话结束时复用它清凭证。 */
+    @Volatile
+    private var sessionInvalidListenerRef: DefaultSessionInvalidListener? = null
+
+    /** 会话存储：构造只存 context，惰性打开（守卫 2）。 */
+    fun sessionStore(context: Context): SessionStore =
+        sessionStoreRef ?: synchronized(this) {
+            sessionStoreRef ?: MinimalSessionStore(context.applicationContext, AndroidLogger)
+                .also { sessionStoreRef = it }
+        }
+
+    /**
+     * UI 侧「会话失效」回调注入点（票 #90）。
+     *
+     * 由 UI 层（MainActivity）注入，依赖方向 UI → net，net 层不 import UI。
+     * [DefaultSessionInvalidListener] 的 `onCleared` 会调用它，使**业务请求 401 兜底**
+     * 也能驱动根节点回登录中心（规格 #89 / US3）。
+     */
+    @Volatile
+    private var onSessionInvalidUi: (() -> Unit)? = null
+
+    fun setOnSessionInvalidUi(callback: (() -> Unit)?) {
+        onSessionInvalidUi = callback
+    }
+
+    /** 失效分流：与 [sessionStore] 同一实例。 */
+    fun sessionInvalidListener(context: Context): SessionInvalidListener =
+        sessionInvalidListenerRef ?: synchronized(this) {
+            sessionInvalidListenerRef ?: DefaultSessionInvalidListener(
+                sessionStore(context),
+                AndroidLogger,
+                onCleared = { onSessionInvalidUi?.invoke() },
+            ).also { sessionInvalidListenerRef = it }
+        }
 
     /**
      * 身份域门面。**首次访问才装配**。
@@ -92,12 +132,12 @@ object NetHolder {
 
     /** 构造 Retrofit —— 唯一一处装配 OkHttp 客户端与转换器。 */
     private fun buildRetrofit(context: Context): Retrofit {
-        // 1) 会话存储：构造只存 context，首次读写才真正打开 Keystore（守卫 2）
-        val store: SessionStore = MinimalSessionStore(context, AndroidLogger)
-        val sessionInvalidListener = DefaultSessionInvalidListener(store, AndroidLogger)
+        // 1) 会话存储 / 失效分流：与启动校验共用同一实例（票 #90）
+        val store: SessionStore = sessionStore(context)
+        val sessionInvalidListener = sessionInvalidListener(context)
 
-        // 2) token 来源：按变体分流（debug 用 DEV_TOKEN，release 恒 null）
-        val tokenProvider = defaultTokenProvider()
+        // 2) token 来源：读会话存储（票 #90 起，接真实登录）
+        val tokenProvider = defaultTokenProvider(store)
 
         // 3) OkHttp：超时 + retryOnConnectionFailure(false) + 三个拦截器
         //    日志开关按变体分流

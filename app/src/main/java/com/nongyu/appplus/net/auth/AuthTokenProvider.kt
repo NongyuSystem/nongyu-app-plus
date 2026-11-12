@@ -5,8 +5,9 @@ package com.nongyu.appplus.net.auth
  *
  * ## 职责边界（不要越界）
  * - **只取，不刷新、不判过期**。刷新是 provider 实现自己的事（内部缓存 + 后台刷新，签名不变）。
- * - 一期实现（[com.nongyu.appplus.net.defaultTokenProvider]）就是「返回固定注入值」或 `null`。
- * - 将来接真实登录时**只换实现**，网络层零改动。
+ * - 票 #90 起的实现（[com.nongyu.appplus.net.defaultTokenProvider]）是「读取会话存储」，
+ *   debug 另留 `DEV_TOKEN` 联调兜底；#43 决议的「接真实登录时只换实现」已在此落地。
+ * - 刷新、过期判断仍不在本接口（由会话失效分流负责），网络层零改动。
  *
  * 被否掉的方案：
  * - 把刷新塞进拦截器 → 网络层会悄悄承担登录职责，与「一期不做登录」冲突。
