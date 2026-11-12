@@ -104,7 +104,11 @@ import com.nongyu.appplus.timetable.logic.noteChanged
 import com.nongyu.appplus.timetable.logic.resolveLocationLabel
 import com.nongyu.appplus.timetable.logic.resolveTeacherLabel
 import com.nongyu.appplus.timetable.logic.shouldPersistNote
+import com.nongyu.appplus.shell.BarMetrics
 import com.nongyu.appplus.shell.BarMode
+import com.nongyu.appplus.shell.barTargetHeight
+import com.nongyu.appplus.shell.DetailSnap
+import com.nongyu.appplus.shell.snapDetailStage
 import com.nongyu.appplus.shell.DetailStage
 import com.nongyu.appplus.shell.DismissTarget
 import com.nongyu.appplus.shell.OrbMode
@@ -646,20 +650,25 @@ fun MainShell() {
         val orbDissolveScale = 1f + dissolve.value * 0.55f
 
         // 详情卡三档高度：简介 128 / 详情 340 / 详情+删除 384（多出删除按钮一行 44dp）。
-        val briefHeight = s(128.dp)
-        val fullHeight = s(340.dp)
-        val fullDeleteHeight = s(384.dp)
-        val detailHeight = when (detailStage) {
-            DetailStage.Brief -> briefHeight
-            DetailStage.Full -> fullHeight
-            DetailStage.FullDelete -> fullDeleteHeight
-        }
-        val draggedDetailHeight = (detailHeight + detailDragDp.dp).coerceAtLeast(navHeight)
-        // 添加日程表单卡高度：六字段＋底部固定按钮，取比详情态略高的值。
-        // 内容区内部可滚动，这里不需要精确等于内容高度。
-        val addScheduleHeight = s(392.dp)
-        // 日程展开卡：只展示明细，比课程详情矮
-        val scheduleDetailHeight = s(210.dp)
+        // 数值集中在 BarMetrics，计算规则在 shell/BarHeight.kt（有单测）。
+        val barMetrics = BarMetrics(
+            brief = s(128.dp),
+            full = s(340.dp),
+            fullDelete = s(384.dp),
+            // 添加日程表单卡高度：六字段＋底部固定按钮，取比详情态略高的值。
+            // 内容区内部可滚动，这里不需要精确等于内容高度。
+            addSchedule = s(392.dp),
+            // 日程展开卡：只展示明细，比课程详情矮
+            scheduleDetail = s(210.dp),
+        )
+        val targetDetailHeight = barTargetHeight(
+            barMode = barMode,
+            isCollapsing = isCollapsing,
+            detailStage = detailStage,
+            dragDp = detailDragDp,
+            metrics = barMetrics,
+            navHeight = navHeight,
+        )
 
         // ---- 高度 / 圆角：全部由 Animatable + spring 驱动 ----
         //
@@ -670,19 +679,16 @@ fun MainShell() {
         //   - 吸附 / 打开 / 退出收拢：animateTo(spring)（有弹性过渡）
         // 两者路径完全分开，不会互相吞掉。
         val density = LocalDensity.current
-        val targetPx = with(density) {
-            when {
-                barMode == BarMode.AddSchedule && !isCollapsing -> addScheduleHeight.toPx()
-                barMode == BarMode.ScheduleDetail && !isCollapsing -> scheduleDetailHeight.toPx()
-                isCollapsing || barMode != BarMode.Detail -> navHeight.toPx()
-                else -> draggedDetailHeight.toPx()
-            }
-        }
+        val targetPx = with(density) { targetDetailHeight.toPx() }
         val barHeightPx = remember { Animatable(with(density) { navHeight.toPx() }) }
         // key 必须包含 detailStage：上划吸附到 Full 时 barMode 仍是 Detail、
         // isCollapsing 仍是 false，若只盯这两个 key，effect 不会重跑，
         // 高度就停在简介态 —— 这正是「上划/下降没有动画」的另一半根因。
-        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging, addingSchedule, scheduleDetailId) {
+        //
+        // 第 2 步解耦：旧 key 里还有 addingSchedule、scheduleDetailId，
+        // 但这两者的信息已由 barMode 承载（见 deriveBarMode），属冗余 key，
+        // 会让同一变化触发多条重跑路径。现固定为 4 个真正的输入。
+        LaunchedEffect(barMode, isCollapsing, detailStage, isDragging) {
             // 形态切换 / 吸附 / 开始退出：走弹簧动画（拖拽中除外）
             if (!isDragging) {
                 barHeightPx.animateTo(
@@ -709,8 +715,8 @@ fun MainShell() {
         // 导致胶囊半透明、K-V 提前浮现（两种形态糊在一起）。
         // 这里让简介态 = 0（胶囊满、K-V 无），详情态 = 1（胶囊无、K-V 满）。
         val expandProgress = with(density) {
-            val briefPx = briefHeight.toPx()
-            val fullPx = fullHeight.toPx()
+            val briefPx = barMetrics.brief.toPx()
+            val fullPx = barMetrics.full.toPx()
             ((barHeightPx.value - briefPx) / (fullPx - briefPx)).coerceIn(0f, 1f)
         }
 
@@ -907,28 +913,13 @@ fun MainShell() {
                                 detailDragDp += deltaDp
                             },
                             onHandleDragEnd = {
-                                // 三档吸附：以「当前形态高度 + 累计偏移」落在哪个区间判定。
-                                // 阈值取相邻两档的中点；最低档之下拖到底则退出。
-                                val briefDp = briefHeight.value
-                                val fullDp = fullHeight.value
-                                val delDp = fullDeleteHeight.value
-                                val base = when (detailStage) {
-                                    DetailStage.Brief -> briefDp
-                                    DetailStage.Full -> fullDp
-                                    DetailStage.FullDelete -> delDp
-                                }
-                                val current = base + detailDragDp
-                                val midBriefFull = (briefDp + fullDp) / 2f
-                                val midFullDel = (fullDp + delDp) / 2f
-                                when {
-                                    current < briefDp * 0.55f -> {
-                                        // 拖到底：不立刻清 detailCourse，否则 AnimatedContent
-                                        // 当帧就把内容换成导航栏、收拢动画根本来不及跑。
-                                        isCollapsing = true
-                                    }
-                                    current > midFullDel -> detailStage = DetailStage.FullDelete
-                                    current > midBriefFull -> detailStage = DetailStage.Full
-                                    else -> detailStage = DetailStage.Brief
+                                // 三档吸附：规则住在 shell/BarHeight.kt 的 snapDetailStage（有单测）。
+                                // 阈值取相邻两档中点；低于简介档 55% 视为拖到底 → 退出。
+                                when (val snap = snapDetailStage(detailStage, detailDragDp, barMetrics)) {
+                                    // 拖到底：不立刻清 detailCourse，否则 AnimatedContent
+                                    // 当帧就把内容换成导航栏、收拢动画根本来不及跑。
+                                    DetailSnap.Collapse -> isCollapsing = true
+                                    is DetailSnap.To -> detailStage = snap.stage
                                 }
                                 detailDragDp = 0f
                                 isDragging = false
