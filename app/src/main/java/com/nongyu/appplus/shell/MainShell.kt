@@ -2,7 +2,6 @@ package com.nongyu.appplus.shell
 
 import com.nongyu.appplus.design.uiScaleFor
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -14,53 +13,38 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.statusBars
 import com.nongyu.appplus.design.ModalScrim
 import com.nongyu.appplus.timetable.ui.TimetableRuler
 import com.nongyu.appplus.timetable.ui.rememberWaterTilt
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,42 +52,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.skin.LocalSkinResolution
 import com.nongyu.appplus.skin.LocalSkinSource
-import com.nongyu.appplus.skin.NavIconKey
 import com.nongyu.appplus.shell.orb.NongyuOrb
-import com.nongyu.appplus.icon.NavIconGeometry
 import com.nongyu.appplus.icon.NavIconStrokes
-import com.nongyu.appplus.icon.drawNavIcon
 import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.design.NongyuTheme
 import com.nongyu.appplus.timetable.model.CourseEntry
-import com.nongyu.appplus.timetable.logic.COURSE_TIMES
 import com.nongyu.appplus.timetable.logic.isPeriodEnded
 import com.nongyu.appplus.timetable.logic.NOTE_DEBOUNCE_MS
 import com.nongyu.appplus.timetable.logic.mergeAttendance
 import com.nongyu.appplus.timetable.logic.noteChanged
-import com.nongyu.appplus.timetable.logic.resolveLocationLabel
-import com.nongyu.appplus.timetable.logic.resolveTeacherLabel
 import com.nongyu.appplus.timetable.logic.shouldPersistNote
+import com.nongyu.appplus.timetable.logic.toggledAttendance
+import com.nongyu.appplus.shell.bar.DetailCardContent
+import com.nongyu.appplus.shell.bar.AddScheduleCardContent
+import com.nongyu.appplus.shell.bar.ScheduleDetailCardContent
+import com.nongyu.appplus.shell.bar.InputBarContent
+import com.nongyu.appplus.shell.bar.NavRowContent
+import com.nongyu.appplus.shell.bar.featheredEdge
 import com.nongyu.appplus.shell.BarMetrics
 import com.nongyu.appplus.shell.BarMode
 import com.nongyu.appplus.shell.barTargetHeight
@@ -118,17 +95,11 @@ import com.nongyu.appplus.timetable.logic.TimetableGeometry
 import com.nongyu.appplus.timetable.data.MockCourseCommentRepository
 import com.nongyu.appplus.timetable.data.CourseUserStore
 import com.nongyu.appplus.timetable.data.weekOfTerm
-import com.nongyu.appplus.timetable.data.MOCK_COURSES
-import com.nongyu.appplus.timetable.ui.ScheduleFormContent
 import com.nongyu.appplus.timetable.ui.classDaysOf
-import com.nongyu.appplus.timetable.ui.CourseCalendar
-import com.nongyu.appplus.timetable.ui.CourseDetailContent
 import com.nongyu.appplus.timetable.ui.weeksLabelOf
 import com.nongyu.appplus.timetable.ui.LocationEditDialog
 import com.nongyu.appplus.timetable.ui.WeekEditDialog
 import com.nongyu.appplus.timetable.ui.LocationNavDialog
-import com.nongyu.appplus.timetable.ui.ScheduleDetailContent
-import com.nongyu.appplus.timetable.ui.TimetableGrid
 import com.nongyu.appplus.timetable.ui.TimetableScreen
 
 /**
@@ -149,7 +120,6 @@ private val TABS = listOf("全部", "课表", "探索", "个人")
 
 // 考勤默认态的判定已下沉到 timetable/logic/PeriodEnded.kt（可单测），
 // 此处直接用，不再保留 UI 层副本。
-
 
 @Composable
 fun MainShell() {
@@ -807,9 +777,10 @@ fun MainShell() {
                 BarMode.AddSchedule -> {
                     val slot = addingSchedule
                     if (slot != null) {
-                        com.nongyu.appplus.timetable.ui.ScheduleFormContent(
-                            initialDay = slot.first,
-                            initialPeriod = slot.second,
+                        // 表单布线已搬到 shell/bar/ScheduleCards.kt（行为未改）。
+                        AddScheduleCardContent(
+                            day = slot.first,
+                            startPeriod = slot.second,
                             week = slot.third,
                             uiScale = uiScale,
                             // 先关表单、再收日程：两个状态分开写。
@@ -820,24 +791,21 @@ fun MainShell() {
                                 addedSchedules.add(entry)
                             },
                             onCancel = { addingSchedule = null },
-                            // 横杠下拉：跟手记录位移，松手时超过阈值就关闭表单。
-                            // 与详情卡退出同一手感（「拉下去就是关了这个卡片」）。
-                            onHandleDrag = { deltaDp ->
-                                scheduleDragDp += deltaDp
-                            },
-                            onHandleDragEnd = {
-                                val closeThreshold: Float = 72f * uiScale
-                                if (scheduleDragDp > closeThreshold) addingSchedule = null
+                            // 横杠下拉：跟手记录位移。
+                            onDrag = { deltaDp -> scheduleDragDp += deltaDp },
+                            // 松手时超过阈值（72 * uiScale）就关闭表单。
+                            onDragEnd = { threshold ->
+                                if (scheduleDragDp > threshold) addingSchedule = null
                                 scheduleDragDp = 0f
                             },
-                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
                 BarMode.ScheduleDetail -> {
                     val sc = addedSchedules.firstOrNull { it.id == scheduleDetailId }
                     if (sc != null) {
-                        com.nongyu.appplus.timetable.ui.ScheduleDetailContent(
+                        // 明细卡布线已搬到 shell/bar/ScheduleCards.kt（行为未改）。
+                        ScheduleDetailCardContent(
                             entry = sc,
                             uiScale = uiScale,
                             // 行内编辑即时落库：直接替换列表里同 id 的那条。
@@ -847,72 +815,55 @@ fun MainShell() {
                                 if (idx >= 0) addedSchedules[idx] = updated
                             },
                             onClose = { scheduleDetailId = null },
-                            onHandleDragDown = { scheduleDetailId = null },
-                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
                 BarMode.Detail -> {
                     val course = detailCourse
                     if (course != null) {
-                        com.nongyu.appplus.timetable.ui.CourseDetailContent(
+                        // 详情卡的参数布线已搬到 shell/bar/DetailCardContent.kt（行为未改）。
+                        // 规则（删除落盘 / 考勤翻转 / 三档吸附）仍留在本函数里。
+                        DetailCardContent(
                             course = course,
-                            uiScale = uiScale,
-                            fullStage = detailStage != DetailStage.Brief,
-                            // 高度进度 0..1，内容层据此做「胶囊 -> K-V 移动」与
-                            // 「评论/备注从盒底滑出」的分帧动画
+                            detailStage = detailStage,
                             expandProgress = expandProgress,
-                            collapsing = isCollapsing,
-                            showDelete = detailStage == DetailStage.FullDelete,
-                            onDelete = {
-                                coroutineScope.launch {
-                                    courseUserStore.setDeletedIds(deletedIds + course.id)
-                                }
-                                collapseDetail()
-                            },
-                            otherSlots = com.nongyu.appplus.timetable.data.MOCK_COURSES
-                                .filter { it.name == course.name && it.id != course.id },
-                            onDismiss = { detailCourse = null },
-                            // 地点：优先今日按天覆盖，其次通用覆盖，最后原始 room
+                            isCollapsing = isCollapsing,
+                            uiScale = uiScale,
                             location = locDay ?: locGeneral ?: course.room,
                             teacher = teacherOverride ?: course.teacher,
+                            attendance = effectiveAttendance,
+                            note = noteText,
+                            comments = comments,
                             onTeacherChange = { v ->
                                 coroutineScope.launch {
                                     courseUserStore.setTeacherOverride(course.id, v)
                                 }
                             },
-                            weekText = com.nongyu.appplus.timetable.ui.weeksLabelOf(course),
-                            onWeekEdit = { showWeekEdit = true },
-                            attendance = effectiveAttendance,
                             onAttendanceToggle = { p ->
-                                val next = !(effectiveAttendance[p] ?: false)
-                                attendanceOverrides = attendanceOverrides + (p to next)
+                                attendanceOverrides = toggledAttendance(effectiveAttendance, p)
+                                val next = attendanceOverrides[p] ?: false
                                 coroutineScope.launch {
                                     courseUserStore.setAttendance(course.id, p, next)
                                 }
                             },
-                            note = noteText,
                             onNoteChange = { text -> noteText = text },
-                            comments = comments,
-                            onCommentAdd = { text ->
-                                com.nongyu.appplus.timetable.data.MockCourseCommentRepository
-                                    .add(course.id, text)
-                                comments = com.nongyu.appplus.timetable.data.MockCourseCommentRepository
-                                    .list(course.id)
+                            onCommentChanged = {
+                                comments = com.nongyu.appplus.timetable.data
+                                    .MockCourseCommentRepository.list(course.id)
                             },
-                            onCommentRemove = { i ->
-                                com.nongyu.appplus.timetable.data.MockCourseCommentRepository
-                                    .remove(course.id, i)
-                                comments = com.nongyu.appplus.timetable.data.MockCourseCommentRepository
-                                    .list(course.id)
+                            onDelete = {
+                                coroutineScope.launch {
+                                    courseUserStore.setDeletedIds(deletedIds + course.id)
+                                }
                             },
+                            onCollapse = ::collapseDetail,
+                            onDismiss = { detailCourse = null },
+                            onWeekEdit = { showWeekEdit = true },
                             onLocationEdit = { showLocationEdit = true },
                             onLocationNav = { showLocationNav = true },
-                            onHandleDrag = { deltaDp ->
-                                isDragging = true
-                                detailDragDp += deltaDp
-                            },
-                            onHandleDragEnd = {
+                            onDragStart = { isDragging = true },
+                            onDragDelta = { deltaDp -> detailDragDp += deltaDp },
+                            onDragEnd = {
                                 // 三档吸附：规则住在 shell/BarHeight.kt 的 snapDetailStage（有单测）。
                                 // 阈值取相邻两档中点；低于简介档 55% 视为拖到底 → 退出。
                                 when (val snap = snapDetailStage(detailStage, detailDragDp, barMetrics)) {
@@ -924,98 +875,33 @@ fun MainShell() {
                                 detailDragDp = 0f
                                 isDragging = false
                             },
-                            // 不再挂「消费点击」的 clickable：
-                            // 当初是为了防止点详情卡穿透到内容区的收起层，
-                            // 但收起层现在放在课表**之下**（白名单分层方案），
-                            // 与底栏里的详情卡根本不在同一命中链上，这层已多余。
-                            // 而且它会吃掉横杠的 pointerInput，导致第二次上划
-                            // （进第四态）手势完全收不到（实测日志无 end 回调）。
-                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
                 BarMode.Input -> {
                     // 输入态：导航栏**原地**变成输入栏，不再浮一个独立输入框。
-                    // 这是维护者要求「点击星云球 → 导航按钮变淡转化为输入栏」。
-                    //
-                    // 自动聚焦：等切换动画走完再请求焦点。
-                    // 直接 rememberFocusRequester + requestFocus() 在重组时调用会失败
-                    // （此时输入框还没 attach 到窗口），必须放到 LaunchedEffect 里，
-                    // 并延迟一点等 AnimatedContent 把内容挂上去，否则键盘不弹。
-                    val focusRequester = remember { FocusRequester() }
-                    val keyboard = LocalSoftwareKeyboardController.current
-                    // 先等一帧让 AnimatedContent 真正把输入框挂上，
-                    // 再等切换动画走完，最后才请求焦点并弹键盘。
-                    // 只 delay 一次会在内容 attach 前就 requestFocus（静默失败，键盘不弹）。
-                    LaunchedEffect(Unit) {
-                        withFrameNanos { }
-                        delay(340)
-                        runCatching {
-                            focusRequester.requestFocus()
-                            keyboard?.show()
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            // 内边距左右 20dp + 上下 8dp：输入框不再贴住容器边缘，
-                            // 白色圆角与文字不会被容器的 clip/featheredEdge 裁掉一截。
-                            .padding(horizontal = s(20.dp), vertical = s(8.dp)),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        // 占位提示必须画在 EditText**之上或同层但不可交互**，
-                        // 否则空输入时它会被 BasicTextField 自己的绘制区域盖住（实测看不到）。
-                        // 这里用 Box 叠放：输入框在下，占位在上且不接收触摸。
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            BasicTextField(
-                                value = inputText,
-                                onValueChange = { inputText = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    // 输入框自己必须有可点的命中区：AnimatedContent 切换时
-                                    // 旧内容可能仍在树上抢点击，给它在垂直方向留出整块可点区域，
-                                    // 避免点边缘时落到外层容器、表现为「点了没反应」。
-                                    .heightIn(min = s(24.dp))
-                                    .clickable(
-                                        indication = null,
-                                        interactionSource = remember { MutableInteractionSource() },
-                                    ) { focusRequester.requestFocus() }
-                                    .focusRequester(focusRequester),
-                                textStyle = TextStyle(
-                                    color = colors.surface.colorText,
-                                    fontSize = (12f * uiScale).sp,
-                                ),
-                                cursorBrush = SolidColor(colors.brand.colorBrand),
-                                singleLine = true,
-                            )
-                            if (inputText.isEmpty()) {
-                                // 占位文字**不能带 clickable**：clickable 会把手势整段消费掉，
-                                // 下层 BasicTextField 永远收不到触摸，表现就是「点了打不了字」。
-                                // 纯 Text 不参与手势，事件会自然穿透到下面的输入框。
-                                Text(
-                                    text = "输入想问农小屿的问题…",
-                                    color = colors.surface.colorTextSecondary.copy(alpha = 0.55f),
-                                    fontSize = (12f * uiScale).sp,
-                                )
-                            }
-                        }
-                    }
+                    // 内容与自动聚焦时序已搬到 shell/bar/InputBarContent.kt（行为未改）。
+                    InputBarContent(
+                        inputText = inputText,
+                        onInputChange = { inputText = it },
+                        uiScale = uiScale,
+                        s = ::s,
+                    )
                 }
                 BarMode.Normal -> {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            // 导航项自己承担淡出：输入态/详情态时 navAlpha=0，
-                            // 但它们住在同一个容器里，不能让容器整体透明。
-                            .alpha(navAlpha),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        NavItem(TABS[0], NavIconKey.Grid, selectedTab == 0, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Grid), Modifier.weight(1f)) { selectedTab = 0 }
-                        NavItem(TABS[1], NavIconKey.Calendar, selectedTab == 1, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Calendar), Modifier.weight(1f), fillProgress = if (selectedTab == 1) iconFill.value else 0f) { selectedTab = 1 }
-                        Spacer(modifier = Modifier.width(s(96.dp)))
-                        NavItem(TABS[2], NavIconKey.Compass, selectedTab == 2, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Compass), Modifier.weight(1f)) { selectedTab = 2 }
-                        NavItem(TABS[3], NavIconKey.Person, selectedTab == 3, colors.navBar.colorItem, colors.navBar.colorIndicator, iconSize, labelSize, iconStrokes.getValue(NavIconKey.Person), Modifier.weight(1f)) { selectedTab = 3 }
-                    }
+                    // 2+2 导航行已搬到 shell/bar/NavRowContent.kt（行为未改）。
+                    NavRowContent(
+                        selectedTab = selectedTab,
+                        onTabSelected = { selectedTab = it },
+                        navAlpha = navAlpha,
+                        iconFillProgress = iconFill.value,
+                        itemColor = colors.navBar.colorItem,
+                        indicatorColor = colors.navBar.colorIndicator,
+                        iconSize = iconSize,
+                        labelSize = labelSize,
+                        iconStrokes = iconStrokes,
+                        s = ::s,
+                    )
                 }
                 }
             }
@@ -1049,8 +935,6 @@ fun MainShell() {
                     .background(Color(0xFF0A140F)),
             )
         }
-
-
 
         // 全屏雷达波：进入时向外扩散、退出时向内回收。
         // 画在 dim 之后、球体之前 —— 压在暗色后景上、位于球体下层。
@@ -1200,7 +1084,6 @@ fun MainShell() {
             )
         }
 
-
         // ---- 地点 / 周次 / 导航 三个子窗体 ----
         // 地点与周次共用 CourseCalendar：都先选「生效天」，再改值；
         // 需上课的天由 classDaysOf(course) 算出并标主题色。
@@ -1262,121 +1145,8 @@ fun MainShell() {
     }
 }
 
-/**
- * 边界虚化 Modifier：在控件外侧画多层「逐圈外扩 + alpha 递减」的圆角描边，
- * 等效于把边界向外糊开约 6.dp，边界自然过渡到背景，没有生硬的 1.dp 线条。
- *
- * 注意：Compose 没有「背景毛玻璃 / backdrop blur」能力
- * （Modifier.blur / RenderEffect 模糊的是控件自身，不是背后内容，且 API<31 失效），
- * 所以这里用「多层柔边」做出虚化观感，而不是真正的背景模糊。
- */
-private fun Modifier.featheredEdge(tint: Color, corner: Dp): Modifier = this.drawBehind {
-    val cornerPx = corner.toPx()
-    val layers = 7
-    for (i in layers downTo 1) {
-        val t = i / layers.toFloat()               // 1.0(最外) .. 0.14(最内)
-        val expand = t * 6.dp.toPx()               // 外扩距离
-        val a = (1f - t) * 0.10f                   // 越外越淡
-        drawRoundRect(
-            color = tint.copy(alpha = a),
-            topLeft = Offset(-expand, -expand * 0.7f),
-            size = Size(size.width + expand * 2f, size.height + expand * 1.4f),
-            cornerRadius = CornerRadius(cornerPx + expand, cornerPx + expand),
-            style = Stroke(width = 1.2.dp.toPx() * (1f - t * 0.5f)),
-        )
-    }
-}
-
-/**
- * 单个导航项：图标 + 文案。
- * 尺寸：图标 26.dp（原 20.dp 偏小），文字 9.sp（原 10.sp 偏大）。
- * 选中态：图标与文字都用品牌色，未选中用低透明度中性色。
- */
-@Composable
-private fun NavItem(
-    label: String,
-    icon: NavIconKey,
-    selected: Boolean,
-    itemColor: Color,
-    indicatorColor: Color,
-    iconSize: Dp,
-    labelSize: TextUnit,
-    iconStroke: Float,
-    modifier: Modifier = Modifier,
-    /** 入场动画：图标从底部往上变绿的进度 0..1（票 #60）。默认 0f，只有课表 Tab 会传。 */
-    fillProgress: Float = 0f,
-    onClick: () -> Unit,
-) {
-    val tint = if (selected) indicatorColor else itemColor
-    Column(
-        modifier = modifier
-            .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        // 整体下移：导航栏本身是垂直居中，加一点顶部内边距把图标+文字压向下方。
-        // 偏移量随图标尺寸等比，避免不同 uiScale 下偏得不一样。
-        verticalArrangement = Arrangement.Center,
-    ) {
-        // 整体轻微下移；幅度取图标尺寸的 0.07（上一版 0.16 明显过头）
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.offset(y = (iconSize.value * 0.07f).dp),
-        ) {
-            Box(modifier = Modifier.size(iconSize)) {
-                Canvas(modifier = Modifier.size(iconSize)) {
-                    drawNavIcon(
-                        geometry = NavIconGeometry.builtInOf(icon),
-                        tint = tint,
-                        strokeScale = iconStroke,
-                    )
-                }
-                // 票 #60 需求 4.1：从底部往上变绿。绿色层按 fillProgress 裁切。
-                if (fillProgress > 0f && selected) {
-                    Canvas(
-                        modifier = Modifier
-                            .size(iconSize)
-                            .clip(BottomUpReveal(fillProgress)),
-                    ) {
-                        drawNavIcon(
-                            geometry = NavIconGeometry.builtInOf(icon),
-                            tint = indicatorColor,
-                            strokeScale = iconStroke,
-                        )
-                    }
-                }
-            }
-            // 图标与文字继续靠近：不留 Spacer，用压缩行高让文字紧贴图标下缘
-            Text(
-                text = label,
-                color = tint,
-                fontSize = labelSize,
-                style = TextStyle(lineHeight = labelSize * 0.92f),
-            )
-        }
-    }
-}
-
 @Preview(showBackground = true)
 @Composable
 private fun MainShellPreview() {
     NongyuAppPlusTheme { MainShell() }
-}
-
-/** 从底部往上揭开的裁剪形状（票 #60 需求 4.1「课表图标从底部往上变绿」）。 */
-private class BottomUpReveal(private val progress: Float) : androidx.compose.ui.graphics.Shape {
-    override fun createOutline(
-        size: androidx.compose.ui.geometry.Size,
-        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-        density: androidx.compose.ui.unit.Density,
-    ): androidx.compose.ui.graphics.Outline {
-        val visible = size.height * progress.coerceIn(0f, 1f)
-        return androidx.compose.ui.graphics.Outline.Rectangle(
-            androidx.compose.ui.geometry.Rect(
-                left = 0f,
-                top = size.height - visible,
-                right = size.width,
-                bottom = size.height,
-            ),
-        )
-    }
 }
