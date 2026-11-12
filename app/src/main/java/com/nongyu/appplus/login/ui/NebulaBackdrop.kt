@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.ui
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode

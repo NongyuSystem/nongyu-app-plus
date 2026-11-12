@@ -1,5 +1,8 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.session
 
+import com.nongyu.appplus.login.session.LoginSessionHolder
+import com.nongyu.appplus.login.model.VerificationResult
+import com.nongyu.appplus.login.model.VerificationPolicy
 import android.content.Context
 import android.util.Log
 import android.view.Choreographer

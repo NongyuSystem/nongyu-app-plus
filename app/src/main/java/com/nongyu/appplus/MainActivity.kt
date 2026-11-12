@@ -4,9 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.nongyu.appplus.ui.login.LoginSessionHolder
-import com.nongyu.appplus.ui.login.SessionStartupVerifier
-import com.nongyu.appplus.ui.login.VerificationResult
+import com.nongyu.appplus.login.session.LoginSessionHolder
+import com.nongyu.appplus.login.session.SessionStartupVerifier
+import com.nongyu.appplus.login.model.VerificationResult
 import com.nongyu.appplus.net.NetHolder
 import com.nongyu.appplus.net.NetStartupProbe
 import com.nongyu.appplus.skin.FileSkinSource

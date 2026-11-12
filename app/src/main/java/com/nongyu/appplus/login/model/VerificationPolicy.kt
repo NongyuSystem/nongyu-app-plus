@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.model
 
 import com.nongyu.appplus.net.core.ApiErrorCode
 import com.nongyu.appplus.net.core.ApiFailure

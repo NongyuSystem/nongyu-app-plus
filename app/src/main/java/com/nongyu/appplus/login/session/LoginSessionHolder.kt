@@ -1,5 +1,7 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.session
 
+import com.nongyu.appplus.login.model.VerificationResult
+import com.nongyu.appplus.login.model.LoginSessionState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.nongyu.appplus.net.auth.SessionStore

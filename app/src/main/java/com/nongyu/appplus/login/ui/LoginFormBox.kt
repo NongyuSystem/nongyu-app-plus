@@ -1,5 +1,6 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.ui
 
+import com.nongyu.appplus.login.model.LoginMethod
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource

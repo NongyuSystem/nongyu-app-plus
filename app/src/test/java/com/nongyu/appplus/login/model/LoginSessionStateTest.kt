@@ -1,4 +1,4 @@
-package com.nongyu.appplus.ui.login
+package com.nongyu.appplus.login.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
