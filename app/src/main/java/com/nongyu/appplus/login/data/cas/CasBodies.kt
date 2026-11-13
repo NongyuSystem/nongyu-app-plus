@@ -28,3 +28,11 @@ data class CasPhoneLoginBody(
     val phone: String,
     val appid: String,
 )
+
+/** `POST /api/v1/cas/getLoginQr` 请求体（实测只有一个 appid）。 */
+@Serializable
+data class CasQrAppIdBody(val appid: String)
+
+/** `POST /api/v1/cas/getCasLoginQrRes` 请求体（实测只有一个 state）。 */
+@Serializable
+data class CasQrStateBody(val state: String)

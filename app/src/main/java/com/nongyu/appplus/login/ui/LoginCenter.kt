@@ -4,6 +4,8 @@ import kotlinx.coroutines.launch
 import com.nongyu.appplus.login.model.VerificationCodeButtonState
 import com.nongyu.appplus.login.session.MailCodeSender
 import com.nongyu.appplus.login.session.MailCodeSendResult
+import com.nongyu.appplus.login.data.cas.CasQrFetchResult
+import com.nongyu.appplus.login.data.cas.CasQrPollResult
 import com.nongyu.appplus.login.session.CampusSsoLoginUseCase
 import com.nongyu.appplus.login.session.SchoolLoginResult
 import com.nongyu.appplus.login.session.PasswordLoginUseCase
@@ -126,6 +128,72 @@ fun LoginCenterScreen() {
     var mailCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
     // 邮箱格的本地图形验证码（前端生成、本地校验）
     var localCaptcha by remember { mutableStateOf(LocalCaptcha.random()) }
+    // 微信扫码：二维码状态、URL、state、以及轮询开关
+    var wechatQrState by remember { mutableStateOf(WechatQrState.LOADING) }
+    var wechatQrUrl by remember { mutableStateOf<String?>(null) }
+    var wechatQrStateToken by remember { mutableStateOf<String?>(null) }
+    var wechatPollActive by remember { mutableStateOf(false) }
+
+    // 切换到微信格时自动取码
+    LaunchedEffect(uiState.selectedMethod) {
+        if (uiState.selectedMethod == LoginMethod.CAMPUS_WECHAT && wechatQrUrl == null) {
+            wechatQrState = WechatQrState.LOADING
+            when (val r = campusUseCase.fetchLoginQr()) {
+                is CasQrFetchResult.Success -> {
+                    wechatQrUrl = r.qr.url
+                    wechatQrStateToken = r.qr.state
+                    wechatQrState = WechatQrState.READY
+                    wechatPollActive = true
+                }
+                is CasQrFetchResult.Failure -> {
+                    wechatQrState = WechatQrState.FAILED
+                    if (r.message.isNotBlank()) showHint(r.message)
+                }
+            }
+        }
+    }
+
+    // 轮询扫码结果（每 1.5 秒）
+    LaunchedEffect(wechatPollActive, wechatQrStateToken) {
+        val token = wechatQrStateToken
+        if (!wechatPollActive || token == null) return@LaunchedEffect
+        while (wechatPollActive) {
+            kotlinx.coroutines.delay(1_500)
+            when (val r = campusUseCase.pollQrResult(token)) {
+                is CasQrPollResult.Scanned -> {
+                    wechatPollActive = false
+                    submitting = true
+                    try {
+                        val res = campusUseCase.submitCredential(
+                            r.credential, DeviceIdStore.getOrCreate(appContext),
+                        )
+                        when (res) {
+                            is SchoolLoginResult.Success -> showHint(null)
+                            is SchoolLoginResult.Failure -> {
+                                val failure = res.failure
+                                if (failure == null) {
+                                    showHint(res.message.ifBlank { null })
+                                } else {
+                                    val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                                    when (LoginFailurePolicy.decide(failure)) {
+                                        LoginFailureAction.SILENT -> showHint(null)
+                                        else -> showHint(LoginFailurePolicy.messageOf(code))
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        submitting = false
+                    }
+                }
+                is CasQrPollResult.Pending -> Unit
+                is CasQrPollResult.Failure -> {
+                    // 失败不终止轮询（可能瞬时抖动），但记录
+                    if (r.message.isNotBlank()) showHint(r.message)
+                }
+            }
+        }
+    }
 
     // 倒计时：每秒推进
     LaunchedEffect(smsCodeState.remainingSeconds) {
@@ -336,6 +404,44 @@ fun LoginCenterScreen() {
                     }
                 },
                 localCaptcha = localCaptcha,
+                wechatQrState = wechatQrState,
+                wechatQrUrl = wechatQrUrl,
+                onRefreshWechatQr = {
+                    wechatQrUrl = null
+                    wechatQrStateToken = null
+                    wechatQrState = WechatQrState.LOADING
+                    scope.launch {
+                        when (val r = campusUseCase.fetchLoginQr()) {
+                            is CasQrFetchResult.Success -> {
+                                wechatQrUrl = r.qr.url
+                                wechatQrStateToken = r.qr.state
+                                wechatQrState = WechatQrState.READY
+                                wechatPollActive = true
+                            }
+                            is CasQrFetchResult.Failure -> {
+                                wechatQrState = WechatQrState.FAILED
+                                if (r.message.isNotBlank()) showHint(r.message)
+                            }
+                        }
+                    }
+                },
+                onDownloadAndOpenWechat = {
+                    // 把二维码存到相册，再拉起微信
+                    val url = wechatQrUrl
+                    if (url != null) {
+                        val ok = WechatQrActions.saveQrToGallery(appContext, url)
+                        showHint(if (ok) "二维码已保存到相册，请用微信扫一扫" else "保存失败")
+                        WechatQrActions.openWechat(appContext)
+                    }
+                },
+                onCopyAndOpenWechat = {
+                    val url = wechatQrUrl
+                    if (url != null) {
+                        WechatQrActions.copyToClipboard(appContext, url)
+                        showHint("链接已复制，请在微信中打开")
+                        WechatQrActions.openWechat(appContext)
+                    }
+                },
                 onRefreshLocalCaptcha = { localCaptcha = LocalCaptcha.random() },
                 onRequestMailCode = {
                     // 邮箱码：不需要图形验证码

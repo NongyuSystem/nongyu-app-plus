@@ -45,6 +45,14 @@ class CasLoginUseCase(
     companion object {
         /** 教务系统在统一身份认证平台注册的应用标识（旧 RN 工具包 `CAS_APPID`）。 */
         const val CAS_APPID = "b54a2f27-f7ba-4b91-bbf0-3b2b12244d14"
+
+        /**
+         * 微信扫码用的 appid（门户）。
+         *
+         * 实测：`getLoginQr` 用 `ywtb` 才返回微信授权 URL（与知识库解码出的
+         * `callback .../loginByQr?appid=ywtb` 一致）。**不能换成教务 appid**。
+         */
+        const val QR_APPID = "ywtb"
     }
 
     /** 取一张图形验证码，明文**剥掉 JSON 引号**后返回 data URI。 */
@@ -130,6 +138,67 @@ class CasLoginUseCase(
             return CasLoginResult.Failure(envelope.msg.orEmpty(), needRefreshCaptcha = true)
         }
         return credentialOrFailure()
+    }
+
+    // ------------------------------------------------------------------
+    // 微信扫码（真站实测 2026-11-13：POST + JSON，响应解密后是 url/state）
+
+    /**
+     * 取一张微信登录二维码。
+     *
+     * 返回的 [CasLoginQr.url] 需由 UI 渲染成二维码；[CasLoginQr.state] 用于轮询。
+     */
+    suspend fun fetchLoginQr(): CasQrFetchResult {
+        val body = jsonBody(json.encodeToString(CasQrAppIdBody.serializer(), CasQrAppIdBody(QR_APPID)))
+        val envelope = call { api.getLoginQr(body) }
+            ?: return CasQrFetchResult.Failure("")
+        if (envelope.code != 200) {
+            return CasQrFetchResult.Failure(envelope.msg.orEmpty())
+        }
+        val plain = CasDecrypt.unwrap(envelope) ?: return CasQrFetchResult.Failure("")
+        val qr = try {
+            json.decodeFromString(CasLoginQr.serializer(), plain)
+        } catch (e: Exception) {
+            return CasQrFetchResult.Failure("")
+        }
+        if (qr.url.isNullOrBlank() || qr.state.isNullOrBlank()) {
+            return CasQrFetchResult.Failure(envelope.msg.orEmpty())
+        }
+        return CasQrFetchResult.Success(qr)
+    }
+
+    /**
+     * 轮询扫码结果（UI 每 1~2 秒调一次）。
+     *
+     * - 未扫码：返回 [CasQrPollResult.Pending]（解密结果是全空对象，**不是成功**）；
+     * - 已扫码：返回 [CasQrPollResult.Scanned]，带 `tgt` 与整套 cookie 供 `method=school`。
+     */
+    suspend fun pollQrResult(state: String): CasQrPollResult {
+        if (state.isBlank()) return CasQrPollResult.Failure("")
+        val body = jsonBody(json.encodeToString(CasQrStateBody.serializer(), CasQrStateBody(state)))
+        val envelope = call { api.getCasLoginQrRes(body) }
+            ?: return CasQrPollResult.Failure("")
+        if (envelope.code != 200) {
+            return CasQrPollResult.Failure(envelope.msg.orEmpty())
+        }
+        val plain = CasDecrypt.unwrap(envelope) ?: return CasQrPollResult.Failure("")
+        val result = try {
+            json.decodeFromString(CasQrResult.serializer(), plain)
+        } catch (e: Exception) {
+            return CasQrPollResult.Failure("")
+        }
+        if (!result.isScanned) return CasQrPollResult.Pending
+
+        // 扫码成功后 cookie 罐里应是 auth 域整套 cookie（与账密链路同一判定口径）
+        val cred = jar.toCredential()
+        val tgt = result.tgt!!
+        return CasQrPollResult.Scanned(
+            CasCredential(
+                goAdminTgt = tgt,
+                cookieHeader = cred.cookieHeader.ifBlank { "go-admin-tgt=$tgt" },
+                companionCookieNames = cred.companionCookieNames,
+            ),
+        )
     }
 
     // ------------------------------------------------------------------

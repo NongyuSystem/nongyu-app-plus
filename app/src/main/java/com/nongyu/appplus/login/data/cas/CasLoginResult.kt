@@ -27,3 +27,19 @@ sealed interface CasLoginResult {
      */
     data class Failure(val message: String, val needRefreshCaptcha: Boolean = false) : CasLoginResult
 }
+
+/** 取微信登录二维码的结果。 */
+sealed interface CasQrFetchResult {
+    data class Success(val qr: CasLoginQr) : CasQrFetchResult
+    /** 文案为空串表示零提示（弱网/解析失败）。 */
+    data class Failure(val message: String) : CasQrFetchResult
+}
+
+/** 轮询扫码结果。 */
+sealed interface CasQrPollResult {
+    /** 尚未扫码（服务端返回 code=200 但解密结果全空）。 */
+    data object Pending : CasQrPollResult
+    /** 已扫码，拿到 tgt 与整套 cookie。 */
+    data class Scanned(val credential: CasCredential) : CasQrPollResult
+    data class Failure(val message: String) : CasQrPollResult
+}

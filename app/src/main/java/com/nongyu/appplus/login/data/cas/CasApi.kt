@@ -39,4 +39,22 @@ interface CasApi {
 
     @POST("api/v1/cas/loginByPhone")
     suspend fun loginByPhone(@Body body: okhttp3.RequestBody): Response<ResponseBody>
+
+    /**
+     * `POST /api/v1/cas/getLoginQr` —— 取微信登录二维码（真站实测 2026-11-13）。
+     *
+     * **必须是 POST**（GET 会 404）；body `{"appid":"ywtb"}`。
+     * 响应 `data` 解密后是 CasLoginQr（含 url 与 state）。
+     */
+    @POST("api/v1/cas/getLoginQr")
+    suspend fun getLoginQr(@Body body: okhttp3.RequestBody): Response<ResponseBody>
+
+    /**
+     * `POST /api/v1/cas/getCasLoginQrRes` —— 轮询扫码结果（真站实测 2026-11-13）。
+     *
+     * body `{"state":"loginByQr:..."}`（**是 state，不是 requestId**）。
+     * 未扫码时解密结果为全空；扫码完成后带 tgt。
+     */
+    @POST("api/v1/cas/getCasLoginQrRes")
+    suspend fun getCasLoginQrRes(@Body body: okhttp3.RequestBody): Response<ResponseBody>
 }

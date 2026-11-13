@@ -79,6 +79,16 @@ class CampusSsoLoginUseCase(
         cas.sendSmsCode(phone, captcha, captchaCode)
     }
 
+    /** 取微信登录二维码（UI 展示用）。 */
+    suspend fun fetchLoginQr() = withContext(Dispatchers.IO) { cas.fetchLoginQr() }
+
+    /** 轮询扫码结果（UI 每 1~2 秒调一次）。 */
+    suspend fun pollQrResult(state: String) = withContext(Dispatchers.IO) { cas.pollQrResult(state) }
+
+    /** 用扫码拿到的凭据提交 method=school（供 UI 在轮询命中后调用）。 */
+    suspend fun submitCredential(credential: CasCredential, deviceId: String): SchoolLoginResult =
+        withContext(Dispatchers.IO) { school.submit(credential, deviceId) }
+
     /** 取图形验证码（UI 首步：拿到 [CasCaptcha] 把图展示给用户）。 */
     suspend fun fetchCaptcha(): CasCaptchaResult = withContext(Dispatchers.IO) {
         cas.fetchCaptcha()
@@ -94,6 +104,12 @@ class CampusSsoLoginUseCase(
             phone: String, captcha: CasCaptcha, captchaCode: String,
         ): CasSmsSendResult
         suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult
+
+        /** 取微信登录二维码。 */
+        suspend fun fetchLoginQr(): com.nongyu.appplus.login.data.cas.CasQrFetchResult
+
+        /** 轮询扫码结果。 */
+        suspend fun pollQrResult(state: String): com.nongyu.appplus.login.data.cas.CasQrPollResult
     }
 
     /** `method=school` 提交能力接缝（纯 JVM 可假实现）。 */
@@ -117,6 +133,8 @@ class CampusSsoLoginUseCase(
                 ): CasSmsSendResult = casUseCase.sendSmsCode(phone, captcha, captchaCode)
                 override suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult =
                     casUseCase.loginWithPhone(phone, smsCode)
+                override suspend fun fetchLoginQr() = casUseCase.fetchLoginQr()
+                override suspend fun pollQrResult(state: String) = casUseCase.pollQrResult(state)
             }
             val schoolPort = object : SchoolPort {
                 override suspend fun submit(credential: CasCredential, deviceId: String) =

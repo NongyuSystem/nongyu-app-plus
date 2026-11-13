@@ -54,6 +54,10 @@ class CampusSsoLoginUseCaseTest {
         override suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult {
             calls += "phone"; return phoneResult ?: CasLoginResult.Success(usable())
         }
+        override suspend fun fetchLoginQr() =
+            com.nongyu.appplus.login.data.cas.CasQrFetchResult.Failure("")
+        override suspend fun pollQrResult(state: String) =
+            com.nongyu.appplus.login.data.cas.CasQrPollResult.Pending
         fun usable() = CasCredential(
             "201690:TGT:TEST",
             "go-admin-tgt=201690:TGT:TEST; laravel_session=S",

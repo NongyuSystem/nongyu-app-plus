@@ -1,5 +1,6 @@
 package com.nongyu.appplus.login.ui
 
+import com.nongyu.appplus.login.model.QrEncoder
 import com.nongyu.appplus.login.model.LocalCaptcha
 import com.nongyu.appplus.login.model.LoginMethod
 import com.nongyu.appplus.login.model.VerificationCodeButtonState
@@ -92,6 +93,15 @@ fun LoginFormBox(
     localCaptcha: LocalCaptcha = LocalCaptcha("----"),
     /** 点本地验证码图换一张。 */
     onRefreshLocalCaptcha: () -> Unit = {},
+    /** 微信扫码面板状态与内容。 */
+    wechatQrState: WechatQrState = WechatQrState.LOADING,
+    wechatQrUrl: String? = null,
+    /** 刷新微信二维码。 */
+    onRefreshWechatQr: () -> Unit = {},
+    /** 下载二维码并跳转微信。 */
+    onDownloadAndOpenWechat: () -> Unit = {},
+    /** 复制链接并跳转微信。 */
+    onCopyAndOpenWechat: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -148,7 +158,19 @@ fun LoginFormBox(
 
             LoginMethod.CAMPUS_WECHAT -> {
                 FormTitle("统一身份认证微信登录", colors)
-                WechatQrPanel(colors)
+                WechatQrPanel(
+                    colors = colors,
+                    qrState = wechatQrState,
+                    qrUrl = wechatQrUrl,
+                    statusText = when (wechatQrState) {
+                        WechatQrState.LOADING -> "正在获取二维码…"
+                        WechatQrState.READY -> "请使用微信扫一扫登录"
+                        WechatQrState.FAILED -> "二维码已失效，请刷新"
+                    },
+                    onRefresh = onRefreshWechatQr,
+                    onDownloadAndOpenWechat = onDownloadAndOpenWechat,
+                    onCopyAndOpenWechat = onCopyAndOpenWechat,
+                )
             }
 
             LoginMethod.PLATFORM_MAIL -> {
@@ -440,26 +462,130 @@ private fun CaptchaImage(colors: NongyuColors, dataUri: String?, onClick: () -> 
 }
 
 @Composable
-private fun WechatQrPanel(colors: NongyuColors) {
-    // 微信扫码的二维码由学校平台服务端下发一次性 state，App 无法自拼；
-    // 扫码完成感知机制属未实测项，这里**不渲染不可扫的假码**误导用户，
-    // 只如实告知暂不可用。接入后替换本面板。
+private fun WechatQrPanel(
+    colors: NongyuColors,
+    qrState: WechatQrState,
+    qrUrl: String?,
+    statusText: String,
+    onRefresh: () -> Unit,
+    onDownloadAndOpenWechat: () -> Unit,
+    onCopyAndOpenWechat: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // 二维码图片区
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
+                .size(200.dp)
                 .background(colors.surface.colorCard, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = "扫码登录暂不可用",
-                color = colors.surface.colorTextSecondary,
-                fontSize = 13.sp,
+            when (qrState) {
+                WechatQrState.LOADING -> Text(
+                    text = "正在获取二维码…",
+                    color = colors.surface.colorTextSecondary,
+                    fontSize = 13.sp,
+                )
+                WechatQrState.READY -> {
+                    val matrix = remember(qrUrl) { qrUrl?.let { QrEncoder.encode(it) } }
+                    if (matrix != null) {
+                        Canvas(modifier = Modifier.size(180.dp)) {
+                            val n = matrix.size
+                            val cell = size.width / n
+                            for (y in 0 until n) for (x in 0 until n) {
+                                if (matrix[y][x]) {
+                                    drawRect(
+                                        color = colors.surface.colorText,
+                                        topLeft = Offset(x * cell, y * cell),
+                                        size = Size(cell, cell),
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Text("二维码生成失败", color = colors.surface.colorTextSecondary, fontSize = 12.sp)
+                    }
+                }
+                WechatQrState.FAILED -> Text(
+                    text = "二维码已失效",
+                    color = colors.surface.colorTextSecondary,
+                    fontSize = 13.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = statusText,
+            color = colors.surface.colorTextSecondary,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(12.dp))
+        // 两个按钮：下载二维码并跳转微信 / 复制链接并跳转微信
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            PanelButton(
+                text = "下载二维码并跳转微信",
+                colors = colors,
+                enabled = qrState == WechatQrState.READY,
+                modifier = Modifier.weight(1f),
+                onClick = onDownloadAndOpenWechat,
+            )
+            PanelButton(
+                text = "复制链接并跳转微信",
+                colors = colors,
+                enabled = qrState == WechatQrState.READY,
+                modifier = Modifier.weight(1f),
+                onClick = onCopyAndOpenWechat,
             )
         }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "刷新二维码",
+            color = colors.brand.colorBrand,
+            fontSize = 12.sp,
+            modifier = Modifier.clickable { onRefresh() },
+        )
+    }
+}
+
+/** 微信二维码面板状态。 */
+enum class WechatQrState { LOADING, READY, FAILED }
+
+/** 面板内的等宽按钮。 */
+@Composable
+private fun PanelButton(
+    text: String,
+    colors: NongyuColors,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .background(
+                if (enabled) colors.brand.colorBrandMuted else colors.surface.colorCard,
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) colors.brand.colorBrand
+                    else colors.surface.colorTextSecondary.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+        )
     }
 }
