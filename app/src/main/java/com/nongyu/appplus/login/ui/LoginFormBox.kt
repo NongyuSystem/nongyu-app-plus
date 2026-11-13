@@ -1,5 +1,6 @@
 package com.nongyu.appplus.login.ui
 
+import com.nongyu.appplus.login.model.LocalCaptcha
 import com.nongyu.appplus.login.model.LoginMethod
 import com.nongyu.appplus.login.model.VerificationCodeButtonState
 import androidx.compose.foundation.Image
@@ -87,6 +88,10 @@ fun LoginFormBox(
     onRequestSmsCode: () -> Unit = {},
     /** 点「获取验证码」发邮箱码。 */
     onRequestMailCode: () -> Unit = {},
+    /** 邮箱格的本地图形验证码（前端生成、本地校验）。 */
+    localCaptcha: LocalCaptcha = LocalCaptcha("----"),
+    /** 点本地验证码图换一张。 */
+    onRefreshLocalCaptcha: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -154,7 +159,15 @@ fun LoginFormBox(
                     onFormValuesChanged(values.toMap())
                 }
                 FormField("请输入邮箱", colors, onValueChange = { put("email", it) })
-                CaptchaRow("请输入图形验证码", colors)
+                // 邮箱发码后端不校验图形码，这张图是**前端本地**生成并本地校验的
+                // （交互约束，不是安全边界；防刷靠后端 Cooldown）
+                LocalCaptchaRow(
+                    placeholder = "请输入图形验证码",
+                    captcha = localCaptcha,
+                    colors = colors,
+                    onValueChange = { put("localCaptchaCode", it) },
+                    onRefresh = onRefreshLocalCaptcha,
+                )
                 FormFieldWithAction(
                     placeholder = "请输入邮箱验证码",
                     actionState = mailCodeState,
@@ -302,6 +315,61 @@ private fun FormFieldWithAction(
                         else colors.surface.colorTextSecondary.copy(alpha = 0.6f),
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/**
+ * 邮箱格：输入框 + 本地绘制的图形验证码（前端生成，本地校验）。
+ *
+ * 与 [CaptchaRow]（学校侧真图）不同：这里的字符由 [LocalCaptcha] 现场生成，
+ * 用 `Canvas` 矢量绘制并配干扰线，点击可换一张。
+ */
+@Composable
+private fun LocalCaptchaRow(
+    placeholder: String,
+    captcha: LocalCaptcha,
+    colors: NongyuColors,
+    onValueChange: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            FormField(placeholder, colors, onValueChange = onValueChange)
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .size(width = 100.dp, height = 48.dp)
+                .background(colors.brand.colorBrandMuted, RoundedCornerShape(12.dp))
+                .clickable { onRefresh() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                // 两条干扰线
+                drawLine(
+                    color = colors.surface.colorTextSecondary.copy(alpha = 0.30f),
+                    start = Offset(w * 0.08f, h * 0.72f),
+                    end = Offset(w * 0.92f, h * 0.28f),
+                    strokeWidth = 1.5.dp.toPx(),
+                )
+                drawLine(
+                    color = colors.surface.colorTextSecondary.copy(alpha = 0.22f),
+                    start = Offset(w * 0.12f, h * 0.30f),
+                    end = Offset(w * 0.88f, h * 0.70f),
+                    strokeWidth = 1.5.dp.toPx(),
+                )
+            }
+            Text(
+                text = captcha.text,
+                color = colors.brand.colorBrand,
+                fontSize = 18.sp,
             )
         }
     }

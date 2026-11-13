@@ -14,6 +14,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.rememberCoroutineScope
 import com.nongyu.appplus.login.ui.NebulaBackdrop
 import com.nongyu.appplus.login.ui.LoginFormBox
+import com.nongyu.appplus.login.model.ContactValidator
+import com.nongyu.appplus.login.model.LocalCaptcha
 import com.nongyu.appplus.login.model.LoginMethod
 import com.nongyu.appplus.login.model.AuthRealm
 import com.nongyu.appplus.login.model.LoginCenterUiState
@@ -122,6 +124,8 @@ fun LoginCenterScreen() {
     // 「获取验证码」按钮状态（短信 / 邮箱各一份）
     var smsCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
     var mailCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
+    // 邮箱格的本地图形验证码（前端生成、本地校验）
+    var localCaptcha by remember { mutableStateOf(LocalCaptcha.random()) }
 
     // 倒计时：每秒推进
     LaunchedEffect(smsCodeState.remainingSeconds) {
@@ -296,6 +300,11 @@ fun LoginCenterScreen() {
                                     smsCodeState = smsCodeState.onFailed()
                                     return@launch
                                 }
+                                if (!ContactValidator.isValidPhone(phone)) {
+                                    showHint("手机号格式不正确")
+                                    smsCodeState = smsCodeState.onFailed()
+                                    return@launch
+                                }
                                 if (captchaCode.isBlank()) {
                                     showHint("请输入图形验证码")
                                     smsCodeState = smsCodeState.onFailed()
@@ -326,6 +335,8 @@ fun LoginCenterScreen() {
                         }
                     }
                 },
+                localCaptcha = localCaptcha,
+                onRefreshLocalCaptcha = { localCaptcha = LocalCaptcha.random() },
                 onRequestMailCode = {
                     // 邮箱码：不需要图形验证码
                     if (!submitting && mailCodeState.enabled) {
@@ -335,6 +346,18 @@ fun LoginCenterScreen() {
                                 val email = campusValues["email"].orEmpty()
                                 if (email.isBlank()) {
                                     showHint("请输入邮箱")
+                                    mailCodeState = mailCodeState.onFailed()
+                                    return@launch
+                                }
+                                if (!ContactValidator.isValidEmail(email)) {
+                                    showHint("邮箱格式不正确")
+                                    mailCodeState = mailCodeState.onFailed()
+                                    return@launch
+                                }
+                                // 本地校验图形码（后端不校验，这是前端交互约束）
+                                if (!localCaptcha.matches(campusValues["localCaptchaCode"])) {
+                                    showHint("图形验证码不正确，请重试")
+                                    localCaptcha = LocalCaptcha.random()
                                     mailCodeState = mailCodeState.onFailed()
                                     return@launch
                                 }
@@ -455,6 +478,7 @@ fun LoginCenterScreen() {
                         else null
                     LoginMethod.CAMPUS_PHONE ->
                         if (campusValues["smsPhone"].isNullOrBlank()) "请输入手机号"
+                        else if (!ContactValidator.isValidPhone(campusValues["smsPhone"])) "手机号格式不正确"
                         else if (campusValues["smsCaptchaCode"].isNullOrBlank()) "请输入图形验证码"
                         else if (campusValues["smsCode"].isNullOrBlank()) "请输入短信验证码"
                         else null
