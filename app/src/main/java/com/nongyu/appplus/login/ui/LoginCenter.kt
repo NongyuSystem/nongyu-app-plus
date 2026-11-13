@@ -106,6 +106,10 @@ fun LoginCenterScreen() {
     var inlineMessage by remember { mutableStateOf<String?>(null) }
     // 统一身份认证三格的表单输入（票 #96）
     var campusValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // 已取到的图形验证码（一次性，取码与提交必须同一 uuid）
+    var campusCaptcha by remember { mutableStateOf<com.nongyu.appplus.login.data.cas.CasCaptcha?>(null) }
+    // 缓存编排器，避免每次点击都重建 OkHttp/Retrofit
+    val campusUseCase = remember { CampusSsoLoginUseCase.production(appContext) }
 
     val mainSize = 73.dp
     val sideSize = 70.dp
@@ -297,52 +301,74 @@ fun LoginCenterScreen() {
                 inlineMessage = null
                 val deviceId = DeviceIdStore.getOrCreate(appContext)
                 scope.launch {
-                    // 票 #96：按当前登录方式分派
-                    when (uiState.selectedMethod) {
-                        LoginMethod.PLATFORM_PASSWORD -> {
-                            val result = PasswordLoginUseCase(
-                                context = appContext,
-                                studentNo = account,
-                                password = password,
-                                deviceId = deviceId,
-                            )
-                            submitting = false
-                            handlePasswordResult(result)
+                    // 票 #96：按当前登录方式分派。finally 保证异常时也解锁按钮，
+                    // 否则一次抛异常会让 submitting 永久为 true、按钮卡死。
+                    try {
+                        when (uiState.selectedMethod) {
+                            LoginMethod.PLATFORM_PASSWORD -> {
+                                handlePasswordResult(
+                                    PasswordLoginUseCase(
+                                        context = appContext,
+                                        studentNo = account,
+                                        password = password,
+                                        deviceId = deviceId,
+                                    ),
+                                )
+                            }
+                            LoginMethod.CAMPUS_PASSWORD -> {
+                                val cap = campusCaptcha
+                                if (cap == null) {
+                                    // 一次性验证码必须先取；本次点击只负责取码
+                                    when (val r = campusUseCase.fetchCaptcha()) {
+                                        is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
+                                            campusCaptcha = r.captcha
+                                        is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
+                                            inlineMessage = r.message.ifBlank { null }
+                                    }
+                                    return@launch
+                                }
+                                handleCampusResult(
+                                    campusUseCase.loginWithPassword(
+                                        studentNo = campusValues["studentNo"].orEmpty(),
+                                        password = campusValues["password"].orEmpty(),
+                                        captcha = cap,
+                                        captchaCode = campusValues["captchaCode"].orEmpty(),
+                                        deviceId = deviceId,
+                                    ),
+                                )
+                            }
+                            LoginMethod.CAMPUS_PHONE -> {
+                                val cap = campusCaptcha
+                                if (cap == null) {
+                                    when (val r = campusUseCase.fetchCaptcha()) {
+                                        is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
+                                            campusCaptcha = r.captcha
+                                        is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
+                                            inlineMessage = r.message.ifBlank { null }
+                                    }
+                                    return@launch
+                                }
+                                handleCampusResult(
+                                    campusUseCase.loginWithPhone(
+                                        phone = campusValues["phone"].orEmpty(),
+                                        smsCode = campusValues["smsCode"].orEmpty(),
+                                        deviceId = deviceId,
+                                    ),
+                                )
+                            }
+                            LoginMethod.CAMPUS_WECHAT -> {
+                                // 扫码完成感知待真机/抓包实测（票 #97），不臆造轮询
+                                inlineMessage = "扫码登录暂不可用"
+                            }
+                            LoginMethod.PLATFORM_MAIL -> {
+                                inlineMessage = "邮箱验证码登录暂不可用"
+                            }
+                            LoginMethod.PLATFORM_OAUTH -> Unit
                         }
-                        LoginMethod.CAMPUS_PASSWORD -> {
-                            val r = CampusSsoLoginUseCase.production(appContext).loginWithPassword(
-                                studentNo = campusValues["studentNo"].orEmpty(),
-                                password = campusValues["password"].orEmpty(),
-                                captchaCode = campusValues["captchaCode"].orEmpty(),
-                                deviceId = deviceId,
-                            )
-                            submitting = false
-                            handleCampusResult(r)
-                        }
-                        LoginMethod.CAMPUS_PHONE -> {
-                            val r = CampusSsoLoginUseCase.production(appContext).loginWithPhone(
-                                phone = campusValues["phone"].orEmpty(),
-                                captchaCode = campusValues["captchaCode"].orEmpty(),
-                                smsCode = campusValues["smsCode"].orEmpty(),
-                                deviceId = deviceId,
-                            )
-                            submitting = false
-                            handleCampusResult(r)
-                        }
-                        LoginMethod.CAMPUS_WECHAT -> {
-                            // 扫码完成感知待真机/抓包实测（票 #97），不臆造轮询
-                            submitting = false
-                            inlineMessage = "扫码登录待真机实测（见票 #97）"
-                        }
-                        LoginMethod.PLATFORM_MAIL -> {
-                            submitting = false
-                            inlineMessage = "邮箱验证码登录待票 S4 接入"
-                        }
-                        LoginMethod.PLATFORM_OAUTH -> {
-                            submitting = false
-                        }
+                    } finally {
+                        submitting = false
+                        hintTick++
                     }
-                    hintTick++
                 }
             },
             modifier = Modifier

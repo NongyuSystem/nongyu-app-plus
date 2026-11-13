@@ -13,41 +13,48 @@ import org.junit.Test
 /**
  * [CampusSsoLoginUseCase] 纯 JVM 决策测试（票 #96）。
  *
- * 用可注入的假 S6 用例 / 假 `method=school` 用例，验证编排：
- * - 账密：先取验证码 → 用同一个 captcha + 用户图形码取 tgt → 交 method=school；
- * - 短信：先取验证码 → 发短信 → 短信登录取 tgt → 交 method=school；
- * - 任一步失败都原样停下，不继续后续调用（不臆造提示）。
+ * **关键回归**（code-review Spec 轴第 1 条）：验证码一次性 —— 取码与提交必须用
+ * 同一个 uuid，编排器**绝不**在登录方法内部重取验证码（重取会让用户输入配新 uuid，
+ * 真站必回「验证码错误」）。
  */
 class CampusSsoLoginUseCaseTest {
 
-    private val usableCred = CasCredential(
+    private fun usableCred() = CasCredential(
         goAdminTgt = "201690:TGT:TEST",
         cookieHeader = "go-admin-tgt=201690:TGT:TEST; laravel_session=S",
         companionCookieNames = setOf("laravel_session"),
     )
 
+    private val captcha = CasCaptcha("CAP-UUID", "data:image/png;base64,AAAA")
+
     private class FakeCas : CampusSsoLoginUseCase.CasPort {
-        var captchaResult: CasCaptchaResult = CasCaptchaResult.Success(
-            CasCaptcha("CAP-UUID", "data:image/png;base64,AAAA"),
-        )
-        var passwordResult: CasLoginResult = CasLoginResult.Success(usableCred())
+        var captchaResult: CasCaptchaResult =
+            CasCaptchaResult.Success(CasCaptcha("CAP-UUID", "data:image/png;base64,AAAA"))
+        var passwordResult: CasLoginResult? = null
         var smsSendResult: CasSmsSendResult = CasSmsSendResult.Success
-        var phoneResult: CasLoginResult = CasLoginResult.Success(usableCred())
+        var phoneResult: CasLoginResult? = null
+        /** 记录每次调用，用于断言"没有多余的重取码"。 */
         val calls = mutableListOf<String>()
+        var lastCaptchaUuid: String? = null
 
         override suspend fun fetchCaptcha(): CasCaptchaResult {
             calls += "captcha"; return captchaResult
         }
         override suspend fun loginWithPassword(
             studentNo: String, password: String, captcha: CasCaptcha, captchaCode: String,
-        ): CasLoginResult { calls += "password"; return passwordResult }
+        ): CasLoginResult {
+            calls += "password"; lastCaptchaUuid = captcha.uuid
+            return passwordResult ?: CasLoginResult.Success(usable())
+        }
         override suspend fun sendSmsCode(
             phone: String, captcha: CasCaptcha, captchaCode: String,
-        ): CasSmsSendResult { calls += "sendSms"; return smsSendResult }
-        override suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult {
-            calls += "phone"; return phoneResult
+        ): CasSmsSendResult {
+            calls += "sendSms"; lastCaptchaUuid = captcha.uuid; return smsSendResult
         }
-        private fun usableCred() = CasCredential(
+        override suspend fun loginWithPhone(phone: String, smsCode: String): CasLoginResult {
+            calls += "phone"; return phoneResult ?: CasLoginResult.Success(usable())
+        }
+        fun usable() = CasCredential(
             "201690:TGT:TEST",
             "go-admin-tgt=201690:TGT:TEST; laravel_session=S",
             setOf("laravel_session"),
@@ -63,67 +70,69 @@ class CampusSsoLoginUseCaseTest {
     }
 
     @Test
-    fun `账密路径 取码 取tgt 提交method=school 依次调用`() = runTest {
+    fun `账密登录不重取验证码 直接用传入的 uuid`() = runTest {
         val cas = FakeCas(); val school = FakeSchool()
-        val useCase = CampusSsoLoginUseCase(cas, school)
-        val result = useCase.loginWithPassword(
+        val result = CampusSsoLoginUseCase(cas, school).loginWithPassword(
             studentNo = "20231234", password = "pw",
-            captchaCode = "a1b2", deviceId = "dev-1",
+            captcha = captcha, captchaCode = "a1b2", deviceId = "dev-1",
         )
         assertTrue(result is SchoolLoginResult.Success)
-        assertEquals(listOf("captcha", "password"), cas.calls)
+        // 只调了 password 一次，没有 captcha（不重取）
+        assertEquals(listOf("password"), cas.calls)
+        assertEquals("CAP-UUID", cas.lastCaptchaUuid)
         assertTrue(school.calledWith!!.isUsable)
     }
 
     @Test
-    fun `短信路径 取码 发短信 取tgt 提交method=school 依次调用`() = runTest {
+    fun `短信登录走 loginByPhone 不重取码`() = runTest {
         val cas = FakeCas(); val school = FakeSchool()
-        val useCase = CampusSsoLoginUseCase(cas, school)
-        val result = useCase.loginWithPhone(
-            phone = "13800000000", captchaCode = "a1b2",
-            smsCode = "654321", deviceId = "dev-1",
+        val result = CampusSsoLoginUseCase(cas, school).loginWithPhone(
+            phone = "13800000000", smsCode = "654321", deviceId = "dev-1",
         )
         assertTrue(result is SchoolLoginResult.Success)
-        assertEquals(listOf("captcha", "sendSms", "phone"), cas.calls)
+        assertEquals(listOf("phone"), cas.calls)
         assertTrue(school.calledWith!!.isUsable)
     }
 
     @Test
-    fun `取验证码失败时账密路径不继续`() = runTest {
+    fun `发短信是独立动作 用同一 uuid`() = runTest {
+        val cas = FakeCas()
+        val useCase = CampusSsoLoginUseCase(cas, FakeSchool())
+        val r = useCase.sendSmsCode("13800000000", captcha, "a1b2")
+        assertTrue(r is CasSmsSendResult.Success)
+        assertEquals(listOf("sendSms"), cas.calls)
+        assertEquals("CAP-UUID", cas.lastCaptchaUuid)
+    }
+
+    @Test
+    fun `取码失败时不提交方法`() = runTest {
         val cas = FakeCas()
         cas.captchaResult = CasCaptchaResult.Failure("验证码获取失败")
-        val school = FakeSchool()
-        val result = CampusSsoLoginUseCase(cas, school).loginWithPassword(
-            "n", "p", "c", "dev-1",
-        )
-        assertTrue(result is SchoolLoginResult.Failure)
-        assertEquals(listOf("captcha"), cas.calls)
-        assertEquals(null, school.calledWith)
+        val r = CampusSsoLoginUseCase(cas, FakeSchool()).fetchCaptcha()
+        assertTrue(r is CasCaptchaResult.Failure)
+        assertEquals("验证码获取失败", (r as CasCaptchaResult.Failure).message)
     }
 
     @Test
-    fun `短信发送失败不继续登录`() = runTest {
+    fun `短信发送失败时后续登录不继续`() = runTest {
         val cas = FakeCas()
         cas.smsSendResult = CasSmsSendResult.Failure("操作频繁")
         val school = FakeSchool()
-        val result = CampusSsoLoginUseCase(cas, school).loginWithPhone(
-            "13800000000", "a1b2", "654321", "dev-1",
-        )
-        assertTrue(result is SchoolLoginResult.Failure)
-        assertEquals(listOf("captcha", "sendSms"), cas.calls)
+        val r = CampusSsoLoginUseCase(cas, school).sendSmsCode("13800000000", captcha, "a1b2")
+        assertTrue(r is CasSmsSendResult.Failure)
         assertEquals(null, school.calledWith)
     }
 
     @Test
-    fun `取tgt失败时method=school不提交`() = runTest {
+    fun `取 tgt 失败时 method=school 不提交`() = runTest {
         val cas = FakeCas()
         cas.passwordResult = CasLoginResult.Failure("验证码错误", needRefreshCaptcha = true)
         val school = FakeSchool()
-        val result = CampusSsoLoginUseCase(cas, school).loginWithPassword(
-            "n", "p", "c", "dev-1",
+        val r = CampusSsoLoginUseCase(cas, school).loginWithPassword(
+            "n", "p", captcha, "c", "dev-1",
         )
-        assertTrue(result is SchoolLoginResult.Failure)
-        assertEquals(listOf("captcha", "password"), cas.calls)
+        assertTrue(r is SchoolLoginResult.Failure)
+        assertEquals("验证码错误", (r as SchoolLoginResult.Failure).message)
         assertEquals(null, school.calledWith)
     }
 }

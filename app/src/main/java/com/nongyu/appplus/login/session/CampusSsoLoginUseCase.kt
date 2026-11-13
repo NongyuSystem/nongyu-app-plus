@@ -31,17 +31,19 @@ class CampusSsoLoginUseCase(
     private val school: SchoolPort,
 ) {
 
-    /** 账密：取码 → 取 tgt → method=school。 */
+    /**
+     * 账密：【用户已看着一张图输入 captchaCode】→ 用同一个 [captcha] 取 tgt → method=school。
+     *
+     * **本方法绝不重取验证码**（S6 实证：取码会换 uuid 并让旧码作废，
+     * 重取会让用户输入的码配上新 uuid，真站必回「验证码错误」）。
+     */
     suspend fun loginWithPassword(
         studentNo: String,
         password: String,
+        captcha: CasCaptcha,
         captchaCode: String,
         deviceId: String,
     ): SchoolLoginResult = withContext(Dispatchers.IO) {
-        val captcha = when (val r = cas.fetchCaptcha()) {
-            is CasCaptchaResult.Success -> r.captcha
-            is CasCaptchaResult.Failure -> return@withContext SchoolLoginResult.Failure(r.message)
-        }
         val cred = when (
             val r = cas.loginWithPassword(studentNo, password, captcha, captchaCode)
         ) {
@@ -51,26 +53,35 @@ class CampusSsoLoginUseCase(
         school.submit(cred, deviceId)
     }
 
-    /** 短信：取码 → 发短信 → 取 tgt → method=school。 */
+    /**
+     * 短信：先 [sendSmsCode]（发码，独立动作），再用短信码登录。
+     *
+     * 同样不重取图形验证码：发码时用的 [captcha] 由调用方在上一步取好并已展示给用户。
+     */
     suspend fun loginWithPhone(
         phone: String,
-        captchaCode: String,
         smsCode: String,
         deviceId: String,
     ): SchoolLoginResult = withContext(Dispatchers.IO) {
-        val captcha = when (val r = cas.fetchCaptcha()) {
-            is CasCaptchaResult.Success -> r.captcha
-            is CasCaptchaResult.Failure -> return@withContext SchoolLoginResult.Failure(r.message)
-        }
-        when (val r = cas.sendSmsCode(phone, captcha, captchaCode)) {
-            is CasSmsSendResult.Success -> Unit
-            is CasSmsSendResult.Failure -> return@withContext SchoolLoginResult.Failure(r.message)
-        }
         val cred = when (val r = cas.loginWithPhone(phone, smsCode)) {
             is CasLoginResult.Success -> r.credential
             is CasLoginResult.Failure -> return@withContext SchoolLoginResult.Failure(r.message)
         }
         school.submit(cred, deviceId)
+    }
+
+    /** 发短信验证码（独立动作，UI 可单独做倒计时）。 */
+    suspend fun sendSmsCode(
+        phone: String,
+        captcha: CasCaptcha,
+        captchaCode: String,
+    ): CasSmsSendResult = withContext(Dispatchers.IO) {
+        cas.sendSmsCode(phone, captcha, captchaCode)
+    }
+
+    /** 取图形验证码（UI 首步：拿到 [CasCaptcha] 把图展示给用户）。 */
+    suspend fun fetchCaptcha(): CasCaptchaResult = withContext(Dispatchers.IO) {
+        cas.fetchCaptcha()
     }
 
     /** S6 取 tgt 的能力接缝（纯 JVM 可假实现）。 */

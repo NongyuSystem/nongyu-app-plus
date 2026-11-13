@@ -27,7 +27,10 @@ import org.junit.Test
 import retrofit2.Retrofit
 
 /**
- * 票 #96 契约层：`method=school` 请求形状 + 真后端 NY1 签名校验。
+ * 票 #96 联调证据（可选）：真后端 NY1 签名可达性。
+ *
+ * ⚠️ 形状契约不在本类：由 `SchoolLoginShapeContractTest`（纯 JVM、必跑）承担。
+ * 本类用 `assumeTrue` 在无后端时跳过，因此**不能**作为 CI 的契约断言依据。
  *
  * 按维护者要求**不用 MockWebServer，直连本地真后端**（`127.0.0.1:3000`）：
  * - 形状断言（恰好四字段、无 `schoolMethod`/`wechatCode`）检查序列化出的请求体；
@@ -38,7 +41,7 @@ import retrofit2.Retrofit
  * 假 tgt 不会登录成功（真站凭据需校园网），本测试只验「签名通、形状对」，
  * 不验成功落地。
  */
-class SchoolLoginContractTest {
+class SchoolRealBackendTest {
 
     companion object {
         /** 与 App `NetConfig.DEBUG_BASE_URL` 一致。 */
@@ -112,7 +115,7 @@ class SchoolLoginContractTest {
                 assertNotEquals("app_sign_unavailable", failure.code)
             }
         }
-        // 走到这里说明：签名通过、请求到达业务层（假 tgt 返回业务错误属预期）
-        assertTrue(outcome is ApiCall.Outcome.Success<*> || outcome is ApiCall.Outcome.Failure)
+        // 本测试只作联调证据：不承担形状断言（由 SchoolLoginShapeContractTest 必跑覆盖），
+        // 也不断言"恒真"的结果类型。签名未被拒即视为链路可达。
     }
 }

@@ -2,7 +2,6 @@ package com.nongyu.appplus.login.ui
 
 import com.nongyu.appplus.login.model.LoginMethod
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -305,8 +304,9 @@ private fun CaptchaImage(colors: NongyuColors) {
  */
 @Composable
 private fun WechatQrPanel(colors: NongyuColors) {
-    var state by remember { mutableStateOf(QrState.LOADING) }
-
+    // 微信扫码的二维码由学校平台服务端下发一次性 state，App 无法自拼；
+    // 扫码完成感知机制属未实测项，这里**不渲染不可扫的假码**误导用户，
+    // 只如实告知暂不可用。接入后替换本面板。
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -318,94 +318,11 @@ private fun WechatQrPanel(colors: NongyuColors) {
                 .background(colors.surface.colorCard, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            if (state == QrState.LOADING) {
-                Text(
-                    text = "正在获取二维码…",
-                    color = colors.surface.colorTextSecondary,
-                    fontSize = 13.sp,
-                )
-            } else {
-                // 本地矢量二维码占位：三个定位块 + 数据块（不引二维码生成库）
-                Canvas(modifier = Modifier.size(150.dp)) {
-                    val n = 8
-                    val cell = size.width / n
-                    listOf(0 to 0, n - 2 to 0, 0 to n - 2).forEach { (cx, cy) ->
-                        drawRect(
-                            color = colors.surface.colorText,
-                            topLeft = Offset(cx * cell, cy * cell),
-                            size = Size(cell * 2, cell * 2),
-                        )
-                    }
-                    for (i in 2..5) {
-                        drawRect(
-                            color = colors.surface.colorText.copy(alpha = 0.55f),
-                            topLeft = Offset(i * cell, ((i % 4) + 2) * cell),
-                            size = Size(cell, cell),
-                        )
-                    }
-                    drawRect(
-                        color = colors.surface.colorOutline,
-                        size = this.size,
-                        style = Stroke(width = 1.dp.toPx()),
-                    )
-                }
-            }
+            Text(
+                text = "扫码登录暂不可用",
+                color = colors.surface.colorTextSecondary,
+                fontSize = 13.sp,
+            )
         }
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = when (state) {
-                QrState.LOADING -> "正在获取二维码…"
-                QrState.SHOWN -> "请使用微信扫码登录"
-                QrState.EXPIRED -> "二维码已失效，请刷新"
-            },
-            color = if (state == QrState.EXPIRED) colors.brand.colorBrand
-                    else colors.surface.colorTextSecondary,
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(Modifier.height(12.dp))
-        PrimaryWideButton(
-            text = if (state == QrState.EXPIRED) "刷新二维码" else "刷新",
-            colors = colors,
-            onClick = { state = QrState.SHOWN },
-        )
-
-        // 显式标注：扫码完成感知待实测（票 #97 / 规格 #89）
-        Text(
-            text = "扫码完成感知机制待真机/抓包实测（票 #97）",
-            color = colors.surface.colorTextSecondary.copy(alpha = 0.6f),
-            fontSize = 11.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
-    }
-}
-
-/** 微信二维码面板状态（票 #96）。 */
-private enum class QrState { LOADING, SHOWN, EXPIRED }
-
-/** 整宽主按钮（矢量圆角矩形 + 文字），可点击。 */
-@Composable
-private fun PrimaryWideButton(
-    text: String,
-    colors: NongyuColors,
-    onClick: () -> Unit = {},
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .background(colors.brand.colorBrand, RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = colors.brand.colorOnBrand,
-            fontSize = 14.sp,
-        )
     }
 }
