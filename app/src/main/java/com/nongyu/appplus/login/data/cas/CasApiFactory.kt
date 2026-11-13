@@ -19,6 +19,15 @@ import java.util.concurrent.TimeUnit
  */
 object CasApiFactory {
 
+    /**
+     * 学校统一身份认证平台根地址（票 #96 真站装配）。
+     *
+     * 真源：后端 `internal/school/schoolauth/jiaowu.go` `authHost`、
+     * `internal/school/cas/exchange.go` `authBase`，以及出站白名单
+     * `app.go` 里的 `auth.sicau.edu.cn`。https，不需要 debug 明文放行。
+     */
+    const val REAL_BASE_URL = "https://auth.sicau.edu.cn/"
+
     fun create(
         baseUrl: String,
         cookieJar: CasCookieJar = CasCookieJar(),

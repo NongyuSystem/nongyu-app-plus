@@ -1,6 +1,8 @@
 package com.nongyu.appplus.login.ui
 
 import kotlinx.coroutines.launch
+import com.nongyu.appplus.login.session.CampusSsoLoginUseCase
+import com.nongyu.appplus.login.session.SchoolLoginResult
 import com.nongyu.appplus.login.session.PasswordLoginUseCase
 import com.nongyu.appplus.login.session.DeviceIdStore
 import com.nongyu.appplus.login.model.LoginFailurePolicy
@@ -102,6 +104,8 @@ fun LoginCenterScreen() {
     var submitting by remember { mutableStateOf(false) }
     // 就地行内提示（票 #92）：失败文案显示在表单内，而非底部全局提示
     var inlineMessage by remember { mutableStateOf<String?>(null) }
+    // 统一身份认证三格的表单输入（票 #96）
+    var campusValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     val mainSize = 73.dp
     val sideSize = 70.dp
@@ -230,7 +234,58 @@ fun LoginCenterScreen() {
                 inlineMessage = inlineMessage,
                 savedAccount = account,
                 savedPassword = password,
+                onFormValuesChanged = { campusValues = it },
             )
+        }
+
+        // 平台账密结果处理（原 #92 逻辑抽出）
+        fun handlePasswordResult(result: com.nongyu.appplus.login.session.PasswordLoginResult) {
+            when (result) {
+                is com.nongyu.appplus.login.session.PasswordLoginResult.Success -> {
+                    // 成功：用例已写凭证并切主界面。登录页随即移出组合，
+                    // profileIncomplete 的轻提示由主界面侧承接（S5 转场票）。
+                    inlineMessage = null
+                }
+                is com.nongyu.appplus.login.session.PasswordLoginResult.Failure -> {
+                    val action = LoginFailurePolicy.decide(result.failure)
+                    val code = (result.failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                    when (action) {
+                        LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
+                            // 自动切统一身份认证 tab；输入保留在 UI state，不清空
+                            uiState = LoginCenterUiState.initial()
+                            inlineMessage = LoginFailurePolicy.messageOf(code)
+                        }
+                        LoginFailureAction.SHOW_MESSAGE ->
+                            inlineMessage = LoginFailurePolicy.messageOf(code)
+                        LoginFailureAction.SILENT -> inlineMessage = null
+                    }
+                }
+            }
+        }
+
+        // 统一身份认证结果处理（票 #96）：失败口径与平台登录一致
+        fun handleCampusResult(result: com.nongyu.appplus.login.session.SchoolLoginResult) {
+            when (result) {
+                is com.nongyu.appplus.login.session.SchoolLoginResult.Success -> inlineMessage = null
+                is com.nongyu.appplus.login.session.SchoolLoginResult.Failure -> {
+                    val failure = result.failure
+                    if (failure == null) {
+                        // 无 ApiFailure：文案直接来自学校侧（或空串零提示）
+                        inlineMessage = result.message.ifBlank { null }
+                    } else {
+                        val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                        when (LoginFailurePolicy.decide(failure)) {
+                            LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
+                                uiState = LoginCenterUiState.initial()
+                                inlineMessage = LoginFailurePolicy.messageOf(code)
+                            }
+                            LoginFailureAction.SHOW_MESSAGE ->
+                                inlineMessage = LoginFailurePolicy.messageOf(code)
+                            LoginFailureAction.SILENT -> inlineMessage = null
+                        }
+                    }
+                }
+            }
         }
 
         // ---- 底部大圆形箭头按钮 = 登录 ----
@@ -238,42 +293,53 @@ fun LoginCenterScreen() {
             colors = colors,
             onClick = {
                 if (submitting) return@LoginArrowButton
-                // 票 #92：只有「平台登录 · 账密」这一格接了真登录（S4/S7 接其余方式）
-                if (uiState.selectedMethod != LoginMethod.PLATFORM_PASSWORD) {
-                    // 其余方式由 S4/S7 接入（票 #92 范围外），不臆造文案
-                    return@LoginArrowButton
-                }
                 submitting = true
                 inlineMessage = null
+                val deviceId = DeviceIdStore.getOrCreate(appContext)
                 scope.launch {
-                    val result = PasswordLoginUseCase(
-                        context = appContext,
-                        studentNo = account,
-                        password = password,
-                        deviceId = DeviceIdStore.getOrCreate(appContext),
-                    )
-                    submitting = false
-                    when (result) {
-                        is com.nongyu.appplus.login.session.PasswordLoginResult.Success -> {
-                            // 成功：用例已写凭证并切主界面。登录页随即移出组合，
-                            // profileIncomplete 的轻提示由主界面侧承接（S5 转场票），
-                            // 本票不在会立刻消失的登录页里放无效提示（code-review Spec 轴 #4）。
-                            inlineMessage = null
+                    // 票 #96：按当前登录方式分派
+                    when (uiState.selectedMethod) {
+                        LoginMethod.PLATFORM_PASSWORD -> {
+                            val result = PasswordLoginUseCase(
+                                context = appContext,
+                                studentNo = account,
+                                password = password,
+                                deviceId = deviceId,
+                            )
+                            submitting = false
+                            handlePasswordResult(result)
                         }
-                        is com.nongyu.appplus.login.session.PasswordLoginResult.Failure -> {
-                            val action = LoginFailurePolicy.decide(result.failure)
-                            val code = (result.failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
-                            when (action) {
-                                LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
-                                    // 自动切统一身份认证 tab；account/password 保留在 UI state，
-                                    // 并由 savedAccount/savedPassword 回灌表单，不清空输入（票 #92）
-                                    uiState = LoginCenterUiState.initial()
-                                    inlineMessage = LoginFailurePolicy.messageOf(code)
-                                }
-                                LoginFailureAction.SHOW_MESSAGE ->
-                                    inlineMessage = LoginFailurePolicy.messageOf(code)
-                                LoginFailureAction.SILENT -> inlineMessage = null
-                            }
+                        LoginMethod.CAMPUS_PASSWORD -> {
+                            val r = CampusSsoLoginUseCase.production(appContext).loginWithPassword(
+                                studentNo = campusValues["studentNo"].orEmpty(),
+                                password = campusValues["password"].orEmpty(),
+                                captchaCode = campusValues["captchaCode"].orEmpty(),
+                                deviceId = deviceId,
+                            )
+                            submitting = false
+                            handleCampusResult(r)
+                        }
+                        LoginMethod.CAMPUS_PHONE -> {
+                            val r = CampusSsoLoginUseCase.production(appContext).loginWithPhone(
+                                phone = campusValues["phone"].orEmpty(),
+                                captchaCode = campusValues["captchaCode"].orEmpty(),
+                                smsCode = campusValues["smsCode"].orEmpty(),
+                                deviceId = deviceId,
+                            )
+                            submitting = false
+                            handleCampusResult(r)
+                        }
+                        LoginMethod.CAMPUS_WECHAT -> {
+                            // 扫码完成感知待真机/抓包实测（票 #97），不臆造轮询
+                            submitting = false
+                            inlineMessage = "扫码登录待真机实测（见票 #97）"
+                        }
+                        LoginMethod.PLATFORM_MAIL -> {
+                            submitting = false
+                            inlineMessage = "邮箱验证码登录待票 S4 接入"
+                        }
+                        LoginMethod.PLATFORM_OAUTH -> {
+                            submitting = false
                         }
                     }
                     hintTick++
@@ -284,6 +350,7 @@ fun LoginCenterScreen() {
                 .navigationBarsPadding()
                 .padding(bottom = 148.dp),
         )
+
 
         // ---- 屏幕底部署名「IOT 工作室制作」----
         // 用 navigationBarsPadding 避开系统导航栏，不会被遮挡

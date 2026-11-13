@@ -2,6 +2,7 @@ package com.nongyu.appplus.login.ui
 
 import com.nongyu.appplus.login.model.LoginMethod
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -68,6 +69,8 @@ fun LoginFormBox(
     /** 外部持有的账密值（票 #92）：切认证域回来后输入框仍保留内容，不清空。 */
     savedAccount: String = "",
     savedPassword: String = "",
+    /** 统一身份认证三格输入上报（票 #96）：key 为字段名，value 为用户输入。 */
+    onFormValuesChanged: (Map<String, String>) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -104,22 +107,31 @@ fun LoginFormBox(
 
             LoginMethod.CAMPUS_PASSWORD -> {
                 FormTitle("统一身份认证账密", colors)
-                FormField("请输入学号", colors)
-                FormField("请输入密码", colors, isPassword = true)
-                CaptchaRow("请输入验证码", colors)
+                val values = remember { mutableMapOf<String, String>() }
+                fun put(k: String, v: String) {
+                    values[k] = v
+                    onFormValuesChanged(values.toMap())
+                }
+                FormField("请输入学号", colors, onValueChange = { put("studentNo", it) })
+                FormField("请输入密码", colors, isPassword = true, onValueChange = { put("password", it) })
+                CaptchaRow("请输入验证码", colors, onValueChange = { put("captchaCode", it) })
             }
 
             LoginMethod.CAMPUS_PHONE -> {
                 FormTitle("统一身份认证手机号", colors)
-                FormField("请输入手机号", colors)
-                CaptchaRow("请输入图形验证码", colors)
-                FormField("请输入短信验证码", colors)
+                val values = remember { mutableMapOf<String, String>() }
+                fun put(k: String, v: String) {
+                    values[k] = v
+                    onFormValuesChanged(values.toMap())
+                }
+                FormField("请输入手机号", colors, onValueChange = { put("phone", it) })
+                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("captchaCode", it) })
+                FormField("请输入短信验证码", colors, onValueChange = { put("smsCode", it) })
             }
 
             LoginMethod.CAMPUS_WECHAT -> {
                 FormTitle("统一身份认证微信登录", colors)
-                QrPlaceholder(colors)
-                PrimaryWideButton("下载图片并跳转微信", colors)
+                WechatQrPanel(colors)
             }
 
             LoginMethod.PLATFORM_MAIL -> {
@@ -233,13 +245,14 @@ private fun FormField(
 private fun CaptchaRow(
     placeholder: String,
     colors: NongyuColors,
+    onValueChange: (String) -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(modifier = Modifier.weight(1f)) {
-            FormField(placeholder, colors)
+            FormField(placeholder, colors, onValueChange = onValueChange)
         }
         Spacer(Modifier.width(12.dp))
         CaptchaImage(colors)
@@ -279,52 +292,114 @@ private fun CaptchaImage(colors: NongyuColors) {
     }
 }
 
-/** 二维码占位（矢量方块网格），示意「二维码图」。 */
+/** 微信扫码独立面板（票 #96）。
+ *
+ * - 中心码由 App 本地矢量绘制占位（不嵌整页 WebView、不引微信开放平台 SDK、
+ *   不逆向 `weixin://` 私有 scheme）；
+ * - 状态：加载中「正在获取二维码…」→ 已显示「请使用微信扫码登录」→
+ *   失效「二维码已失效，请刷新」并支持刷新；
+ * - **扫码完成感知机制显式标注待真机/抓包实测（票 #97）**：二维码的 state 是
+ *   学校平台服务端下发的一次性串（知识库 `川农统一身份认证「微信扫码登录」实证形态`），
+ *   App 无法自拼 URL，也不臆测轮询端点形状。用户扫码确认后合理时间内进入
+ *   `method=school` 提交，由 #97 承接。
+ */
 @Composable
-private fun QrPlaceholder(colors: NongyuColors) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-            .background(colors.surface.colorCard, RoundedCornerShape(14.dp)),
-        contentAlignment = Alignment.Center,
+private fun WechatQrPanel(colors: NongyuColors) {
+    var state by remember { mutableStateOf(QrState.LOADING) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Canvas(modifier = Modifier.size(150.dp)) {
-            val n = 8
-            val cell = size.width / n
-            // 三个角的定位块（finder pattern 示意）
-            listOf(0 to 0, n - 2 to 0, 0 to n - 2).forEach { (cx, cy) ->
-                drawRect(
-                    color = colors.surface.colorText,
-                    topLeft = Offset(cx * cell, cy * cell),
-                    size = Size(cell * 2, cell * 2),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(colors.surface.colorCard, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (state == QrState.LOADING) {
+                Text(
+                    text = "正在获取二维码…",
+                    color = colors.surface.colorTextSecondary,
+                    fontSize = 13.sp,
                 )
+            } else {
+                // 本地矢量二维码占位：三个定位块 + 数据块（不引二维码生成库）
+                Canvas(modifier = Modifier.size(150.dp)) {
+                    val n = 8
+                    val cell = size.width / n
+                    listOf(0 to 0, n - 2 to 0, 0 to n - 2).forEach { (cx, cy) ->
+                        drawRect(
+                            color = colors.surface.colorText,
+                            topLeft = Offset(cx * cell, cy * cell),
+                            size = Size(cell * 2, cell * 2),
+                        )
+                    }
+                    for (i in 2..5) {
+                        drawRect(
+                            color = colors.surface.colorText.copy(alpha = 0.55f),
+                            topLeft = Offset(i * cell, ((i % 4) + 2) * cell),
+                            size = Size(cell, cell),
+                        )
+                    }
+                    drawRect(
+                        color = colors.surface.colorOutline,
+                        size = this.size,
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                }
             }
-            // 数据块示意
-            for (i in 2..5) {
-                drawRect(
-                    color = colors.surface.colorText.copy(alpha = 0.55f),
-                    topLeft = Offset(i * cell, ((i % 4) + 2) * cell),
-                    size = Size(cell, cell),
-                )
-            }
-            drawRect(
-                color = colors.surface.colorOutline,
-                size = this.size,
-                style = Stroke(width = 1.dp.toPx()),
-            )
         }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = when (state) {
+                QrState.LOADING -> "正在获取二维码…"
+                QrState.SHOWN -> "请使用微信扫码登录"
+                QrState.EXPIRED -> "二维码已失效，请刷新"
+            },
+            color = if (state == QrState.EXPIRED) colors.brand.colorBrand
+                    else colors.surface.colorTextSecondary,
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(12.dp))
+        PrimaryWideButton(
+            text = if (state == QrState.EXPIRED) "刷新二维码" else "刷新",
+            colors = colors,
+            onClick = { state = QrState.SHOWN },
+        )
+
+        // 显式标注：扫码完成感知待实测（票 #97 / 规格 #89）
+        Text(
+            text = "扫码完成感知机制待真机/抓包实测（票 #97）",
+            color = colors.surface.colorTextSecondary.copy(alpha = 0.6f),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
     }
 }
 
-/** 整宽主按钮（矢量圆角矩形 + 文字）。 */
+/** 微信二维码面板状态（票 #96）。 */
+private enum class QrState { LOADING, SHOWN, EXPIRED }
+
+/** 整宽主按钮（矢量圆角矩形 + 文字），可点击。 */
 @Composable
-private fun PrimaryWideButton(text: String, colors: NongyuColors) {
+private fun PrimaryWideButton(
+    text: String,
+    colors: NongyuColors,
+    onClick: () -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp)
-            .background(colors.brand.colorBrand, RoundedCornerShape(12.dp)),
+            .background(colors.brand.colorBrand, RoundedCornerShape(12.dp))
+            .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Text(
