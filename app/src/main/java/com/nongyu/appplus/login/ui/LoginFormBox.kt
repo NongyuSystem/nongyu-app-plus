@@ -28,13 +28,21 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -110,55 +118,63 @@ fun LoginFormBox(
         // 组件间隔拉开：原 12dp → 20dp
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+
+
         when (method) {
             LoginMethod.PLATFORM_PASSWORD -> {
-                FormTitle("平台内账号密码", colors)
+                PullIn(0, method) { FormTitle("平台内账号密码", colors) }
                 // 票 #92：账密两格的值上报给 UI，供登录用例组装请求
                 var studentNo by remember { mutableStateOf(savedAccount) }
                 var password by remember { mutableStateOf(savedPassword) }
-                FormField("请输入账号", colors, value = studentNo) {
-                    studentNo = it
-                    onCredentialsChanged(studentNo, password)
+                PullIn(1, method) {
+                    FormField("请输入账号", colors, value = studentNo) {
+                        studentNo = it
+                        onCredentialsChanged(studentNo, password)
+                    }
                 }
-                FormField("请输入密码", colors, isPassword = true, value = password) {
-                    password = it
-                    onCredentialsChanged(studentNo, password)
+                PullIn(2, method) {
+                    FormField("请输入密码", colors, isPassword = true, value = password) {
+                        password = it
+                        onCredentialsChanged(studentNo, password)
+                    }
                 }
             }
 
             LoginMethod.CAMPUS_PASSWORD -> {
-                FormTitle("统一身份认证账密", colors)
+                PullIn(0, method) { FormTitle("统一身份认证账密", colors) }
                 val values = remember { mutableMapOf<String, String>() }
                 fun put(k: String, v: String) {
                     values[k] = v
                     onFormValuesChanged(values.toMap())
                 }
-                FormField("请输入学号", colors, onValueChange = { put("pwStudentNo", it) })
-                FormField("请输入密码", colors, isPassword = true, onValueChange = { put("pwPassword", it) })
-                CaptchaRow("请输入验证码", colors, onValueChange = { put("pwCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
+                PullIn(1, method) { FormField("请输入学号", colors, onValueChange = { put("pwStudentNo", it) }) }
+                PullIn(2, method) { FormField("请输入密码", colors, isPassword = true, onValueChange = { put("pwPassword", it) }) }
+                PullIn(3, method) { CaptchaRow("请输入验证码", colors, onValueChange = { put("pwCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha) }
             }
 
             LoginMethod.CAMPUS_PHONE -> {
-                FormTitle("统一身份认证手机号", colors)
+                PullIn(0, method) { FormTitle("统一身份认证手机号", colors) }
                 val values = remember { mutableMapOf<String, String>() }
                 fun put(k: String, v: String) {
                     values[k] = v
                     onFormValuesChanged(values.toMap())
                 }
-                FormField("请输入手机号", colors, onValueChange = { put("smsPhone", it) })
-                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("smsCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
-                FormFieldWithAction(
-                    placeholder = "请输入短信验证码",
-                    actionState = smsCodeState,
-                    colors = colors,
-                    onAction = onRequestSmsCode,
-                    onValueChange = { put("smsCode", it) },
-                )
+                PullIn(1, method) { FormField("请输入手机号", colors, onValueChange = { put("smsPhone", it) }) }
+                PullIn(2, method) { CaptchaRow("请输入图形验证码", colors, onValueChange = { put("smsCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha) }
+                PullIn(3, method) {
+                    FormFieldWithAction(
+                        placeholder = "请输入短信验证码",
+                        actionState = smsCodeState,
+                        colors = colors,
+                        onAction = onRequestSmsCode,
+                        onValueChange = { put("smsCode", it) },
+                    )
+                }
             }
 
             LoginMethod.CAMPUS_WECHAT -> {
-                FormTitle("统一身份认证微信登录", colors)
-                WechatQrPanel(
+                PullIn(0, method) { FormTitle("统一身份认证微信登录", colors) }
+                PullIn(1, method) { WechatQrPanel(
                     colors = colors,
                     qrState = wechatQrState,
                     qrUrl = wechatQrUrl,
@@ -170,40 +186,144 @@ fun LoginFormBox(
                     onRefresh = onRefreshWechatQr,
                     onDownloadAndOpenWechat = onDownloadAndOpenWechat,
                     onCopyAndOpenWechat = onCopyAndOpenWechat,
-                )
+                    )
+                }
             }
 
             LoginMethod.PLATFORM_MAIL -> {
-                FormTitle("邮箱验证码", colors)
+                PullIn(0, method) { FormTitle("邮箱验证码", colors) }
                 val values = remember { mutableMapOf<String, String>() }
                 fun put(k: String, v: String) {
                     values[k] = v
                     onFormValuesChanged(values.toMap())
                 }
-                FormField("请输入邮箱", colors, onValueChange = { put("email", it) })
+                PullIn(1, method) { FormField("请输入邮箱", colors, onValueChange = { put("email", it) }) }
                 // 邮箱发码后端不校验图形码，这张图是**前端本地**生成并本地校验的
                 // （交互约束，不是安全边界；防刷靠后端 Cooldown）
-                LocalCaptchaRow(
-                    placeholder = "请输入图形验证码",
-                    captcha = localCaptcha,
-                    colors = colors,
-                    onValueChange = { put("localCaptchaCode", it) },
-                    onRefresh = onRefreshLocalCaptcha,
-                )
-                FormFieldWithAction(
-                    placeholder = "请输入邮箱验证码",
-                    actionState = mailCodeState,
-                    colors = colors,
-                    onAction = onRequestMailCode,
-                    onValueChange = { put("mailCode", it) },
-                )
+                PullIn(2, method) {
+                    LocalCaptchaRow(
+                        placeholder = "请输入图形验证码",
+                        captcha = localCaptcha,
+                        colors = colors,
+                        onValueChange = { put("localCaptchaCode", it) },
+                        onRefresh = onRefreshLocalCaptcha,
+                    )
+                }
+                PullIn(3, method) {
+                    FormFieldWithAction(
+                        placeholder = "请输入邮箱验证码",
+                        actionState = mailCodeState,
+                        colors = colors,
+                        onAction = onRequestMailCode,
+                        onValueChange = { put("mailCode", it) },
+                    )
+                }
             }
 
             // oauth 本期禁用，不会进入表单
             LoginMethod.PLATFORM_OAUTH -> {
-                FormTitle("暂未开放", colors)
+                PullIn(0, method) { FormTitle("暂未开放", colors) }
             }
         }
+    }
+}
+
+/**
+ * 眼睛图标：纯矢量路径绘制（等价 SVG），无矩形外框。
+ *
+ * - 睁眼：椭圆眼眶 + 实心瞳孔 + 上方高光
+ * - 闭眼：眼眶改画一条下弯弧线 + 三根睫毛，表示"隐藏"
+ */
+@Composable
+private fun EyeIcon(visible: Boolean, colors: NongyuColors) {
+    val tint = colors.surface.colorTextSecondary
+    Canvas(modifier = Modifier.size(22.dp)) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val cy = h / 2f
+        val rx = w * 0.40f
+        val ry = h * 0.26f
+        val stroke = 1.6.dp.toPx()
+
+        // 眼眶
+        if (visible) {
+            drawOval(
+                color = tint,
+                topLeft = Offset(cx - rx, cy - ry),
+                size = Size(rx * 2, ry * 2),
+                style = Stroke(width = stroke),
+            )
+            // 瞳孔
+            drawCircle(color = tint, radius = h * 0.11f, center = Offset(cx, cy))
+            // 高光
+            drawCircle(
+                color = colors.surface.colorCard,
+                radius = h * 0.035f,
+                center = Offset(cx - h * 0.035f, cy - h * 0.035f),
+            )
+        } else {
+            // 闭眼：下弯弧线
+            val path = Path().apply {
+                moveTo(cx - rx, cy)
+                quadraticBezierTo(cx, cy + ry * 1.6f, cx + rx, cy)
+            }
+            drawPath(path, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+            // 三根睫毛
+            listOf(-0.6f, 0f, 0.6f).forEach { k ->
+                val x = cx + rx * k
+                drawLine(
+                    color = tint,
+                    start = Offset(x, cy + ry * 0.45f),
+                    end = Offset(x + rx * 0.12f, cy + ry * 1.05f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 表单内第 [index] 个组件的「拉出式」入场包装（顶层函数，避免局部 @Composable 限制）。
+ *
+ * [method] 变化时整组重新入场；各组件按 index 错峰（每个 +60ms），
+ * 从最上方 -120dp 处移动到最终位置，同时淡入。
+ */
+@Composable
+private fun PullIn(index: Int, method: LoginMethod, content: @Composable () -> Unit) {
+    PullInItem(index = index, key = method) { content() }
+}
+
+/**
+ * 「拉出式」入场：组件从最上方偏移处一个一个移动到最终位置，配合淡入。
+ *
+ * @param index 该组件在列表中的序号，决定错峰延迟（每个 +60ms）
+ * @param key 切换登录方式时变化的值，用于重新触发入场
+ */
+@Composable
+private fun PullInItem(
+    index: Int,
+    key: Any?,
+    content: @Composable () -> Unit,
+) {
+    var visible by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) {
+        delay((index * 60L).coerceAtMost(600L))
+        visible = true
+    }
+    val progress by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 420),
+        label = "pullIn",
+    )
+    Box(
+        modifier = Modifier.graphicsLayer {
+            translationY = (-120.dp.toPx()) * (1f - progress)
+            alpha = progress
+        },
+    ) {
+        content()
     }
 }
 
@@ -239,6 +359,8 @@ private fun FormField(
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val showPlaceholder = !focused && text.isEmpty()
+    // 密码可见性：睁眼=明文，闭眼（默认）=星号
+    var passwordVisible by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -261,7 +383,10 @@ private fun FormField(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 14.dp),
+                .padding(
+                    start = 14.dp,
+                    end = if (isPassword) 44.dp else 14.dp,
+                ),
             contentAlignment = Alignment.CenterStart,
         ) {
             if (showPlaceholder) {
@@ -283,7 +408,7 @@ private fun FormField(
                     fontSize = 13.sp,
                 ),
                 cursorBrush = SolidColor(colors.brand.colorBrand),
-                visualTransformation = if (isPassword) {
+                visualTransformation = if (isPassword && !passwordVisible) {
                     PasswordVisualTransformation()
                 } else {
                     VisualTransformation.None
@@ -291,6 +416,23 @@ private fun FormField(
                 interactionSource = interaction,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        // 密码框尾部：纯图案眼睛按钮（无外框、无水波纹）
+        if (isPassword) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(40.dp)
+                    // 无 indication → 不产生水波纹
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { passwordVisible = !passwordVisible },
+                contentAlignment = Alignment.Center,
+            ) {
+                EyeIcon(visible = passwordVisible, colors = colors)
+            }
         }
     }
 }
@@ -327,6 +469,8 @@ private fun FormFieldWithAction(
                     else colors.surface.colorCard,
                     RoundedCornerShape(12.dp),
                 )
+                // clip 放在 clickable 之前，让水波纹按圆角矩形边界扩散（否则是直角矩形）
+                .clip(RoundedCornerShape(12.dp))
                 .clickable(enabled = actionState.enabled) { onAction() }
                 .padding(horizontal = 10.dp),
             contentAlignment = Alignment.Center,
@@ -526,26 +670,22 @@ private fun WechatQrPanel(
         )
 
         Spacer(Modifier.height(12.dp))
-        // 两个按钮：下载二维码并跳转微信 / 复制链接并跳转微信
-        Row(
+        // 两个按钮：上下排布（按维护者要求），各占满一行
+        PanelButton(
+            text = "下载二维码并跳转微信",
+            colors = colors,
+            enabled = qrState == WechatQrState.READY,
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            PanelButton(
-                text = "下载二维码并跳转微信",
-                colors = colors,
-                enabled = qrState == WechatQrState.READY,
-                modifier = Modifier.weight(1f),
-                onClick = onDownloadAndOpenWechat,
-            )
-            PanelButton(
-                text = "复制链接并跳转微信",
-                colors = colors,
-                enabled = qrState == WechatQrState.READY,
-                modifier = Modifier.weight(1f),
-                onClick = onCopyAndOpenWechat,
-            )
-        }
+            onClick = onDownloadAndOpenWechat,
+        )
+        Spacer(Modifier.height(10.dp))
+        PanelButton(
+            text = "复制链接并跳转微信",
+            colors = colors,
+            enabled = qrState == WechatQrState.READY,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onCopyAndOpenWechat,
+        )
 
         Spacer(Modifier.height(8.dp))
         Text(
@@ -576,6 +716,7 @@ private fun PanelButton(
                 if (enabled) colors.brand.colorBrandMuted else colors.surface.colorCard,
                 RoundedCornerShape(10.dp),
             )
+            .clip(RoundedCornerShape(10.dp))
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,

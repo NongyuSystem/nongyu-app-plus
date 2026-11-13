@@ -136,6 +136,7 @@ fun LoginCenterScreen() {
     var wechatQrUrl by remember { mutableStateOf<String?>(null) }
     var wechatQrStateToken by remember { mutableStateOf<String?>(null) }
     var wechatPollActive by remember { mutableStateOf(false) }
+    var wechatPollFailCount by remember { mutableStateOf(0) }
 
     // 切换到微信格时自动取码
     LaunchedEffect(uiState.selectedMethod) {
@@ -164,35 +165,58 @@ fun LoginCenterScreen() {
             kotlinx.coroutines.delay(1_500)
             when (val r = campusUseCase.pollQrResult(token)) {
                 is CasQrPollResult.Scanned -> {
+                    // 命中即彻底停止：不能只置 false 又让别的分支重启取码
                     wechatPollActive = false
+                    wechatQrStateToken = null
                     submitting = true
+                    android.util.Log.d("NongyuWechatQr", "扫码完成，提交 method=school")
                     try {
                         val res = campusUseCase.submitCredential(
                             r.credential, DeviceIdStore.getOrCreate(appContext),
                         )
                         when (res) {
-                            is SchoolLoginResult.Success -> showHint(null)
+                            is SchoolLoginResult.Success -> {
+                                android.util.Log.d("NongyuWechatQr", "method=school 成功，应已切主界面")
+                                showHint(null)
+                            }
                             is SchoolLoginResult.Failure -> {
                                 val failure = res.failure
-                                if (failure == null) {
-                                    showHint(res.message.ifBlank { null })
-                                } else {
-                                    val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
-                                    when (LoginFailurePolicy.decide(failure)) {
-                                        LoginFailureAction.SILENT -> showHint(null)
-                                        else -> showHint(LoginFailurePolicy.messageOf(code))
+                                val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                                // 扫码是用户主动等待的动作，**任何失败都给可见提示**，
+                                // 不沿用"弱网零提示"口径（否则表现为"扫了没反应"）。
+                                val msg = LoginFailurePolicy.messageOf(code)
+                                    ?: res.message.takeIf { it.isNotBlank() }
+                                    ?: when (failure) {
+                                        is com.nongyu.appplus.net.core.ApiFailure.Timeout -> "登录超时，请重新扫码"
+                                        is com.nongyu.appplus.net.core.ApiFailure.Network -> "网络不可用，请重新扫码"
+                                        else -> "登录失败，请重新扫码"
                                     }
-                                }
+                                android.util.Log.d("NongyuWechatQr", "method=school 失败 code=$code msg=$msg")
+                                showHint(msg)
+                                wechatQrState = WechatQrState.FAILED
                             }
                         }
+                    } catch (e: Exception) {
+                        android.util.Log.w("NongyuWechatQr", "提交异常", e)
+                        showHint("登录失败，请重新扫码")
+                        wechatQrState = WechatQrState.FAILED
                     } finally {
                         submitting = false
                     }
+                    return@LaunchedEffect   // 命中后退出轮询循环，别再取新码
                 }
-                is CasQrPollResult.Pending -> Unit
+                is CasQrPollResult.Pending -> wechatPollFailCount = 0
                 is CasQrPollResult.Failure -> {
-                    // 失败不终止轮询（可能瞬时抖动），但记录
-                    if (r.message.isNotBlank()) showHint(r.message)
+                    // 瞬时抖动允许重试；但持续失败要停轮询并让用户刷新，
+                    // 否则界面永远停在"请使用微信扫一扫登录"。
+                    wechatPollFailCount++
+                    if (wechatPollFailCount >= 5) {
+                        wechatPollActive = false
+                        wechatQrState = WechatQrState.FAILED
+                        showHint(r.message.ifBlank { "二维码已失效，请刷新" })
+                    } else if (r.message.isNotBlank()) {
+                        showHint(r.message)
+                    }
                 }
             }
         }
@@ -413,6 +437,7 @@ fun LoginCenterScreen() {
                     wechatQrUrl = null
                     wechatQrStateToken = null
                     wechatQrState = WechatQrState.LOADING
+                    wechatPollFailCount = 0
                     scope.launch {
                         when (val r = campusUseCase.fetchLoginQr()) {
                             is CasQrFetchResult.Success -> {

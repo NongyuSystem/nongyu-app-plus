@@ -191,6 +191,11 @@ class CasLoginUseCase(
         }
         // 判定"已扫码"：以 Set-Cookie 里抓到合法 tgt 为准（权威文档 §1）
         val tgtFromCookie = tgtInterceptor.lastTgt()
+        logger.log(
+            NongyuLogger.Level.DEBUG,
+            "pollQr: code=${envelope.code} scanned=${result.isScanned} bodyTgt=${result.tgt?.take(20)} " +
+                "cookieTgt=${tgtFromCookie?.take(20)} user=${result.user?.name}",
+        )
         if (tgtFromCookie == null && !result.isScanned) return CasQrPollResult.Pending
 
         if (tgtFromCookie == null) {
