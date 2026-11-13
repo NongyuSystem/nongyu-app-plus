@@ -1,6 +1,9 @@
 package com.nongyu.appplus.login.ui
 
 import kotlinx.coroutines.launch
+import com.nongyu.appplus.login.model.VerificationCodeButtonState
+import com.nongyu.appplus.login.session.MailCodeSender
+import com.nongyu.appplus.login.session.MailCodeSendResult
 import com.nongyu.appplus.login.session.CampusSsoLoginUseCase
 import com.nongyu.appplus.login.session.SchoolLoginResult
 import com.nongyu.appplus.login.session.PasswordLoginUseCase
@@ -111,6 +114,24 @@ fun LoginCenterScreen() {
     var campusCaptcha by remember { mutableStateOf<com.nongyu.appplus.login.data.cas.CasCaptcha?>(null) }
     // 缓存编排器，避免每次点击都重建 OkHttp/Retrofit
     val campusUseCase = remember { CampusSsoLoginUseCase.production(appContext) }
+    val mailCodeSender = remember { MailCodeSender.production(appContext) }
+    // 「获取验证码」按钮状态（短信 / 邮箱各一份）
+    var smsCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
+    var mailCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
+
+    // 倒计时：每秒推进
+    LaunchedEffect(smsCodeState.remainingSeconds) {
+        if (smsCodeState.remainingSeconds > 0) {
+            kotlinx.coroutines.delay(1_000)
+            smsCodeState = smsCodeState.tick()
+        }
+    }
+    LaunchedEffect(mailCodeState.remainingSeconds) {
+        if (mailCodeState.remainingSeconds > 0) {
+            kotlinx.coroutines.delay(1_000)
+            mailCodeState = mailCodeState.tick()
+        }
+    }
 
     // 进入统一身份认证账密/短信两格时自动取一张图形验证码（一次性，展示给用户）
     LaunchedEffect(uiState.selectedMethod) {
@@ -255,6 +276,60 @@ fun LoginCenterScreen() {
                 savedPassword = password,
                 onFormValuesChanged = { campusValues = it },
                 captchaImage = campusCaptcha?.image,
+                smsCodeState = smsCodeState,
+                mailCodeState = mailCodeState,
+                onRequestSmsCode = {
+                    // 短信码：先要有图形验证码（一次性），再发短信
+                    if (!submitting && smsCodeState.enabled) {
+                        scope.launch {
+                            smsCodeState = smsCodeState.onStarted()
+                            try {
+                                val cap = campusCaptcha
+                                if (cap == null) {
+                                    inlineMessage = "请先获取图形验证码"
+                                    smsCodeState = smsCodeState.onFailed()
+                                    return@launch
+                                }
+                                when (
+                                    val r = campusUseCase.sendSmsCode(
+                                        phone = campusValues["phone"].orEmpty(),
+                                        captcha = cap,
+                                        captchaCode = campusValues["captchaCode"].orEmpty(),
+                                    )
+                                ) {
+                                    is com.nongyu.appplus.login.data.cas.CasSmsSendResult.Success ->
+                                        smsCodeState = smsCodeState.onSucceeded()
+                                    is com.nongyu.appplus.login.data.cas.CasSmsSendResult.Failure -> {
+                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                        smsCodeState = smsCodeState.onFailed()
+                                    }
+                                }
+                            } finally {
+                                if (smsCodeState.sending) smsCodeState = smsCodeState.onFailed()
+                            }
+                        }
+                    }
+                },
+                onRequestMailCode = {
+                    // 邮箱码：不需要图形验证码
+                    if (!submitting && mailCodeState.enabled) {
+                        scope.launch {
+                            mailCodeState = mailCodeState.onStarted()
+                            try {
+                                when (val r = mailCodeSender.send(campusValues["email"].orEmpty())) {
+                                    is MailCodeSendResult.Success ->
+                                        mailCodeState = mailCodeState.onSucceeded()
+                                    is MailCodeSendResult.Failure -> {
+                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                        mailCodeState = mailCodeState.onFailed()
+                                    }
+                                }
+                            } finally {
+                                if (mailCodeState.sending) mailCodeState = mailCodeState.onFailed()
+                            }
+                        }
+                    }
+                },
                 onRefreshCaptcha = {
                     if (!submitting) {
                         scope.launch {

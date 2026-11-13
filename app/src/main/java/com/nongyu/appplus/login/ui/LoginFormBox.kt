@@ -1,6 +1,7 @@
 package com.nongyu.appplus.login.ui
 
 import com.nongyu.appplus.login.model.LoginMethod
+import com.nongyu.appplus.login.model.VerificationCodeButtonState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -79,6 +81,14 @@ fun LoginFormBox(
     captchaImage: String? = null,
     /** 点验证码图换一张。 */
     onRefreshCaptcha: () -> Unit = {},
+    /** 短信验证码按钮状态（票 #89 文案状态机）。 */
+    smsCodeState: VerificationCodeButtonState = VerificationCodeButtonState(),
+    /** 邮箱验证码按钮状态。 */
+    mailCodeState: VerificationCodeButtonState = VerificationCodeButtonState(),
+    /** 点「获取验证码」发短信码（不是图形验证码）。 */
+    onRequestSmsCode: () -> Unit = {},
+    /** 点「获取验证码」发邮箱码。 */
+    onRequestMailCode: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -134,7 +144,13 @@ fun LoginFormBox(
                 }
                 FormField("请输入手机号", colors, onValueChange = { put("phone", it) })
                 CaptchaRow("请输入图形验证码", colors, onValueChange = { put("captchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
-                FormField("请输入短信验证码", colors, onValueChange = { put("smsCode", it) })
+                FormFieldWithAction(
+                    placeholder = "请输入短信验证码",
+                    actionState = smsCodeState,
+                    colors = colors,
+                    onAction = onRequestSmsCode,
+                    onValueChange = { put("smsCode", it) },
+                )
             }
 
             LoginMethod.CAMPUS_WECHAT -> {
@@ -144,9 +160,20 @@ fun LoginFormBox(
 
             LoginMethod.PLATFORM_MAIL -> {
                 FormTitle("邮箱验证码", colors)
-                FormField("请输入邮箱", colors)
+                val values = remember { mutableMapOf<String, String>() }
+                fun put(k: String, v: String) {
+                    values[k] = v
+                    onFormValuesChanged(values.toMap())
+                }
+                FormField("请输入邮箱", colors, onValueChange = { put("email", it) })
                 CaptchaRow("请输入图形验证码", colors)
-                FormField("请输入邮箱验证码", colors)
+                FormFieldWithAction(
+                    placeholder = "请输入邮箱验证码",
+                    actionState = mailCodeState,
+                    colors = colors,
+                    onAction = onRequestMailCode,
+                    onValueChange = { put("mailCode", it) },
+                )
             }
 
             // oauth 本期禁用，不会进入表单
@@ -240,6 +267,53 @@ private fun FormField(
                 },
                 interactionSource = interaction,
                 modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * 输入框 + 右侧「获取验证码」按钮（票 #89 文案状态机）。
+ *
+ * 用于**短信验证码**与**邮箱验证码**（不是图形验证码）：
+ * 按钮贴在输入框右侧，文案与可用性由 [VerificationCodeButtonState] 驱动
+ * （获取验证码 → 发送中… → 重新获取（Ns）→ 重新获取）。
+ */
+@Composable
+private fun FormFieldWithAction(
+    placeholder: String,
+    actionState: VerificationCodeButtonState,
+    colors: NongyuColors,
+    onAction: () -> Unit,
+    onValueChange: (String) -> Unit = {},
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            FormField(placeholder, colors, onValueChange = onValueChange)
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .height(48.dp)
+                .widthIn(min = 104.dp)
+                .background(
+                    if (actionState.enabled) colors.brand.colorBrandMuted
+                    else colors.surface.colorCard,
+                    RoundedCornerShape(12.dp),
+                )
+                .clickable(enabled = actionState.enabled) { onAction() }
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = actionState.label,
+                color = if (actionState.enabled) colors.brand.colorBrand
+                        else colors.surface.colorTextSecondary.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
             )
         }
     }
