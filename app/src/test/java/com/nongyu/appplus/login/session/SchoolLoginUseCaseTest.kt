@@ -58,12 +58,12 @@ class SchoolLoginUseCaseTest {
     }
 
     @Test
-    fun `单枚 tgt 的不可用凭据不发请求`() = runTest {
+    fun `无 tgt 的凭据不发请求`() = runTest {
         val gw = FakeGateway()
-        val cred = CasCredential("TGT-ONLY", "go-admin-tgt=TGT-ONLY", emptySet())
+        // 没有 tgt 才是真不可用
+        val cred = CasCredential(null, "laravel_session=S", setOf("laravel_session"))
         val result = SchoolLoginUseCase(gw, FakeSession(), FakeNavigator()).invoke(cred, "dev-1")
         assertTrue(result is SchoolLoginResult.Failure)
-        assertTrue((result as SchoolLoginResult.Failure).message.contains("整套"))
         assertEquals(null, gw.lastBody)   // 没发请求
     }
 

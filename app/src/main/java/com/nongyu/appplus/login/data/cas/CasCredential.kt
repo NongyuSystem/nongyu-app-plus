@@ -20,7 +20,14 @@ data class CasCredential(
     /** 除 `go-admin-tgt` 外的其它同域 cookie 名（用于判定「整套」而非单枚）。 */
     val companionCookieNames: Set<String>,
 ) {
-    /** 是否可作为可用登录态交给 `method=school`。 */
+    /**
+     * 是否可作为可用登录态交给 `method=school`。
+     *
+     * 判据是**有没有 tgt**，不是"有没有配套 cookie"：
+     * 真站实测（2026-11-13）学校 CAS 的响应**不带 Set-Cookie**，
+     * tgt 是从登录响应/轮询结果里直接给的。配套 cookie 有则一并透传（利于后端续期），
+     * 没有也不算失败——否则会把成功当失败。
+     */
     val isUsable: Boolean
-        get() = !goAdminTgt.isNullOrBlank() && companionCookieNames.isNotEmpty()
+        get() = !goAdminTgt.isNullOrBlank()
 }

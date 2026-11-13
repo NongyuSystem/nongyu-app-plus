@@ -13,7 +13,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /** 邮箱验证码发送结果。 */
 sealed interface MailCodeSendResult {
     data object Success : MailCodeSendResult
-    data class Failure(val message: String) : MailCodeSendResult
+    /** @param failure 后端 ApiFailure，供上层按错误码给出准确文案（不再吞成空串）。 */
+    data class Failure(
+        val message: String,
+        val failure: com.nongyu.appplus.net.core.ApiFailure? = null,
+    ) : MailCodeSendResult
 }
 
 /**
@@ -37,7 +41,8 @@ class MailCodeSender(
         if (email.isBlank()) return@withContext MailCodeSendResult.Failure("")
         when (val outcome = gateway.sendMailCode(email.trim())) {
             is ApiCall.Outcome.Success -> MailCodeSendResult.Success
-            is ApiCall.Outcome.Failure -> MailCodeSendResult.Failure("")
+            // 保留 failure：上层要按 code 给准确文案（need_school_auth / too_many_attempts 等）
+            is ApiCall.Outcome.Failure -> MailCodeSendResult.Failure("", outcome.failure)
         }
     }
 

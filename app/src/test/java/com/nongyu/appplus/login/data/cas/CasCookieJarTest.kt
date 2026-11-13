@@ -53,10 +53,14 @@ class CasCookieJarTest {
     }
 
     @Test
-    fun `只有单枚 tgt 时 isUsable 为 false`() {
+    fun `只有单枚 tgt 时也算可用（真站响应本就不带 Set-Cookie）`() {
+        // 真站实测 2026-11-13：学校 CAS 的响应不带 Set-Cookie，tgt 是直接给的。
+        // 若要求"必须有配套 cookie"，会把成功当失败。
         val jar = CasCookieJar()
         jar.saveFromResponse(authUrl, listOf(cookie("go-admin-tgt", "TGT-ONLY")))
-        assertFalse(jar.toCredential().isUsable)
+        val cred = jar.toCredential()
+        assertTrue(cred.isUsable)
+        assertEquals("TGT-ONLY", cred.goAdminTgt)
     }
 
     @Test

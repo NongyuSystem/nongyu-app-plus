@@ -25,8 +25,12 @@ class CasLoginUseCaseTest {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        val (api, jar) = CasApiFactory.create(server.url("/").toString())
-        useCase = CasLoginUseCase(api, jar)
+        val client = CasApiFactory.create(server.url("/").toString())
+        useCase = CasLoginUseCase(
+            api = client.api,
+            jar = client.jar,
+            tgtInterceptor = client.tgtInterceptor,
+        )
     }
 
     @After
@@ -50,7 +54,8 @@ class CasLoginUseCaseTest {
         private fun loginOk() = MockResponse()
             .setResponseCode(200)
             .setBody("""{"requestId":"$LOGIN_REQ","code":200,"msg":"登录成功","data":"$LOGIN_DATA"}""")
-            .addHeader("Set-Cookie", "go-admin-tgt=201690:TGT:TEST; Path=/; HttpOnly")
+            // 关键：tgt 只能从 Set-Cookie 头取（body 里没有）
+            .addHeader("Set-Cookie", "go-admin-tgt=201690:TGT:TEST-VALUE; Path=/; Max-Age=864000; HttpOnly")
             .addHeader("Set-Cookie", "laravel_session=SESSION-TEST; Path=/; HttpOnly")
 
         private fun smsSendOk() = MockResponse().setResponseCode(200).setBody(
@@ -80,7 +85,7 @@ class CasLoginUseCaseTest {
         assertTrue(result is CasLoginResult.Success)
         val cred = (result as CasLoginResult.Success).credential
         assertTrue(cred.isUsable)
-        assertEquals("201690:TGT:TEST", cred.goAdminTgt)
+        assertEquals("201690:TGT:TEST-VALUE", cred.goAdminTgt)
         // 断言提交的请求体 uuid 与取码 uuid 一致（不重取）
         server.takeRequest() // captcha
         val loginReq = server.takeRequest()
@@ -155,17 +160,17 @@ class CasLoginUseCaseTest {
     }
 
     @Test
-    fun `登录成功但只拿到单枚 tgt 判为不可用`() = runTest {
+    fun `登录成功但只拿到单枚 tgt 仍算可用`() = runTest {
         server.enqueue(captchaOk())
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .setBody("""{"requestId":"r","code":200,"msg":"登录成功"}""")
-                .addHeader("Set-Cookie", "go-admin-tgt=TGT-ONLY; Path=/; HttpOnly"),
+                .addHeader("Set-Cookie", "go-admin-tgt=201690:TGT:ONLY; Path=/; Max-Age=864000; HttpOnly"),
         )
         val cap = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
         val result = useCase.loginWithPassword("20231234", "secret", cap, "a1b2")
-        assertTrue(result is CasLoginResult.Failure)
-        assertTrue((result as CasLoginResult.Failure).message.contains("整套"))
+        assertTrue(result is CasLoginResult.Success)
+        assertEquals("201690:TGT:ONLY", (result as CasLoginResult.Success).credential.goAdminTgt)
     }
 
     @Test
@@ -181,10 +186,12 @@ class CasLoginUseCaseTest {
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .setBody("""{"requestId":"r","code":200,"msg":"登录成功"}""")
-                .addHeader("Set-Cookie", "go-admin-tgt=NEW-TGT; Path=/; HttpOnly"),
+                .addHeader("Set-Cookie", "go-admin-tgt=201690:TGT:NEW; Path=/; Max-Age=864000; HttpOnly"),
         )
         val cap2 = (useCase.fetchCaptcha() as CasCaptchaResult.Success).captcha
         val second = useCase.loginWithPassword("n", "p", cap2, "c")
-        assertTrue(second is CasLoginResult.Failure)
+        // 罐已清空 → 拿到的是本次响应的 NEW-TGT，不含上次的 laravel_session
+        assertTrue(second is CasLoginResult.Success)
+        assertEquals("201690:TGT:NEW", (second as CasLoginResult.Success).credential.goAdminTgt)
     }
 }

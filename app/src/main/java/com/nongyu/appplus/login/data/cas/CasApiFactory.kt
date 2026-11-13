@@ -31,18 +31,28 @@ object CasApiFactory {
     fun create(
         baseUrl: String,
         cookieJar: CasCookieJar = CasCookieJar(),
+        tgtInterceptor: TgtCaptureInterceptor = TgtCaptureInterceptor(),
         client: OkHttpClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            // 从 Set-Cookie 头捕获 go-admin-tgt（HttpOnly，body 里没有）
+            .addInterceptor(tgtInterceptor)
             // 与旧 RN 工具包 CAS_TIMEOUT / CALLBACK_TIMEOUT 一致：15s 连接 / 20s 读
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .build(),
-    ): Pair<CasApi, CasCookieJar> {
+    ): CasClient {
         val api = Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(client)
             .build()
             .create(CasApi::class.java)
-        return api to cookieJar
+        return CasClient(api, cookieJar, tgtInterceptor)
     }
+
+    /** 一次装配产出的三件套。 */
+    data class CasClient(
+        val api: CasApi,
+        val jar: CasCookieJar,
+        val tgtInterceptor: TgtCaptureInterceptor,
+    )
 }

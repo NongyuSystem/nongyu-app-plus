@@ -37,6 +37,8 @@ import retrofit2.Response
 class CasLoginUseCase(
     private val api: CasApi,
     private val jar: CasCookieJar,
+    /** 从 Set-Cookie 抓 tgt 的拦截器（body 里没有 tgt）。 */
+    private val tgtInterceptor: TgtCaptureInterceptor = TgtCaptureInterceptor(),
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     /** 日志接缝：纯 JVM 测试默认 Noop；生产传 AndroidLogger（不直接用 android.util.Log）。 */
     private val logger: NongyuLogger = NongyuLogger.Noop,
@@ -187,15 +189,23 @@ class CasLoginUseCase(
         } catch (e: Exception) {
             return CasQrPollResult.Failure("")
         }
-        if (!result.isScanned) return CasQrPollResult.Pending
+        // 判定"已扫码"：以 Set-Cookie 里抓到合法 tgt 为准（权威文档 §1）
+        val tgtFromCookie = tgtInterceptor.lastTgt()
+        if (tgtFromCookie == null && !result.isScanned) return CasQrPollResult.Pending
 
-        // 扫码成功后 cookie 罐里应是 auth 域整套 cookie（与账密链路同一判定口径）
+        if (tgtFromCookie == null) {
+            // 轮询响应里带了 tgt 字段但 Set-Cookie 没有：**不能直接当 cookie 用**。
+            // 权威文档 §1.2 明确这是"把值来源搞错"的坑（会把非法值存进后端，
+            // 表现为能登录但画像全空）。这里必须拒绝并报错，而不是静默使用。
+            return CasQrPollResult.Failure(
+                "未从响应头拿到有效的登录凭据，请刷新二维码重试",
+            )
+        }
         val cred = jar.toCredential()
-        val tgt = result.tgt!!
         return CasQrPollResult.Scanned(
             CasCredential(
-                goAdminTgt = tgt,
-                cookieHeader = cred.cookieHeader.ifBlank { "go-admin-tgt=$tgt" },
+                goAdminTgt = tgtFromCookie,
+                cookieHeader = cred.cookieHeader,
                 companionCookieNames = cred.companionCookieNames,
             ),
         )
@@ -203,17 +213,30 @@ class CasLoginUseCase(
 
     // ------------------------------------------------------------------
 
-    /** 收口：整套 cookie 齐备才算成功，单枚 tgt 明确失败。 */
+    /**
+     * 收口：必须从 **`Set-Cookie` 头**拿到形态合法的 `go-admin-tgt`。
+     *
+     * 单枚 tgt 就够（权威文档 §1.1：`fetch.go:48` 只设一枚），
+     * 配套 cookie 属"更保险但非必要"，有则一并透传供后端续期。
+     * 拿不到合法 tgt 时要明确失败——否则后端会存进一个垃圾值，
+     * 表现为「能登录、有画像姓名、其他字段全空」且日志零线索。
+     */
     private fun credentialOrFailure(): CasLoginResult {
-        val cred = jar.toCredential()
-        return if (cred.isUsable) {
-            CasLoginResult.Success(cred)
-        } else {
-            CasLoginResult.Failure(
-                "统一身份认证未返回整套会话 cookie，请重试",
+        val tgt = tgtInterceptor.lastTgt()
+        if (tgt == null || !TgtValidator.looksLikeTgt(tgt)) {
+            return CasLoginResult.Failure(
+                "统一身份认证未返回有效的登录凭据（go-admin-tgt），请重试",
                 needRefreshCaptcha = true,
             )
         }
+        val cred = jar.toCredential()
+        return CasLoginResult.Success(
+            CasCredential(
+                goAdminTgt = tgt,
+                cookieHeader = cred.cookieHeader,
+                companionCookieNames = cred.companionCookieNames,
+            ),
+        )
     }
 
     /** 统一反序列化信封；失败/空响应返回 null（由调用方产出「零提示」文案）。 */

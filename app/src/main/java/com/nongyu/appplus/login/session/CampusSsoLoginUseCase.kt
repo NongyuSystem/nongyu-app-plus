@@ -120,8 +120,13 @@ class CampusSsoLoginUseCase(
     companion object {
         /** 生产装配：S6 直连真站 + `SchoolLoginUseCase` 提交农屿后端。 */
         fun production(context: Context): CampusSsoLoginUseCase {
-            val (api, jar) = CasApiFactory.create(CasApiFactory.REAL_BASE_URL)
-            val casUseCase = CasLoginUseCase(api, jar, logger = com.nongyu.appplus.net.api.http.AndroidLogger)
+            val client = CasApiFactory.create(CasApiFactory.REAL_BASE_URL)
+            val casUseCase = CasLoginUseCase(
+                api = client.api,
+                jar = client.jar,
+                logger = com.nongyu.appplus.net.api.http.AndroidLogger,
+                tgtInterceptor = client.tgtInterceptor,
+            )
             val schoolUseCase = SchoolLoginUseCase.production(context)
             val casPort = object : CasPort {
                 override suspend fun fetchCaptcha(): CasCaptchaResult = casUseCase.fetchCaptcha()

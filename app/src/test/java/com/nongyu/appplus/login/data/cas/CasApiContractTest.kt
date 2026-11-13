@@ -178,14 +178,14 @@ class CasApiContractTest {
     }
 
     @Test
-    fun `只有单枚 tgt 的响应不算可用登录态`() = runTest {
+    fun `只有单枚 tgt 的响应也算可用登录态（真站不带 Set-Cookie）`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(okEnvelope())
                 .addHeader("Set-Cookie", "go-admin-tgt=TGT-ONLY; Path=/; HttpOnly"),
         )
         api.login(body("""{"appid":"A","code":"c","number":"n","password":"p","uuid":"u"}"""))
         server.takeRequest()
-        assertFalse(jar.toCredential().isUsable)
+        assertTrue(jar.toCredential().isUsable)
     }
 
     // ---------- 统一身份认证平台错误不伪装成农屿错误码 ----------
