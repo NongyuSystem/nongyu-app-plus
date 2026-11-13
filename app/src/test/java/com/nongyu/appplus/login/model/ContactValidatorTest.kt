@@ -5,82 +5,47 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [ContactValidator] 纯 JVM 单测。
+ * [ContactValidator] 与后端 `validate.go` 对齐的单测。
  *
- * 口径：手机号 11 位 1[3-9] 开头；邮箱宽松（有 @、域名有 .、顶级域 ≥2 字母）。
- * 正例来自真实使用场景，反例覆盖「明显打错」的常见形态。
+ * 每条正例/反例都对应后端的一条规则，避免前端放过后端要 400 的输入。
  */
 class ContactValidatorTest {
 
-    // ---------- 手机号 ----------
+    // ---------- 学号：后端 ^[0-9]{9}$ ----------
 
     @Test
-    fun `常见手机号合法`() {
-        listOf("13800000000", "19912345678", "15012345678", "17712345678")
-            .forEach { assertTrue("应合法: $it", ContactValidator.isValidPhone(it)) }
-    }
-
-    @Test
-    fun `手机号首尾空白会被忽略`() {
-        assertTrue(ContactValidator.isValidPhone("  13800000000  "))
-    }
-
-    @Test
-    fun `位数不对不合法`() {
-        listOf("1380000000", "138000000000", "138000000").forEach {
-            assertFalse("应非法: $it", ContactValidator.isValidPhone(it))
+    fun `9位数字学号合法`() {
+        listOf("202502204", "123456789", "000000000").forEach {
+            assertTrue("应合法: $it", ContactValidator.isValidStudentNo(it))
         }
     }
 
     @Test
-    fun `不以1开头或第二位非法不合法`() {
-        listOf("23800000000", "12800000000", "10000000000").forEach {
-            assertFalse("应非法: $it", ContactValidator.isValidPhone(it))
+    fun `学号位数或字符不对不合法`() {
+        listOf("20250220", "2025022044", "20250220a", "", "  ", "2025 0220").forEach {
+            assertFalse("应非法: $it", ContactValidator.isValidStudentNo(it))
         }
     }
 
     @Test
-    fun `含非数字不合法`() {
-        listOf("1380000000a", "138-0000-0000", "138 0000 0000").forEach {
-            assertFalse("应非法: $it", ContactValidator.isValidPhone(it))
-        }
+    fun `学号null不合法`() {
+        assertFalse(ContactValidator.isValidStudentNo(null))
     }
 
-    @Test
-    fun `手机号空与null不合法`() {
-        assertFalse(ContactValidator.isValidPhone(null))
-        assertFalse(ContactValidator.isValidPhone(""))
-        assertFalse(ContactValidator.isValidPhone("   "))
-    }
-
-    // ---------- 邮箱 ----------
+    // ---------- 邮箱：后端 ^[^@\s]+@[^@\s]+\.[^@\s]+$、<=254 ----------
 
     @Test
     fun `常见邮箱合法`() {
-        listOf(
-            "a@b.com",
-            "student@sicau.edu.cn",
-            "first.last@example.com",
-            "user+tag@example.co.uk",
-            "x_y-z@sub.example.org",
-        ).forEach { assertTrue("应合法: $it", ContactValidator.isValidEmail(it)) }
-    }
-
-    @Test
-    fun `邮箱首尾空白会被忽略`() {
-        assertTrue(ContactValidator.isValidEmail("  a@b.com  "))
-    }
-
-    @Test
-    fun `缺at或缺域名不合法`() {
-        listOf("abc", "a@", "@b.com", "a@b").forEach {
-            assertFalse("应非法: $it", ContactValidator.isValidEmail(it))
+        listOf("a@b.com", "student@sicau.edu.cn", "user+tag@example.co.uk").forEach {
+            assertTrue("应合法: $it", ContactValidator.isValidEmail(it))
         }
     }
 
     @Test
-    fun `多个at不合法`() {
-        assertFalse(ContactValidator.isValidEmail("a@b@c.com"))
+    fun `缺at或缺点号不合法`() {
+        listOf("abc", "a@b", "a@.com", "@b.com", "a@b@c.com").forEach {
+            assertFalse("应非法: $it", ContactValidator.isValidEmail(it))
+        }
     }
 
     @Test
@@ -89,27 +54,60 @@ class ContactValidatorTest {
     }
 
     @Test
-    fun `顶级域不足两位不合法`() {
-        assertFalse(ContactValidator.isValidEmail("a@b.c"))
+    fun `超长邮箱不合法`() {
+        assertFalse(ContactValidator.isValidEmail("a".repeat(250) + "@b.com"))
     }
 
+    // ---------- mailcode 的 code：后端 ^[0-9A-Za-z]{4,8}$ ----------
+
     @Test
-    fun `域名段为空不合法`() {
-        listOf("a@.com", "a@b..com", "a@b.com.").forEach {
-            assertFalse("应非法: $it", ContactValidator.isValidEmail(it))
+    fun `4到8位字母数字验证码合法`() {
+        listOf("1234", "abcdef", "A1B2C3", "12345678").forEach {
+            assertTrue("应合法: $it", ContactValidator.isValidMailCode(it))
         }
     }
 
     @Test
-    fun `邮箱空与null不合法`() {
-        assertFalse(ContactValidator.isValidEmail(null))
-        assertFalse(ContactValidator.isValidEmail(""))
-        assertFalse(ContactValidator.isValidEmail("   "))
+    fun `验证码长度或字符不对不合法`() {
+        listOf("123", "123456789", "12a4!", "12 4", "").forEach {
+            assertFalse("应非法: $it", ContactValidator.isValidMailCode(it))
+        }
+    }
+
+    // ---------- 密码：非空、<=256 ----------
+
+    @Test
+    fun `非空短密码合法`() {
+        assertTrue(ContactValidator.isValidPassword("x"))
+        assertTrue(ContactValidator.isValidPassword("yuanshen123ABC."))
     }
 
     @Test
-    fun `超长邮箱不合法`() {
-        val long = "a".repeat(250) + "@b.com"
-        assertFalse(ContactValidator.isValidEmail(long))
+    fun `空密码或超长密码不合法`() {
+        assertFalse(ContactValidator.isValidPassword(""))
+        assertFalse(ContactValidator.isValidPassword("   "))
+        assertFalse(ContactValidator.isValidPassword(null))
+        assertFalse(ContactValidator.isValidPassword("a".repeat(257)))
+    }
+
+    // ---------- deviceId：<=128 ----------
+
+    @Test
+    fun `deviceId长度校验`() {
+        assertTrue(ContactValidator.isValidDeviceId(null))
+        assertTrue(ContactValidator.isValidDeviceId(""))
+        assertTrue(ContactValidator.isValidDeviceId("a".repeat(128)))
+        assertFalse(ContactValidator.isValidDeviceId("a".repeat(129)))
+    }
+
+    // ---------- 手机号（学校侧，宽松） ----------
+
+    @Test
+    fun `手机号校验`() {
+        assertTrue(ContactValidator.isValidPhone("13800000000"))
+        assertTrue(ContactValidator.isValidPhone("19912345678"))
+        listOf("12800000000", "1380000000", "138000000000", "1380000000a", "").forEach {
+            assertFalse("应非法: $it", ContactValidator.isValidPhone(it))
+        }
     }
 }

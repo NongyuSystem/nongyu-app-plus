@@ -9,8 +9,10 @@ package com.nongyu.appplus.login.data.cas
  *   （触发后端 `tgtSaver.Save` 保管，供免密续期）；
  * - [cookieHeader] 是 **auth.sicau.edu.cn 域下整套会话 cookie**（`laravel_session` /
  *   `XSRF-TOKEN` 等），填进 `cookie` 字段作为出站换票的 `Cookie` 头原样透传；
- * - 只交单枚 tgt 换票会返回 `code=500 未登录`，所以 [isUsable] 要求两者齐备且
- *   除 tgt 外至少还有一枚配套 cookie。
+ * - **单枚 tgt 就够**（权威文档 §1.1：`fetch.go:48` 只设一枚），
+ *   配套 cookie 属"更保险但非必要"，有则一并透传供后端续期；
+ * - [isUsable] 只要求 tgt 非空——但 tgt 必须是**从 `Set-Cookie` 头取到的合法值**
+ *   （见 [TgtValidator]），不能是响应 body 的 HTML。
  *
  * 本类**不含任何真实凭据值**，只是运行时容器。
  */
@@ -29,5 +31,5 @@ data class CasCredential(
      * 没有也不算失败——否则会把成功当失败。
      */
     val isUsable: Boolean
-        get() = !goAdminTgt.isNullOrBlank()
+        get() = TgtValidator.looksLikeTgt(goAdminTgt)
 }

@@ -2,6 +2,8 @@ package com.nongyu.appplus.login.ui
 
 import kotlinx.coroutines.launch
 import com.nongyu.appplus.login.model.VerificationCodeButtonState
+import com.nongyu.appplus.login.session.MailCodeLoginUseCase
+import com.nongyu.appplus.login.session.MailLoginResult
 import com.nongyu.appplus.login.session.MailCodeSender
 import com.nongyu.appplus.login.session.MailCodeSendResult
 import com.nongyu.appplus.login.data.cas.CasQrFetchResult
@@ -123,6 +125,7 @@ fun LoginCenterScreen() {
     // 缓存编排器，避免每次点击都重建 OkHttp/Retrofit
     val campusUseCase = remember { CampusSsoLoginUseCase.production(appContext) }
     val mailCodeSender = remember { MailCodeSender.production(appContext) }
+    val mailLoginUseCase = remember { MailCodeLoginUseCase.production(appContext) }
     // 「获取验证码」按钮状态（短信 / 邮箱各一份）
     var smsCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
     var mailCodeState by remember { mutableStateOf(VerificationCodeButtonState()) }
@@ -572,22 +575,37 @@ fun LoginCenterScreen() {
             colors = colors,
             onClick = {
                 if (submitting) return@LoginArrowButton
-                // 前置校验：缺输入时只在底部提示，不打后端（避免"参数错误"这类无意义往返）
+                // 前置校验：与后端 validate.go 同一套规则，不合格不发请求
+                // （后端不合法只回 400 invalid_request，没有 message，用户会觉得"没反应"）
                 val missing = when (uiState.selectedMethod) {
                     LoginMethod.PLATFORM_PASSWORD ->
                         if (account.isBlank()) "请输入账号"
-                        else if (password.isBlank()) "请输入密码" else null
+                        else if (!ContactValidator.isValidStudentNo(account)) "账号必须是 9 位数字"
+                        else if (password.isBlank()) "请输入密码"
+                        else if (!ContactValidator.isValidPassword(password)) "密码过长（最多 256 字符）"
+                        else null
+
                     LoginMethod.CAMPUS_PASSWORD ->
                         if (campusValues["pwStudentNo"].isNullOrBlank()) "请输入学号"
+                        else if (!ContactValidator.isValidStudentNo(campusValues["pwStudentNo"])) "学号必须是 9 位数字"
                         else if (campusValues["pwPassword"].isNullOrBlank()) "请输入密码"
                         else if (campusValues["pwCaptchaCode"].isNullOrBlank()) "请输入验证码"
                         else null
+
                     LoginMethod.CAMPUS_PHONE ->
                         if (campusValues["smsPhone"].isNullOrBlank()) "请输入手机号"
                         else if (!ContactValidator.isValidPhone(campusValues["smsPhone"])) "手机号格式不正确"
                         else if (campusValues["smsCaptchaCode"].isNullOrBlank()) "请输入图形验证码"
                         else if (campusValues["smsCode"].isNullOrBlank()) "请输入短信验证码"
                         else null
+
+                    LoginMethod.PLATFORM_MAIL ->
+                        if (campusValues["email"].isNullOrBlank()) "请输入邮箱"
+                        else if (!ContactValidator.isValidEmail(campusValues["email"])) "邮箱格式不正确"
+                        else if (campusValues["mailCode"].isNullOrBlank()) "请输入邮箱验证码"
+                        else if (!ContactValidator.isValidMailCode(campusValues["mailCode"])) "验证码必须是 4-8 位字母或数字"
+                        else null
+
                     else -> null
                 }
                 if (missing != null) {
@@ -658,7 +676,27 @@ fun LoginCenterScreen() {
                                 showHint("扫码登录暂不可用");
                             }
                             LoginMethod.PLATFORM_MAIL -> {
-                                showHint("邮箱验证码登录暂不可用");
+                                when (
+                                    val r = mailLoginUseCase(
+                                        email = campusValues["email"].orEmpty(),
+                                        code = campusValues["mailCode"].orEmpty(),
+                                        deviceId = deviceId,
+                                    )
+                                ) {
+                                    is MailLoginResult.Success -> showHint(null)
+                                    is MailLoginResult.Failure -> {
+                                        val f = r.failure
+                                        if (f == null) {
+                                            showHint(r.message.ifBlank { null })
+                                        } else {
+                                            val c = (f as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                                            when (LoginFailurePolicy.decide(f)) {
+                                                LoginFailureAction.SILENT -> showHint(null)
+                                                else -> showHint(LoginFailurePolicy.messageOf(c))
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             LoginMethod.PLATFORM_OAUTH -> Unit
                         }

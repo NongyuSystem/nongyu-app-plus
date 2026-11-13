@@ -57,10 +57,10 @@ class CasCookieJarTest {
         // 真站实测 2026-11-13：学校 CAS 的响应不带 Set-Cookie，tgt 是直接给的。
         // 若要求"必须有配套 cookie"，会把成功当失败。
         val jar = CasCookieJar()
-        jar.saveFromResponse(authUrl, listOf(cookie("go-admin-tgt", "TGT-ONLY")))
+        jar.saveFromResponse(authUrl, listOf(cookie("go-admin-tgt", "201690:TGT:ONLY")))
         val cred = jar.toCredential()
         assertTrue(cred.isUsable)
-        assertEquals("TGT-ONLY", cred.goAdminTgt)
+        assertEquals("201690:TGT:ONLY", cred.goAdminTgt)
     }
 
     @Test

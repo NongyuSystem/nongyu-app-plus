@@ -40,10 +40,13 @@ class SchoolLoginUseCase(
 ) {
     suspend operator fun invoke(credential: CasCredential, deviceId: String): SchoolLoginResult =
         withContext(Dispatchers.IO) {
-            // 单枚 tgt 不是可用登录态（知识库实证：换票会 code=500 未登录）
+            // 凭据判定（权威文档 §1.1 / §1.2）：
+            // - 单枚 go-admin-tgt 就够，配套 cookie 属"更保险但非必要"；
+            // - 但 tgt 必须是**从 Set-Cookie 取到的合法值**，不能是响应 body 的 HTML
+            //   （后者会让后端存进 Redis 后每次换票 500，表现为"能登录但画像全空"）。
             if (!credential.isUsable) {
                 return@withContext SchoolLoginResult.Failure(
-                    message = "统一身份认证未返回整套会话 cookie，请重试",
+                    message = "未取得有效的统一身份认证凭据（go-admin-tgt），请重试",
                 )
             }
             val dto = LoginRequestDto(

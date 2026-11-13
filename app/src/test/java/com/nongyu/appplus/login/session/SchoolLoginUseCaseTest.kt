@@ -72,7 +72,7 @@ class SchoolLoginUseCaseTest {
         val gw = FakeGateway()
         val session = FakeSession()
         val navigator = FakeNavigator()
-        val cred = CasCredential("T", "go-admin-tgt=T; laravel_session=S", setOf("laravel_session"))
+        val cred = CasCredential("201690:TGT:T", "go-admin-tgt=201690:TGT:T; laravel_session=S", setOf("laravel_session"))
         val result = SchoolLoginUseCase(gw, session, navigator).invoke(cred, "dev-1")
         assertTrue(result is SchoolLoginResult.Success)
         assertEquals("T", session.writtenToken)
@@ -85,7 +85,7 @@ class SchoolLoginUseCaseTest {
         gw.next = ApiCall.Outcome.Failure(
             ApiFailure.Http(401, "bad_credentials", null, "https://x/identity/login"),
         )
-        val cred = CasCredential("T", "go-admin-tgt=T; laravel_session=S", setOf("laravel_session"))
+        val cred = CasCredential("201690:TGT:T", "go-admin-tgt=201690:TGT:T; laravel_session=S", setOf("laravel_session"))
         val result = SchoolLoginUseCase(gw, FakeSession(), FakeNavigator()).invoke(cred, "dev-1")
         assertTrue(result is SchoolLoginResult.Failure)
         assertTrue((result as SchoolLoginResult.Failure).failure is ApiFailure.Http)

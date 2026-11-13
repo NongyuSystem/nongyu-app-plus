@@ -181,7 +181,7 @@ class CasApiContractTest {
     fun `只有单枚 tgt 的响应也算可用登录态（真站不带 Set-Cookie）`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(okEnvelope())
-                .addHeader("Set-Cookie", "go-admin-tgt=TGT-ONLY; Path=/; HttpOnly"),
+                .addHeader("Set-Cookie", "go-admin-tgt=201690:TGT:ONLY; Path=/; Max-Age=864000; HttpOnly"),
         )
         api.login(body("""{"appid":"A","code":"c","number":"n","password":"p","uuid":"u"}"""))
         server.takeRequest()
