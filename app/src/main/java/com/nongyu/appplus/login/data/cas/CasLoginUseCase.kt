@@ -71,6 +71,10 @@ class CasLoginUseCase(
      * @param captchaCode 用户针对该图输入的图形码
      */
     suspend fun sendSmsCode(phone: String, captcha: CasCaptcha, captchaCode: String): CasSmsSendResult {
+        logger.log(
+            NongyuLogger.Level.DEBUG,
+            "sms/send 入参 phoneEmpty=${phone.isBlank()} codeEmpty=${captchaCode.isBlank()} uuidEmpty=${captcha.uuid.isBlank()} uuidLen=${captcha.uuid.length}",
+        )
         val body = jsonBody(
             json.encodeToString(
                 CasSmsSendBody.serializer(),

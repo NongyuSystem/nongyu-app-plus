@@ -287,17 +287,30 @@ fun LoginCenterScreen() {
                         scope.launch {
                             smsCodeState = smsCodeState.onStarted()
                             try {
+                                val phone = campusValues["smsPhone"].orEmpty()
+                                val captchaCode = campusValues["smsCaptchaCode"].orEmpty()
                                 val cap = campusCaptcha
+                                // 前置校验：缺手机号/图形码时不打后端（避免学校侧回"参数错误"）
+                                if (phone.isBlank()) {
+                                    showHint("请输入手机号")
+                                    smsCodeState = smsCodeState.onFailed()
+                                    return@launch
+                                }
+                                if (captchaCode.isBlank()) {
+                                    showHint("请输入图形验证码")
+                                    smsCodeState = smsCodeState.onFailed()
+                                    return@launch
+                                }
                                 if (cap == null) {
-                                    showHint("请先获取图形验证码");
+                                    showHint("图形验证码已失效，请点击图片刷新")
                                     smsCodeState = smsCodeState.onFailed()
                                     return@launch
                                 }
                                 when (
                                     val r = campusUseCase.sendSmsCode(
-                                        phone = campusValues["phone"].orEmpty(),
+                                        phone = phone,
                                         captcha = cap,
-                                        captchaCode = campusValues["captchaCode"].orEmpty(),
+                                        captchaCode = captchaCode,
                                     )
                                 ) {
                                     is com.nongyu.appplus.login.data.cas.CasSmsSendResult.Success ->
@@ -319,7 +332,13 @@ fun LoginCenterScreen() {
                         scope.launch {
                             mailCodeState = mailCodeState.onStarted()
                             try {
-                                when (val r = mailCodeSender.send(campusValues["email"].orEmpty())) {
+                                val email = campusValues["email"].orEmpty()
+                                if (email.isBlank()) {
+                                    showHint("请输入邮箱")
+                                    mailCodeState = mailCodeState.onFailed()
+                                    return@launch
+                                }
+                                when (val r = mailCodeSender.send(email)) {
                                     is MailCodeSendResult.Success ->
                                         mailCodeState = mailCodeState.onSucceeded()
                                     is MailCodeSendResult.Failure -> {
@@ -430,13 +449,13 @@ fun LoginCenterScreen() {
                         if (account.isBlank()) "请输入账号"
                         else if (password.isBlank()) "请输入密码" else null
                     LoginMethod.CAMPUS_PASSWORD ->
-                        if (campusValues["studentNo"].isNullOrBlank()) "请输入学号"
-                        else if (campusValues["password"].isNullOrBlank()) "请输入密码"
-                        else if (campusValues["captchaCode"].isNullOrBlank()) "请输入验证码"
+                        if (campusValues["pwStudentNo"].isNullOrBlank()) "请输入学号"
+                        else if (campusValues["pwPassword"].isNullOrBlank()) "请输入密码"
+                        else if (campusValues["pwCaptchaCode"].isNullOrBlank()) "请输入验证码"
                         else null
                     LoginMethod.CAMPUS_PHONE ->
-                        if (campusValues["phone"].isNullOrBlank()) "请输入手机号"
-                        else if (campusValues["captchaCode"].isNullOrBlank()) "请输入图形验证码"
+                        if (campusValues["smsPhone"].isNullOrBlank()) "请输入手机号"
+                        else if (campusValues["smsCaptchaCode"].isNullOrBlank()) "请输入图形验证码"
                         else if (campusValues["smsCode"].isNullOrBlank()) "请输入短信验证码"
                         else null
                     else -> null
@@ -477,10 +496,10 @@ fun LoginCenterScreen() {
                                 }
                                 handleCampusResult(
                                     campusUseCase.loginWithPassword(
-                                        studentNo = campusValues["studentNo"].orEmpty(),
-                                        password = campusValues["password"].orEmpty(),
+                                        studentNo = campusValues["pwStudentNo"].orEmpty(),
+                                        password = campusValues["pwPassword"].orEmpty(),
                                         captcha = cap,
-                                        captchaCode = campusValues["captchaCode"].orEmpty(),
+                                        captchaCode = campusValues["pwCaptchaCode"].orEmpty(),
                                         deviceId = deviceId,
                                     ),
                                 )
@@ -498,7 +517,7 @@ fun LoginCenterScreen() {
                                 }
                                 handleCampusResult(
                                     campusUseCase.loginWithPhone(
-                                        phone = campusValues["phone"].orEmpty(),
+                                        phone = campusValues["smsPhone"].orEmpty(),
                                         smsCode = campusValues["smsCode"].orEmpty(),
                                         deviceId = deviceId,
                                     ),

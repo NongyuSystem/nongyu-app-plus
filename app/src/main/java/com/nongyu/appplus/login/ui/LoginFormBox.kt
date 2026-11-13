@@ -118,9 +118,9 @@ fun LoginFormBox(
                     values[k] = v
                     onFormValuesChanged(values.toMap())
                 }
-                FormField("请输入学号", colors, onValueChange = { put("studentNo", it) })
-                FormField("请输入密码", colors, isPassword = true, onValueChange = { put("password", it) })
-                CaptchaRow("请输入验证码", colors, onValueChange = { put("captchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
+                FormField("请输入学号", colors, onValueChange = { put("pwStudentNo", it) })
+                FormField("请输入密码", colors, isPassword = true, onValueChange = { put("pwPassword", it) })
+                CaptchaRow("请输入验证码", colors, onValueChange = { put("pwCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
             }
 
             LoginMethod.CAMPUS_PHONE -> {
@@ -130,8 +130,8 @@ fun LoginFormBox(
                     values[k] = v
                     onFormValuesChanged(values.toMap())
                 }
-                FormField("请输入手机号", colors, onValueChange = { put("phone", it) })
-                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("captchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
+                FormField("请输入手机号", colors, onValueChange = { put("smsPhone", it) })
+                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("smsCaptchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
                 FormFieldWithAction(
                     placeholder = "请输入短信验证码",
                     actionState = smsCodeState,
