@@ -106,8 +106,12 @@ fun LoginCenterScreen() {
     var account by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
-    // 就地行内提示（票 #92）：失败文案显示在表单内，而非底部全局提示
-    var inlineMessage by remember { mutableStateOf<String?>(null) }
+    // 提示统一走底部 hint（维护者要求：不在表单内单独显示）。
+    // null/空白 表示清空提示，统一在这里收敛，避免每处都写 ifBlank。
+    fun showHint(msg: String?) {
+        hint = msg?.takeIf { it.isNotBlank() } ?: ""
+        hintTick++
+    }
     // 统一身份认证三格的表单输入（票 #96）
     var campusValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     // 已取到的图形验证码（一次性，取码与提交必须同一 uuid）
@@ -142,7 +146,7 @@ fun LoginCenterScreen() {
                 is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
                     campusCaptcha = r.captcha
                 is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
-                    if (r.message.isNotBlank()) inlineMessage = r.message
+                    if (r.message.isNotBlank()) showHint(r.message);
             }
         }
     }
@@ -271,7 +275,6 @@ fun LoginCenterScreen() {
                     account = no
                     password = pwd
                 },
-                inlineMessage = inlineMessage,
                 savedAccount = account,
                 savedPassword = password,
                 onFormValuesChanged = { campusValues = it },
@@ -286,7 +289,7 @@ fun LoginCenterScreen() {
                             try {
                                 val cap = campusCaptcha
                                 if (cap == null) {
-                                    inlineMessage = "请先获取图形验证码"
+                                    showHint("请先获取图形验证码");
                                     smsCodeState = smsCodeState.onFailed()
                                     return@launch
                                 }
@@ -300,7 +303,7 @@ fun LoginCenterScreen() {
                                     is com.nongyu.appplus.login.data.cas.CasSmsSendResult.Success ->
                                         smsCodeState = smsCodeState.onSucceeded()
                                     is com.nongyu.appplus.login.data.cas.CasSmsSendResult.Failure -> {
-                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                        if (r.message.isNotBlank()) showHint(r.message);
                                         smsCodeState = smsCodeState.onFailed()
                                     }
                                 }
@@ -320,7 +323,7 @@ fun LoginCenterScreen() {
                                     is MailCodeSendResult.Success ->
                                         mailCodeState = mailCodeState.onSucceeded()
                                     is MailCodeSendResult.Failure -> {
-                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                        if (r.message.isNotBlank()) showHint(r.message);
                                         mailCodeState = mailCodeState.onFailed()
                                     }
                                 }
@@ -336,12 +339,12 @@ fun LoginCenterScreen() {
                             submitting = true
                             try {
                                 campusCaptcha = null
-                                inlineMessage = null
+                                showHint(null);
                                 when (val r = campusUseCase.fetchCaptcha()) {
                                     is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
                                         campusCaptcha = r.captcha
                                     is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
-                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                        if (r.message.isNotBlank()) showHint(r.message);
                                 }
                             } finally {
                                 submitting = false
@@ -358,7 +361,7 @@ fun LoginCenterScreen() {
                 is com.nongyu.appplus.login.session.PasswordLoginResult.Success -> {
                     // 成功：用例已写凭证并切主界面。登录页随即移出组合，
                     // profileIncomplete 的轻提示由主界面侧承接（S5 转场票）。
-                    inlineMessage = null
+                    showHint(null);
                 }
                 is com.nongyu.appplus.login.session.PasswordLoginResult.Failure -> {
                     val action = LoginFailurePolicy.decide(result.failure)
@@ -367,11 +370,11 @@ fun LoginCenterScreen() {
                         LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
                             // 自动切统一身份认证 tab；输入保留在 UI state，不清空
                             uiState = LoginCenterUiState.initial()
-                            inlineMessage = LoginFailurePolicy.messageOf(code)
+                            showHint(LoginFailurePolicy.messageOf(code));
                         }
                         LoginFailureAction.SHOW_MESSAGE ->
-                            inlineMessage = LoginFailurePolicy.messageOf(code)
-                        LoginFailureAction.SILENT -> inlineMessage = null
+                            showHint(LoginFailurePolicy.messageOf(code));
+                        LoginFailureAction.SILENT -> showHint(null);
                     }
                 }
             }
@@ -380,22 +383,36 @@ fun LoginCenterScreen() {
         // 统一身份认证结果处理（票 #96）：失败口径与平台登录一致
         fun handleCampusResult(result: com.nongyu.appplus.login.session.SchoolLoginResult) {
             when (result) {
-                is com.nongyu.appplus.login.session.SchoolLoginResult.Success -> inlineMessage = null
+                is com.nongyu.appplus.login.session.SchoolLoginResult.Success -> showHint(null);
                 is com.nongyu.appplus.login.session.SchoolLoginResult.Failure -> {
                     val failure = result.failure
                     if (failure == null) {
                         // 无 ApiFailure：文案直接来自学校侧（或空串零提示）
-                        inlineMessage = result.message.ifBlank { null }
+                        showHint(result.message.ifBlank { null });
                     } else {
                         val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
                         when (LoginFailurePolicy.decide(failure)) {
                             LoginFailureAction.SWITCH_TO_CAMPUS_SSO -> {
                                 uiState = LoginCenterUiState.initial()
-                                inlineMessage = LoginFailurePolicy.messageOf(code)
+                                showHint(LoginFailurePolicy.messageOf(code));
                             }
                             LoginFailureAction.SHOW_MESSAGE ->
-                                inlineMessage = LoginFailurePolicy.messageOf(code)
-                            LoginFailureAction.SILENT -> inlineMessage = null
+                                showHint(LoginFailurePolicy.messageOf(code));
+                            LoginFailureAction.SILENT -> showHint(null);
+                        }
+                    }
+                    // 验证码是一次性的：提交失败后旧码已作废，自动换一张，
+                    // 否则用户再点一次就会拿同一个废码空跑（表现为"点两次就报错"）。
+                    if (uiState.selectedMethod == LoginMethod.CAMPUS_PASSWORD ||
+                        uiState.selectedMethod == LoginMethod.CAMPUS_PHONE
+                    ) {
+                        campusCaptcha = null
+                        scope.launch {
+                            when (val r = campusUseCase.fetchCaptcha()) {
+                                is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
+                                    campusCaptcha = r.captcha
+                                is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure -> Unit
+                            }
                         }
                     }
                 }
@@ -407,8 +424,29 @@ fun LoginCenterScreen() {
             colors = colors,
             onClick = {
                 if (submitting) return@LoginArrowButton
+                // 前置校验：缺输入时只在底部提示，不打后端（避免"参数错误"这类无意义往返）
+                val missing = when (uiState.selectedMethod) {
+                    LoginMethod.PLATFORM_PASSWORD ->
+                        if (account.isBlank()) "请输入账号"
+                        else if (password.isBlank()) "请输入密码" else null
+                    LoginMethod.CAMPUS_PASSWORD ->
+                        if (campusValues["studentNo"].isNullOrBlank()) "请输入学号"
+                        else if (campusValues["password"].isNullOrBlank()) "请输入密码"
+                        else if (campusValues["captchaCode"].isNullOrBlank()) "请输入验证码"
+                        else null
+                    LoginMethod.CAMPUS_PHONE ->
+                        if (campusValues["phone"].isNullOrBlank()) "请输入手机号"
+                        else if (campusValues["captchaCode"].isNullOrBlank()) "请输入图形验证码"
+                        else if (campusValues["smsCode"].isNullOrBlank()) "请输入短信验证码"
+                        else null
+                    else -> null
+                }
+                if (missing != null) {
+                    showHint(missing)
+                    return@LoginArrowButton
+                }
                 submitting = true
-                inlineMessage = null
+                showHint(null);
                 val deviceId = DeviceIdStore.getOrCreate(appContext)
                 scope.launch {
                     // 票 #96：按当前登录方式分派。finally 保证异常时也解锁按钮，
@@ -433,7 +471,7 @@ fun LoginCenterScreen() {
                                         is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
                                             campusCaptcha = r.captcha
                                         is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
-                                            inlineMessage = r.message.ifBlank { null }
+                                            showHint(r.message.ifBlank { null });
                                     }
                                     return@launch
                                 }
@@ -454,7 +492,7 @@ fun LoginCenterScreen() {
                                         is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
                                             campusCaptcha = r.captcha
                                         is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
-                                            inlineMessage = r.message.ifBlank { null }
+                                            showHint(r.message.ifBlank { null });
                                     }
                                     return@launch
                                 }
@@ -468,10 +506,10 @@ fun LoginCenterScreen() {
                             }
                             LoginMethod.CAMPUS_WECHAT -> {
                                 // 扫码完成感知待真机/抓包实测（票 #97），不臆造轮询
-                                inlineMessage = "扫码登录暂不可用"
+                                showHint("扫码登录暂不可用");
                             }
                             LoginMethod.PLATFORM_MAIL -> {
-                                inlineMessage = "邮箱验证码登录暂不可用"
+                                showHint("邮箱验证码登录暂不可用");
                             }
                             LoginMethod.PLATFORM_OAUTH -> Unit
                         }
@@ -512,11 +550,15 @@ fun LoginCenterScreen() {
                 .navigationBarsPadding()
                 .padding(bottom = 72.dp),
         ) {
+            // 唯一的提示出口：字号与颜色要够醒目、允许换行（学校侧 msg 可能较长）
             Text(
                 text = hint,
-                color = colors.surface.colorTextSecondary,
-                fontSize = 13.sp,
+                color = colors.surface.colorText,
+                fontSize = 14.sp,
                 textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp),
             )
         }
     }

@@ -70,8 +70,6 @@ fun LoginFormBox(
     modifier: Modifier = Modifier,
     /** 平台登录账密输入变化上报（票 #92）；其它方式不上报。 */
     onCredentialsChanged: (studentNo: String, password: String) -> Unit = { _, _ -> },
-    /** 就地行内提示文案（票 #92 验收判据）；null 表示不显示。 */
-    inlineMessage: String? = null,
     /** 外部持有的账密值（票 #92）：切认证域回来后输入框仍保留内容，不清空。 */
     savedAccount: String = "",
     savedPassword: String = "",
@@ -97,16 +95,6 @@ fun LoginFormBox(
         // 组件间隔拉开：原 12dp → 20dp
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        // 就地行内提示：紧跟表单标题，不弹窗、不清空输入（#89 文案表 / 票 #92）
-        if (!inlineMessage.isNullOrBlank()) {
-            Text(
-                text = inlineMessage,
-                color = colors.brand.colorBrand,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
         when (method) {
             LoginMethod.PLATFORM_PASSWORD -> {
                 FormTitle("平台内账号密码", colors)
