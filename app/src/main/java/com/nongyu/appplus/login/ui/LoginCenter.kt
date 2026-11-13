@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -110,6 +111,20 @@ fun LoginCenterScreen() {
     var campusCaptcha by remember { mutableStateOf<com.nongyu.appplus.login.data.cas.CasCaptcha?>(null) }
     // 缓存编排器，避免每次点击都重建 OkHttp/Retrofit
     val campusUseCase = remember { CampusSsoLoginUseCase.production(appContext) }
+
+    // 进入统一身份认证账密/短信两格时自动取一张图形验证码（一次性，展示给用户）
+    LaunchedEffect(uiState.selectedMethod) {
+        val needsCaptcha = uiState.selectedMethod == LoginMethod.CAMPUS_PASSWORD ||
+            uiState.selectedMethod == LoginMethod.CAMPUS_PHONE
+        if (needsCaptcha && campusCaptcha == null) {
+            when (val r = campusUseCase.fetchCaptcha()) {
+                is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
+                    campusCaptcha = r.captcha
+                is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
+                    if (r.message.isNotBlank()) inlineMessage = r.message
+            }
+        }
+    }
 
     val mainSize = 73.dp
     val sideSize = 70.dp
@@ -239,6 +254,26 @@ fun LoginCenterScreen() {
                 savedAccount = account,
                 savedPassword = password,
                 onFormValuesChanged = { campusValues = it },
+                captchaImage = campusCaptcha?.image,
+                onRefreshCaptcha = {
+                    if (!submitting) {
+                        scope.launch {
+                            submitting = true
+                            try {
+                                campusCaptcha = null
+                                inlineMessage = null
+                                when (val r = campusUseCase.fetchCaptcha()) {
+                                    is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Success ->
+                                        campusCaptcha = r.captcha
+                                    is com.nongyu.appplus.login.data.cas.CasCaptchaResult.Failure ->
+                                        if (r.message.isNotBlank()) inlineMessage = r.message
+                                }
+                            } finally {
+                                submitting = false
+                            }
+                        }
+                    }
+                },
             )
         }
 

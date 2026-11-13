@@ -1,5 +1,6 @@
 package com.nongyu.appplus.login.data.cas
 
+import com.nongyu.appplus.net.core.NongyuLogger
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -37,6 +38,8 @@ class CasLoginUseCase(
     private val api: CasApi,
     private val jar: CasCookieJar,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
+    /** 日志接缝：纯 JVM 测试默认 Noop；生产传 AndroidLogger（不直接用 android.util.Log）。 */
+    private val logger: NongyuLogger = NongyuLogger.Noop,
 ) {
 
     companion object {
@@ -143,10 +146,14 @@ class CasLoginUseCase(
     /** 统一反序列化信封；失败/空响应返回 null（由调用方产出「零提示」文案）。 */
     private suspend fun call(block: suspend () -> Response<ResponseBody>): CasEnvelope? =
         try {
-            val text = block().body()?.string().orEmpty()
+            val response = block()
+            val text = response.body()?.string().orEmpty()
+            logger.log(NongyuLogger.Level.DEBUG, "CAS HTTP ${response.code()} bodyLen=${text.length}")
             if (text.isBlank()) null
             else json.decodeFromString(CasEnvelope.serializer(), text)
         } catch (e: Exception) {
+            // 不静默吞：失败必须可在日志里看到（UI 仍按零提示处理）
+            logger.log(NongyuLogger.Level.WARN, "CAS 请求失败", e)
             null
         }
 

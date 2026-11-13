@@ -1,8 +1,13 @@
 package com.nongyu.appplus.login.ui
 
 import com.nongyu.appplus.login.model.LoginMethod
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.nongyu.appplus.login.data.cas.CaptchaImageDecoder
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +75,10 @@ fun LoginFormBox(
     savedPassword: String = "",
     /** 统一身份认证三格输入上报（票 #96）：key 为字段名，value 为用户输入。 */
     onFormValuesChanged: (Map<String, String>) -> Unit = {},
+    /** 已取到的图形验证码 data URI（票 #96），用于在表单里渲染真图。 */
+    captchaImage: String? = null,
+    /** 点验证码图换一张。 */
+    onRefreshCaptcha: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -113,7 +122,7 @@ fun LoginFormBox(
                 }
                 FormField("请输入学号", colors, onValueChange = { put("studentNo", it) })
                 FormField("请输入密码", colors, isPassword = true, onValueChange = { put("password", it) })
-                CaptchaRow("请输入验证码", colors, onValueChange = { put("captchaCode", it) })
+                CaptchaRow("请输入验证码", colors, onValueChange = { put("captchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
             }
 
             LoginMethod.CAMPUS_PHONE -> {
@@ -124,7 +133,7 @@ fun LoginFormBox(
                     onFormValuesChanged(values.toMap())
                 }
                 FormField("请输入手机号", colors, onValueChange = { put("phone", it) })
-                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("captchaCode", it) })
+                CaptchaRow("请输入图形验证码", colors, onValueChange = { put("captchaCode", it) }, captchaImage = captchaImage, onRefreshCaptcha = onRefreshCaptcha)
                 FormField("请输入短信验证码", colors, onValueChange = { put("smsCode", it) })
             }
 
@@ -245,6 +254,10 @@ private fun CaptchaRow(
     placeholder: String,
     colors: NongyuColors,
     onValueChange: (String) -> Unit = {},
+    /** 已取到的图形验证码 data URI（票 #96）；null 时显示占位。 */
+    captchaImage: String? = null,
+    /** 点验证码图换一张（看图一次即作废，填错要能刷新）。 */
+    onRefreshCaptcha: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -254,54 +267,48 @@ private fun CaptchaRow(
             FormField(placeholder, colors, onValueChange = onValueChange)
         }
         Spacer(Modifier.width(12.dp))
-        CaptchaImage(colors)
+        CaptchaImage(colors, captchaImage, onRefreshCaptcha)
     }
 }
 
-/** 图形验证码占位：淡绿底 + 斜线纹理（矢量），示意「验证码的图」。 */
+/**
+ * 图形验证码图（票 #96 缺口补齐）。
+ *
+ * 有 [dataUri] 时把 S6 解出的 `data:image/png;base64,...` 解码成 Bitmap 真实渲染；
+ * 没有（尚未取码 / 解码失败）时显示淡绿占位块。
+ */
 @Composable
-private fun CaptchaImage(colors: NongyuColors) {
+private fun CaptchaImage(colors: NongyuColors, dataUri: String?, onClick: () -> Unit = {}) {
+    val bitmap = remember(dataUri) {
+        CaptchaImageDecoder.decode(dataUri)?.let { bytes ->
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+    }
+
     Box(
         modifier = Modifier
             .size(width = 100.dp, height = 48.dp)
-            .background(colors.brand.colorBrandMuted, RoundedCornerShape(12.dp)),
+            .background(colors.brand.colorBrandMuted, RoundedCornerShape(12.dp))
+            .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            drawLine(
-                color = colors.surface.colorTextSecondary.copy(alpha = 0.35f),
-                start = Offset(w * 0.10f, h * 0.75f),
-                end = Offset(w * 0.90f, h * 0.25f),
-                strokeWidth = 1.5.dp.toPx(),
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "图形验证码",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(2.dp),
             )
-            drawLine(
-                color = colors.surface.colorTextSecondary.copy(alpha = 0.25f),
-                start = Offset(w * 0.15f, h * 0.30f),
-                end = Offset(w * 0.85f, h * 0.70f),
-                strokeWidth = 1.5.dp.toPx(),
+        } else {
+            Text(
+                text = "验证码",
+                color = colors.surface.colorTextSecondary,
+                fontSize = 12.sp,
             )
         }
-        Text(
-            text = "验证码",
-            color = colors.surface.colorTextSecondary,
-            fontSize = 12.sp,
-        )
     }
 }
 
-/** 微信扫码独立面板（票 #96）。
- *
- * - 中心码由 App 本地矢量绘制占位（不嵌整页 WebView、不引微信开放平台 SDK、
- *   不逆向 `weixin://` 私有 scheme）；
- * - 状态：加载中「正在获取二维码…」→ 已显示「请使用微信扫码登录」→
- *   失效「二维码已失效，请刷新」并支持刷新；
- * - **扫码完成感知机制显式标注待真机/抓包实测（票 #97）**：二维码的 state 是
- *   学校平台服务端下发的一次性串（知识库 `川农统一身份认证「微信扫码登录」实证形态`），
- *   App 无法自拼 URL，也不臆测轮询端点形状。用户扫码确认后合理时间内进入
- *   `method=school` 提交，由 #97 承接。
- */
 @Composable
 private fun WechatQrPanel(colors: NongyuColors) {
     // 微信扫码的二维码由学校平台服务端下发一次性 state，App 无法自拼；
