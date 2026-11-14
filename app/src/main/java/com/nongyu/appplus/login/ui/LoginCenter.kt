@@ -460,20 +460,30 @@ fun LoginCenterScreen() {
                     }
                 },
                 onDownloadAndOpenWechat = {
-                    // 把二维码存到相册，再拉起微信
+                    // 把二维码存到相册，再拉起微信扫一扫
                     val url = wechatQrUrl
                     if (url != null) {
-                        val ok = WechatQrActions.saveQrToGallery(appContext, url)
-                        showHint(if (ok) "二维码已保存到相册，请用微信扫一扫" else "保存失败")
-                        WechatQrActions.openWechat(appContext)
+                        val saved = WechatQrActions.saveQrToGallery(appContext, url)
+                        val opened = WechatQrActions.openWechat(appContext)
+                        showHint(
+                            when {
+                                // 跳转失败要明确告知（旧实现静默跳过，表现为"点了没反应"）
+                                !opened -> "未找到微信，请先安装微信"
+                                saved -> "二维码已保存到相册，可在微信扫一扫里选取"
+                                else -> "二维码保存失败，请直接对着屏幕扫"
+                            },
+                        )
                     }
                 },
                 onCopyAndOpenWechat = {
                     val url = wechatQrUrl
                     if (url != null) {
                         WechatQrActions.copyToClipboard(appContext, url)
-                        showHint("链接已复制，请在微信中打开")
-                        WechatQrActions.openWechat(appContext)
+                        val opened = WechatQrActions.openWechat(appContext)
+                        showHint(
+                            if (opened) "链接已复制，可在微信里粘贴打开"
+                            else "未找到微信，请先安装微信",
+                        )
                     }
                 },
                 onRefreshLocalCaptcha = { localCaptcha = LocalCaptcha.random() },

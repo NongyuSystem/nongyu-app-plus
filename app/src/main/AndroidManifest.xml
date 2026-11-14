@@ -5,6 +5,18 @@
          （票 #48 Q5：只声明依赖时合并清单里没有该权限，手写后 APK 才有）。 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Android 11+（targetSdk 30 起）的包可见性限制：不声明 <queries> 时
+         PackageManager.getLaunchIntentForPackage("com.tencent.mm") 直接返回 null，
+         表现为「点跳转微信没任何反应」（且不会抛异常，极难排查）。
+         这里显式声明微信包与 weixin scheme，两者都需要。 -->
+    <queries>
+        <package android:name="com.tencent.mm" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="weixin" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

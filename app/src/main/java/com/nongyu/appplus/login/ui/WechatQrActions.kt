@@ -70,13 +70,61 @@ object WechatQrActions {
         cm.setPrimaryClip(ClipData.newPlainText("微信登录链接", text))
     }
 
-    /** 拉起微信主界面（不带 URL——微信没有该契约）。 */
-    fun openWechat(context: Context) {
-        val launch = context.packageManager.getLaunchIntentForPackage(WECHAT_PACKAGE)
+    /**
+     * 拉起微信，让用户用「扫一扫」扫屏幕上的二维码。
+     *
+     * ## 跳转顺序（实测确定）
+     * 1. `getLaunchIntentForPackage(com.tencent.mm)` → 微信主界面（确定性最高）
+     * 2. 兜底 `weixin://dl/scan`
+     *
+     * 注意 `weixin://dl/scan` **不能**当作首选：真机实测它会被微信解析到
+     * `com.tencent.mm.plugin.webview.ui.tools.MMWebViewUI`（内置浏览器），
+     * 并不是扫一扫界面。用它当首选会让用户落在一个莫名其妙的网页上。
+     *
+     * ## 为什么以前"点了没反应"（两个坑，都已修）
+     * 1. **Android 11+ 包可见性**：targetSdk 36 下不声明 `<queries>` 时，
+     *    `getLaunchIntentForPackage` **直接返回 null 且不抛异常**，
+     *    旧代码 `if (launch != null)` 于是静默跳过。已在 AndroidManifest 补
+     *    `<queries><package com.tencent.mm/><intent VIEW weixin/></queries>`。
+     * 2. **异常被 `runCatching` 吞掉**：即使 startActivity 失败也无任何反馈。
+     *    现在返回 [Boolean] 让调用方给出可见提示。
+     *
+     * @return true 表示已经发出跳转（微信会被切到前台）
+     */
+    fun openWechat(context: Context): Boolean {
+        // ① 首选：微信主界面
+        val launch = try {
+            context.packageManager.getLaunchIntentForPackage(WECHAT_PACKAGE)
+        } catch (e: Exception) {
+            null
+        }
         if (launch != null) {
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { context.startActivity(launch) }
+            if (startQuietly(context, launch)) return true
         }
+
+        // ② 兜底：weixin scheme（落点可能是内置浏览器，仅保证能切到微信）
+        val schemeIntent = Intent(Intent.ACTION_VIEW, Uri.parse("weixin://")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return startQuietly(context, schemeIntent)
+    }
+
+    /** 尝试启动一个 Intent；成功返回 true，任何失败返回 false（不抛出）。 */
+    private fun startQuietly(context: Context, intent: Intent): Boolean = try {
+        // 先确认有 Activity 能接，避免直接抛 ActivityNotFoundException
+        val resolved = context.packageManager.resolveActivity(
+            intent,
+            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
+        )
+        if (resolved == null) {
+            false
+        } else {
+            context.startActivity(intent)
+            true
+        }
+    } catch (e: Exception) {
+        false
     }
 
     /** 微信包名。 */
