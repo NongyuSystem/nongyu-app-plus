@@ -98,7 +98,12 @@ import com.nongyu.appplus.design.NongyuTheme
  * - 左右圆：`brand.colorBrandMuted` 底 + `surface.colorTextSecondary` 图标（淡绿底灰）
  */
 @Composable
-fun LoginCenterScreen() {
+fun LoginCenterScreen(
+    /** 票 #94 转场：登录按钮的透明度覆盖值（null = 用自身状态）。 */
+    arrowAlphaOverride: Float? = null,
+    /** 票 #94 转场：登录按钮的缩放倍数覆盖值（null = 用按压反馈）。 */
+    arrowScaleOverride: Float? = null,
+) {
     val colors = NongyuTheme.colors
     val appContext = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
@@ -616,6 +621,8 @@ fun LoginCenterScreen() {
         // ---- 底部大圆形箭头按钮 = 登录 ----
         LoginArrowButton(
             colors = colors,
+            alphaOverride = arrowAlphaOverride,
+            scaleOverride = arrowScaleOverride,
             onClick = {
                 if (submitting) return@LoginArrowButton
                 // 前置校验：与后端 validate.go 同一套规则，不合格不发请求
@@ -1099,19 +1106,30 @@ private fun LoginArrowButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: androidx.compose.ui.unit.Dp = 88.dp,
+    /** 票 #94：转场期间由根节点下发的透明度；非转场时为 null。 */
+    alphaOverride: Float? = null,
+    /** 票 #94：转场期间由根节点下发的放大倍数；非转场时为 null。 */
+    scaleOverride: Float? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.92f else 1f,
         animationSpec = spring(dampingRatio = 0.45f, stiffness = 420f),
         label = "loginArrowScale",
     )
+    // 转场期间按根节点给的倍数放大并淡出；否则用按压反馈的比例
+    val scale = scaleOverride ?: pressScale
+    val alpha = alphaOverride ?: 1f
 
     Box(
         modifier = modifier
             .size(size)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
             .clip(androidx.compose.foundation.shape.CircleShape)
             .clickable(interactionSource = interaction) { onClick() },
         contentAlignment = Alignment.Center,
