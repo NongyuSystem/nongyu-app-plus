@@ -170,32 +170,38 @@ fun LoginCenterScreen() {
                     wechatQrStateToken = null
                     submitting = true
                     android.util.Log.d("NongyuWechatQr", "扫码完成，提交 method=school")
+                    // 提交放在 NonCancellable 里：登录成功后根节点会切到 MAIN，
+                    // 本 Composable 离开组合会取消 LaunchedEffect 协程；若提交被半途取消，
+                    // 凭证可能没写进去，且 CancellationException 会被误判成"登录失败"。
                     try {
-                        val res = campusUseCase.submitCredential(
-                            r.credential, DeviceIdStore.getOrCreate(appContext),
-                        )
-                        when (res) {
-                            is SchoolLoginResult.Success -> {
-                                android.util.Log.d("NongyuWechatQr", "method=school 成功，应已切主界面")
-                                showHint(null)
-                            }
-                            is SchoolLoginResult.Failure -> {
-                                val failure = res.failure
-                                val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
-                                // 扫码是用户主动等待的动作，**任何失败都给可见提示**，
-                                // 不沿用"弱网零提示"口径（否则表现为"扫了没反应"）。
-                                val msg = LoginFailurePolicy.messageOf(code)
-                                    ?: res.message.takeIf { it.isNotBlank() }
-                                    ?: when (failure) {
-                                        is com.nongyu.appplus.net.core.ApiFailure.Timeout -> "登录超时，请重新扫码"
-                                        is com.nongyu.appplus.net.core.ApiFailure.Network -> "网络不可用，请重新扫码"
-                                        else -> "登录失败，请重新扫码"
-                                    }
-                                android.util.Log.d("NongyuWechatQr", "method=school 失败 code=$code msg=$msg")
-                                showHint(msg)
-                                wechatQrState = WechatQrState.FAILED
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            val res = campusUseCase.submitCredential(
+                                r.credential, DeviceIdStore.getOrCreate(appContext),
+                            )
+                            when (res) {
+                                is SchoolLoginResult.Success -> {
+                                    android.util.Log.d("NongyuWechatQr", "method=school 成功，应已切主界面")
+                                    // 不调用 showHint：此刻界面可能已开始切走，state 写入无意义
+                                }
+                                is SchoolLoginResult.Failure -> {
+                                    val failure = res.failure
+                                    val code = (failure as? com.nongyu.appplus.net.core.ApiFailure.Http)?.code
+                                    val msg = LoginFailurePolicy.messageOf(code)
+                                        ?: res.message.takeIf { it.isNotBlank() }
+                                        ?: when (failure) {
+                                            is com.nongyu.appplus.net.core.ApiFailure.Timeout -> "登录超时，请重新扫码"
+                                            is com.nongyu.appplus.net.core.ApiFailure.Network -> "网络不可用，请重新扫码"
+                                            else -> "登录失败，请重新扫码"
+                                        }
+                                    android.util.Log.d("NongyuWechatQr", "method=school 失败 code=$code msg=$msg")
+                                    showHint(msg)
+                                    wechatQrState = WechatQrState.FAILED
+                                }
                             }
                         }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // 组合离开导致的正常取消：不是失败，绝不写 FAILED / 错误提示
+                        android.util.Log.d("NongyuWechatQr", "组合离开，提交协程正常取消")
                     } catch (e: Exception) {
                         android.util.Log.w("NongyuWechatQr", "提交异常", e)
                         showHint("登录失败，请重新扫码")

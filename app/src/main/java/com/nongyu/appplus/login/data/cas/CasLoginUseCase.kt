@@ -151,6 +151,9 @@ class CasLoginUseCase(
      * 返回的 [CasLoginQr.url] 需由 UI 渲染成二维码；[CasLoginQr.state] 用于轮询。
      */
     suspend fun fetchLoginQr(): CasQrFetchResult {
+        // 取新码必须清掉上一轮残留的 tgt：否则新码的第一次轮询会
+        // 因拦截器里还有旧 cookieTgt 被误判成"已扫码"，形成 1 秒失效循环。
+        tgtInterceptor.reset()
         val body = jsonBody(json.encodeToString(CasQrAppIdBody.serializer(), CasQrAppIdBody(QR_APPID)))
         val envelope = call { api.getLoginQr(body) }
             ?: return CasQrFetchResult.Failure("")
