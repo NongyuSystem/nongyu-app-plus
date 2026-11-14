@@ -2,6 +2,7 @@ package com.nongyu.appplus.login.data.cas
 
 import com.nongyu.appplus.net.core.NongyuLogger
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
@@ -81,16 +82,19 @@ class CasLoginUseCase(
      * @param captchaCode 用户针对该图输入的图形码
      */
     suspend fun sendSmsCode(phone: String, captcha: CasCaptcha, captchaCode: String): CasSmsSendResult {
+        val dto = CasSmsSendBody(
+            uuid = captcha.uuid,
+            code = captchaCode,
+            // 必须显式传：NetJson 未开 encodeDefaults，默认值不会被序列化
+            type = CasSmsSendBody.SMS_TYPE_LOGIN,
+            phone = phone,
+        )
+        val encoded = json.encodeToString(CasSmsSendBody.serializer(), dto)
         logger.log(
             NongyuLogger.Level.DEBUG,
-            "sms/send 入参 phoneEmpty=${phone.isBlank()} codeEmpty=${captchaCode.isBlank()} uuidEmpty=${captcha.uuid.isBlank()} uuidLen=${captcha.uuid.length}",
+            "sms/send 请求体字段=${jsonKeysOf(encoded)} uuidLen=${captcha.uuid.length}",
         )
-        val body = jsonBody(
-            json.encodeToString(
-                CasSmsSendBody.serializer(),
-                CasSmsSendBody(captcha.uuid, captchaCode, phone = phone),
-            ),
-        )
+        val body = jsonBody(encoded)
         val envelope = call { api.sendSms(body) }
             ?: return CasSmsSendResult.Failure("")
         return if (envelope.code == 200) {
@@ -263,4 +267,15 @@ class CasLoginUseCase(
 
     private fun jsonBody(text: String) =
         text.toRequestBody("application/json".toMediaType())
+
+    /**
+     * 只取 JSON 的顶层字段名，用于日志核对「该带的字段带上了没」。
+     *
+     * 不打印字段值：手机号、验证码属于敏感信息，日志里只留字段名。
+     */
+    private fun jsonKeysOf(text: String): List<String> = try {
+        json.parseToJsonElement(text).jsonObject.keys.toList()
+    } catch (e: Exception) {
+        listOf("<unparsable>")
+    }
 }
