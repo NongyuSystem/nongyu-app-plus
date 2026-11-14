@@ -11,11 +11,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.login.model.LoginDestination
-import com.nongyu.appplus.login.model.LoginTransition
+import com.nongyu.appplus.login.model.LoginReveal
 import com.nongyu.appplus.login.session.LoginSessionHolder
 import com.nongyu.appplus.login.ui.LoginCenterScreen
 import com.nongyu.appplus.shell.MainShell
@@ -23,21 +27,24 @@ import com.nongyu.appplus.shell.MainShell
 /**
  * 应用根组件。
  *
- * 票 #90 起：根节点用 `when(会话状态)` 在「主界面 / 登录中心」之间切换（Q9=A），
- * 不引导航库。状态由 [LoginSessionHolder]（单一主接缝）持有：
- * - 首帧前 MainActivity 用会话存储判定落地去向，无「检查中」态；
- * - 首帧之后 `SessionStartupVerifier` 的校验结果只做事后纠正。
+ * 票 #90 起：根节点在「主界面 / 登录中心」之间切换（Q9=A），不引导航库。
+ * 状态由 [LoginSessionHolder]（单一主接缝）持有。
  *
- * 票 #94 起：**用户主动登录成功**时播放三段转场（见 [LoginTransition]）：
- * 登录按钮淡出放大 → 与主界面交叉溶解 → 主界面内容入场淡入。
- * 冷启动（本地已有凭证）直接渲染主界面，不播转场——由 [LoginTransition.shouldPlay]
- * 的 "LOGIN_CENTER → MAIN" 判据保证。
+ * 票 #94（修订）：登录成功播放**圆形揭示**转场（见 [LoginReveal]）。
  *
- * ## 为什么用 [Animatable] 主动推进入场进度，而不是 animateFloatAsState
- * `animateFloatAsState` 只在**目标值变化**时启动动画。转场的触发时机是
- * 「destination 刚刚变成 MAIN」，此时若把目标值设为 0、再改 1，
- * 会因为同一帧内合并而在某些时序下不启动，表现为「登录成功后停在登录页」。
- * 这里改成显式 `snapTo(0)` + `animateTo(1)`：进度由我们驱动，时序确定。
+ * ## 转场怎么画
+ * 点击登录后**主界面立刻渲染在最底层**；登录中心盖在它上面，并用
+ * [BlendMode.DstOut] 在自身绘制层上挖掉一个圆 —— 于是从前往外看，
+ * 登录页中间有一个**圆形缺口**，透过缺口看到下面的主界面。
+ * 随后缺口半径按 `t²` 扩大、圆心按 `t³` 向上移动，直到把登录页整层吃掉。
+ *
+ * 为什么不是「两层做 alpha 交叉溶解」：那会让两层同时半透明，屏幕整体发灰，
+ * 且看不到「一个圆」的形状。挖洞是硬边界，缺口内外都实心。
+ *
+ * ## 实现要点
+ * - 挖洞必须在**独立图层**上做：`graphicsLayer { compositingStrategy = Offscreen }`，
+ *   否则 `DstOut` 会把下面的主界面一起擦掉。
+ * - 遮罩用 `drawWithContent`：先 `drawContent()` 画登录页，再用 `DstOut` 画圆擦掉。
  *
  * 本组件**不发起网络请求**，也不访问 NetHolder（ADR-0006）。
  */
@@ -45,8 +52,8 @@ import com.nongyu.appplus.shell.MainShell
 fun NongyuApp() {
     val state = LoginSessionHolder.state.value
 
-    // 转场总进度：0 = 纯登录中心，1 = 纯主界面。
-    val progress = remember { Animatable(if (state.destination == LoginDestination.MAIN) 1f else 0f) }
+    // 转场进度：0 = 只有登录页（缺口等于按钮本身），1 = 登录页完全消失。
+    val progress = remember { Animatable(0f) }
     var playing by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(state.destination) }
 
@@ -55,13 +62,13 @@ fun NongyuApp() {
         val to = state.destination
         previousDestination = to
 
-        if (LoginTransition.shouldPlay(from, to)) {
-            // 主动播放：先归零再推进，保证动画一定启动
+        if (LoginReveal.shouldPlay(from, to)) {
+            // 主动驱动：先归零再推进，保证动画一定启动
             playing = true
             progress.snapTo(0f)
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(LoginTransition.DURATION_MS),
+                animationSpec = tween(LoginReveal.DURATION_MS),
             )
             playing = false
         } else {
@@ -72,34 +79,42 @@ fun NongyuApp() {
     }
 
     val p = progress.value
-    val buttonAlpha = LoginTransition.buttonAlpha(p)
-    val buttonScale = LoginTransition.buttonScale(p)
-    val mainAlpha = LoginTransition.mainAlpha(p)
-    val contentAlpha = LoginTransition.contentAlpha(p)
+    val revealRadiusRatio = LoginReveal.radiusRatio(p)
+    val revealCenterYRatio = LoginReveal.centerYRatio(p)
+    val loginGone = LoginReveal.isLoginLayerGone(p)
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 登录中心：转场期间**保留在下面**，只让它的登录按钮淡出放大。
-        // 不能因为是 MAIN 就立刻移除——否则主界面没有「从下面渐显」的对象，
-        // 交叉溶解会变成「凭空出现」。
-        if (state.destination == LoginDestination.LOGIN_CENTER || playing) {
-            LoginCenterScreen(
-                arrowAlphaOverride = if (playing) buttonAlpha else null,
-                arrowScaleOverride = if (playing) buttonScale else null,
-            )
+        // ---- 底层：主界面 ----
+        // 转场一开始就渲染，这样圆洞里透出的就是它（不是空白）
+        if (state.destination == LoginDestination.MAIN) {
+            MainShell()
         }
 
-        // 主界面：覆盖在登录中心之上，按交叉溶解 + 内容入场两级透明度显影。
-        if (state.destination == LoginDestination.MAIN) {
+        // ---- 上层：登录中心 + 挖洞 ----
+        // 转场期间保留；一旦缺口覆盖全屏就可以整层移除，省一次全屏绘制
+        if (state.destination == LoginDestination.LOGIN_CENTER || (playing && !loginGone)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        // mainAlpha 控制与登录按钮交叉溶解的整屏透明度；
-                        // contentAlpha 控制内容再显影一次，两者相乘即最终透明度。
-                        alpha = (mainAlpha * contentAlpha).coerceIn(0f, 1f)
+                    // 必须在独立图层里挖洞，否则 DstOut 会擦到下面的主界面
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        if (playing) {
+                            // DstOut：把已画内容中「这个圆内」的部分擦成透明
+                            drawCircle(
+                                color = androidx.compose.ui.graphics.Color.Black,
+                                radius = revealRadiusRatio * size.width,
+                                center = Offset(
+                                    x = LoginReveal.CENTER_X_RATIO * size.width,
+                                    y = revealCenterYRatio * size.height,
+                                ),
+                                blendMode = BlendMode.DstOut,
+                            )
+                        }
                     },
             ) {
-                MainShell()
+                LoginCenterScreen()
             }
         }
     }
