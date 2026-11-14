@@ -256,9 +256,11 @@ fun LoginCenterScreen() {
         }
     }
 
-    val mainSize = 73.dp
-    val sideSize = 70.dp
-    val gap = 16.dp
+    // 真机适配：所有尺寸按屏幕等比缩放（基准蓝叠 540×1200dp）
+    val uiScale = rememberLoginScale()
+    val mainSize = 73f.scaledDp(uiScale)
+    val sideSize = 70f.scaledDp(uiScale)
+    val gap = 16f.scaledDp(uiScale)
     /** 从屏幕顶部算的圆心位置：0.25 = 从底部往上 3/4。 */
     val heightRatio = 0.25f
 
@@ -278,11 +280,11 @@ fun LoginCenterScreen() {
         Text(
             text = "农屿 X",
             color = colors.surface.colorText,
-            fontSize = 54.sp,
+            fontSize = 54f.scaledSp(uiScale),
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 32.dp, top = 64.dp),
+                .padding(start = 32f.scaledDp(uiScale), top = 64f.scaledDp(uiScale)),
         )
 
         val progress by animateFloatAsState(
@@ -367,10 +369,10 @@ fun LoginCenterScreen() {
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = centerY + mainSize / 2 + 36.dp)
+                .offset(y = centerY + mainSize / 2 + 36f.scaledDp(uiScale))
                 .fillMaxWidth()
                 // 长表单（微信二维码 / 邮箱验证码）可滚动，避免被屏幕底部截断
-                .height(screenH - centerY - mainSize / 2 - 36.dp)
+                .height(screenH - centerY - mainSize / 2 - 36f.scaledDp(uiScale))
                 .verticalScroll(rememberScrollState()),
         ) {
             LoginFormBox(
@@ -750,7 +752,8 @@ fun LoginCenterScreen() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 148.dp),
+                .padding(bottom = 148f.scaledDp(uiScale)),
+            size = 88f.scaledDp(uiScale),
         )
 
 
@@ -759,12 +762,12 @@ fun LoginCenterScreen() {
         Text(
             text = "IOT 工作室制作",
             color = colors.surface.colorTextSecondary,
-            fontSize = 12.sp,
+            fontSize = 12f.scaledSp(uiScale),
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 32.dp)
+                .padding(bottom = 32f.scaledDp(uiScale))
                 .fillMaxWidth(),
         )
 
@@ -776,17 +779,17 @@ fun LoginCenterScreen() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 72.dp),
+                .padding(bottom = 72f.scaledDp(uiScale)),
         ) {
             // 唯一的提示出口：字号与颜色要够醒目、允许换行（学校侧 msg 可能较长）
             Text(
                 text = hint,
                 color = colors.surface.colorText,
-                fontSize = 14.sp,
+                fontSize = 14f.scaledSp(uiScale),
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 32.dp),
+                    .padding(horizontal = 32f.scaledDp(uiScale)),
             )
         }
     }
@@ -1095,8 +1098,8 @@ private fun LoginArrowButton(
     colors: NongyuColors,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = 88.dp,
 ) {
-    val size = 88.dp
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(

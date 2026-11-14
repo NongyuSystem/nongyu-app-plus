@@ -111,12 +111,14 @@ fun LoginFormBox(
     /** 复制链接并跳转微信。 */
     onCopyAndOpenWechat: () -> Unit = {},
 ) {
+    // 真机适配：所有尺寸按屏幕等比缩放（基准蓝叠 540×1200dp）
+    val uiScale = rememberLoginScale()
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp),
+            .padding(horizontal = 32f.scaledDp(uiScale)),
         // 组件间隔拉开：原 12dp → 20dp
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20f.scaledDp(uiScale)),
     ) {
 
 
@@ -236,15 +238,16 @@ fun LoginFormBox(
  */
 @Composable
 private fun EyeIcon(visible: Boolean, colors: NongyuColors) {
+    val uiScale = rememberLoginScale()
     val tint = colors.surface.colorTextSecondary
-    Canvas(modifier = Modifier.size(22.dp)) {
+    Canvas(modifier = Modifier.size(22f.scaledDp(uiScale))) {
         val w = size.width
         val h = size.height
         val cx = w / 2f
         val cy = h / 2f
         val rx = w * 0.40f
         val ry = h * 0.26f
-        val stroke = 1.6.dp.toPx()
+        val stroke = 1.6f.scaledDp(uiScale).toPx()
 
         // 眼眶
         if (visible) {
@@ -307,6 +310,7 @@ private fun PullInItem(
     key: Any?,
     content: @Composable () -> Unit,
 ) {
+    val uiScale = rememberLoginScale()
     var visible by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
         delay((index * 60L).coerceAtMost(600L))
@@ -319,7 +323,7 @@ private fun PullInItem(
     )
     Box(
         modifier = Modifier.graphicsLayer {
-            translationY = (-120.dp.toPx()) * (1f - progress)
+            translationY = (-120f.scaledDp(uiScale).toPx()) * (1f - progress)
             alpha = progress
         },
     ) {
@@ -330,10 +334,11 @@ private fun PullInItem(
 /** 表单标题。 */
 @Composable
 private fun FormTitle(text: String, colors: NongyuColors) {
+    val uiScale = rememberLoginScale()
     Text(
         text = text,
         color = colors.surface.colorText,
-        fontSize = 15.sp,
+        fontSize = 15f.scaledSp(uiScale),
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -354,6 +359,7 @@ private fun FormField(
     value: String? = null,
     onValueChange: (String) -> Unit = {},
 ) {
+    val uiScale = rememberLoginScale()
     var internalText by remember { mutableStateOf("") }
     val text = value ?: internalText
     val interaction = remember { MutableInteractionSource() }
@@ -365,18 +371,18 @@ private fun FormField(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp),
+            .height(48f.scaledDp(uiScale)),
     ) {
         // 底色 + 描边（矢量）
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawRoundRect(
                 color = colors.surface.colorCard,
-                cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx()),
+                cornerRadius = CornerRadius(12f.scaledDp(uiScale).toPx(), 12f.scaledDp(uiScale).toPx()),
             )
             drawRoundRect(
                 color = colors.surface.colorOutline,
-                cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx()),
+                cornerRadius = CornerRadius(12f.scaledDp(uiScale).toPx(), 12f.scaledDp(uiScale).toPx()),
+                style = Stroke(width = 1f.scaledDp(uiScale).toPx()),
             )
         }
 
@@ -384,8 +390,8 @@ private fun FormField(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    start = 14.dp,
-                    end = if (isPassword) 44.dp else 14.dp,
+                    start = 14f.scaledDp(uiScale),
+                    end = if (isPassword) 44f.scaledDp(uiScale) else 14f.scaledDp(uiScale),
                 ),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -393,7 +399,7 @@ private fun FormField(
                 Text(
                     text = placeholder,
                     color = colors.surface.colorTextSecondary.copy(alpha = 0.55f),
-                    fontSize = 13.sp,
+                    fontSize = 13f.scaledSp(uiScale),
                 )
             }
             BasicTextField(
@@ -405,7 +411,7 @@ private fun FormField(
                 singleLine = true,
                 textStyle = androidx.compose.ui.text.TextStyle(
                     color = colors.surface.colorText,
-                    fontSize = 13.sp,
+                    fontSize = 13f.scaledSp(uiScale),
                 ),
                 cursorBrush = SolidColor(colors.brand.colorBrand),
                 visualTransformation = if (isPassword && !passwordVisible) {
@@ -423,7 +429,7 @@ private fun FormField(
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .size(40.dp)
+                    .size(40f.scaledDp(uiScale))
                     // 无 indication → 不产生水波纹
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -452,6 +458,7 @@ private fun FormFieldWithAction(
     onAction: () -> Unit,
     onValueChange: (String) -> Unit = {},
 ) {
+    val uiScale = rememberLoginScale()
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -459,27 +466,27 @@ private fun FormFieldWithAction(
         Box(modifier = Modifier.weight(1f)) {
             FormField(placeholder, colors, onValueChange = onValueChange)
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12f.scaledDp(uiScale)))
         Box(
             modifier = Modifier
-                .height(48.dp)
-                .widthIn(min = 104.dp)
+                .height(48f.scaledDp(uiScale))
+                .widthIn(min = 104f.scaledDp(uiScale))
                 .background(
                     if (actionState.enabled) colors.brand.colorBrandMuted
                     else colors.surface.colorCard,
-                    RoundedCornerShape(12.dp),
+                    RoundedCornerShape(12f.scaledDp(uiScale)),
                 )
                 // clip 放在 clickable 之前，让水波纹按圆角矩形边界扩散（否则是直角矩形）
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12f.scaledDp(uiScale)))
                 .clickable(enabled = actionState.enabled) { onAction() }
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 10f.scaledDp(uiScale)),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = actionState.label,
                 color = if (actionState.enabled) colors.brand.colorBrand
                         else colors.surface.colorTextSecondary.copy(alpha = 0.6f),
-                fontSize = 12.sp,
+                fontSize = 12f.scaledSp(uiScale),
                 textAlign = TextAlign.Center,
             )
         }
@@ -500,6 +507,7 @@ private fun LocalCaptchaRow(
     onValueChange: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val uiScale = rememberLoginScale()
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -507,11 +515,11 @@ private fun LocalCaptchaRow(
         Box(modifier = Modifier.weight(1f)) {
             FormField(placeholder, colors, onValueChange = onValueChange)
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12f.scaledDp(uiScale)))
         Box(
             modifier = Modifier
-                .size(width = 100.dp, height = 48.dp)
-                .background(colors.brand.colorBrandMuted, RoundedCornerShape(12.dp))
+                .size(width = 100f.scaledDp(uiScale), height = 48f.scaledDp(uiScale))
+                .background(colors.brand.colorBrandMuted, RoundedCornerShape(12f.scaledDp(uiScale)))
                 .clickable { onRefresh() },
             contentAlignment = Alignment.Center,
         ) {
@@ -523,19 +531,19 @@ private fun LocalCaptchaRow(
                     color = colors.surface.colorTextSecondary.copy(alpha = 0.30f),
                     start = Offset(w * 0.08f, h * 0.72f),
                     end = Offset(w * 0.92f, h * 0.28f),
-                    strokeWidth = 1.5.dp.toPx(),
+                    strokeWidth = 1.5f.scaledDp(uiScale).toPx(),
                 )
                 drawLine(
                     color = colors.surface.colorTextSecondary.copy(alpha = 0.22f),
                     start = Offset(w * 0.12f, h * 0.30f),
                     end = Offset(w * 0.88f, h * 0.70f),
-                    strokeWidth = 1.5.dp.toPx(),
+                    strokeWidth = 1.5f.scaledDp(uiScale).toPx(),
                 )
             }
             Text(
                 text = captcha.text,
                 color = colors.brand.colorBrand,
-                fontSize = 18.sp,
+                fontSize = 18f.scaledSp(uiScale),
             )
         }
     }
@@ -555,6 +563,7 @@ private fun CaptchaRow(
     /** 点验证码图换一张（看图一次即作废，填错要能刷新）。 */
     onRefreshCaptcha: () -> Unit = {},
 ) {
+    val uiScale = rememberLoginScale()
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -562,7 +571,7 @@ private fun CaptchaRow(
         Box(modifier = Modifier.weight(1f)) {
             FormField(placeholder, colors, onValueChange = onValueChange)
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12f.scaledDp(uiScale)))
         CaptchaImage(colors, captchaImage, onRefreshCaptcha)
     }
 }
@@ -575,6 +584,7 @@ private fun CaptchaRow(
  */
 @Composable
 private fun CaptchaImage(colors: NongyuColors, dataUri: String?, onClick: () -> Unit = {}) {
+    val uiScale = rememberLoginScale()
     val bitmap = remember(dataUri) {
         CaptchaImageDecoder.decode(dataUri)?.let { bytes ->
             android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -583,8 +593,8 @@ private fun CaptchaImage(colors: NongyuColors, dataUri: String?, onClick: () -> 
 
     Box(
         modifier = Modifier
-            .size(width = 100.dp, height = 48.dp)
-            .background(colors.brand.colorBrandMuted, RoundedCornerShape(12.dp))
+            .size(width = 100f.scaledDp(uiScale), height = 48f.scaledDp(uiScale))
+            .background(colors.brand.colorBrandMuted, RoundedCornerShape(12f.scaledDp(uiScale)))
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
@@ -593,13 +603,13 @@ private fun CaptchaImage(colors: NongyuColors, dataUri: String?, onClick: () -> 
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "图形验证码",
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().padding(2.dp),
+                modifier = Modifier.fillMaxSize().padding(2f.scaledDp(uiScale)),
             )
         } else {
             Text(
                 text = "验证码",
                 color = colors.surface.colorTextSecondary,
-                fontSize = 12.sp,
+                fontSize = 12f.scaledSp(uiScale),
             )
         }
     }
@@ -615,6 +625,7 @@ private fun WechatQrPanel(
     onDownloadAndOpenWechat: () -> Unit,
     onCopyAndOpenWechat: () -> Unit,
 ) {
+    val uiScale = rememberLoginScale()
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -622,20 +633,20 @@ private fun WechatQrPanel(
         // 二维码图片区
         Box(
             modifier = Modifier
-                .size(200.dp)
-                .background(colors.surface.colorCard, RoundedCornerShape(14.dp)),
+                .size(200f.scaledDp(uiScale))
+                .background(colors.surface.colorCard, RoundedCornerShape(14f.scaledDp(uiScale))),
             contentAlignment = Alignment.Center,
         ) {
             when (qrState) {
                 WechatQrState.LOADING -> Text(
                     text = "正在获取二维码…",
                     color = colors.surface.colorTextSecondary,
-                    fontSize = 13.sp,
+                    fontSize = 13f.scaledSp(uiScale),
                 )
                 WechatQrState.READY -> {
                     val matrix = remember(qrUrl) { qrUrl?.let { QrEncoder.encode(it) } }
                     if (matrix != null) {
-                        Canvas(modifier = Modifier.size(180.dp)) {
+                        Canvas(modifier = Modifier.size(180f.scaledDp(uiScale))) {
                             val n = matrix.size
                             val cell = size.width / n
                             for (y in 0 until n) for (x in 0 until n) {
@@ -649,27 +660,27 @@ private fun WechatQrPanel(
                             }
                         }
                     } else {
-                        Text("二维码生成失败", color = colors.surface.colorTextSecondary, fontSize = 12.sp)
+                        Text("二维码生成失败", color = colors.surface.colorTextSecondary, fontSize = 12f.scaledSp(uiScale))
                     }
                 }
                 WechatQrState.FAILED -> Text(
                     text = "二维码已失效",
                     color = colors.surface.colorTextSecondary,
-                    fontSize = 13.sp,
+                    fontSize = 13f.scaledSp(uiScale),
                 )
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(10f.scaledDp(uiScale)))
         Text(
             text = statusText,
             color = colors.surface.colorTextSecondary,
-            fontSize = 12.sp,
+            fontSize = 12f.scaledSp(uiScale),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(12f.scaledDp(uiScale)))
         // 两个按钮：上下排布（按维护者要求），各占满一行
         PanelButton(
             text = "下载二维码并跳转微信",
@@ -678,7 +689,7 @@ private fun WechatQrPanel(
             modifier = Modifier.fillMaxWidth(),
             onClick = onDownloadAndOpenWechat,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(10f.scaledDp(uiScale)))
         PanelButton(
             text = "复制链接并跳转微信",
             colors = colors,
@@ -687,11 +698,11 @@ private fun WechatQrPanel(
             onClick = onCopyAndOpenWechat,
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(8f.scaledDp(uiScale)))
         Text(
             text = "刷新二维码",
             color = colors.brand.colorBrand,
-            fontSize = 12.sp,
+            fontSize = 12f.scaledSp(uiScale),
             modifier = Modifier.clickable { onRefresh() },
         )
     }
@@ -709,23 +720,24 @@ private fun PanelButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val uiScale = rememberLoginScale()
     Box(
         modifier = modifier
-            .height(44.dp)
+            .height(44f.scaledDp(uiScale))
             .background(
                 if (enabled) colors.brand.colorBrandMuted else colors.surface.colorCard,
-                RoundedCornerShape(10.dp),
+                RoundedCornerShape(10f.scaledDp(uiScale)),
             )
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10f.scaledDp(uiScale)))
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = 6f.scaledDp(uiScale)),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             color = if (enabled) colors.brand.colorBrand
                     else colors.surface.colorTextSecondary.copy(alpha = 0.5f),
-            fontSize = 11.sp,
+            fontSize = 11f.scaledSp(uiScale),
             textAlign = TextAlign.Center,
         )
     }
