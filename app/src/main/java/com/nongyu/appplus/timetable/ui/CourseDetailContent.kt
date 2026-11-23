@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -502,38 +503,54 @@ private fun AttendanceSection(
             fontSize = (7.5f * uiScale).sp,
         )
         Spacer(Modifier.height(s(5.dp)))
-        // 一次课 = 一个小格子；日期就是它的身份
-        Column(verticalArrangement = Arrangement.spacedBy(s(3.dp))) {
-            dates.chunked(8).forEach { rowDates ->
-                Row(horizontalArrangement = Arrangement.spacedBy(s(4.dp))) {
-                    rowDates.forEach { date ->
-                        val iso = date.toString()
-                        val on = attendance[iso] == true
-                        val occurred = !date.isAfter(today)
-                        Box(
-                            modifier = Modifier
-                                .size(s(18.dp))
-                                .clip(RoundedCornerShape(s(4.dp)))
-                                .background(
-                                    when {
-                                        on -> colors.brand.colorBrand
-                                        occurred -> colors.surface.colorOutline.copy(alpha = 0.75f)
-                                        else -> colors.surface.colorOutline.copy(alpha = 0.30f)
+        // 一次课 = 一个小格子；日期就是它的身份。
+        //
+        // 2026-11-23：格子由 18dp 正方加宽到 30dp（装得下「11/23」），
+        // 所以每行能放几个不能再写死 8 —— 那会在窄卡里挤出边界。
+        // 改为按**实测可用宽度**推算，卡片变宽自动多放几个。
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val cellW = with(density) { s(30.dp).toPx() }
+            val gapW = with(density) { s(4.dp).toPx() }
+            val perRow = if (cellW > 0f) {
+                ((constraints.maxWidth + gapW) / (cellW + gapW)).toInt().coerceAtLeast(1)
+            } else {
+                6
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(s(3.dp))) {
+                dates.chunked(perRow).forEach { rowDates ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(s(4.dp))) {
+                        rowDates.forEach { date ->
+                            val iso = date.toString()
+                            val on = attendance[iso] == true
+                            val occurred = !date.isAfter(today)
+                            Box(
+                                modifier = Modifier
+                                    // 标签是「11/23」这种 5 字符日期，正方形会挤到贴边；
+                                    // 加宽后左右有留白，高度不变以免占更多竖向空间。
+                                    .size(width = s(30.dp), height = s(18.dp))
+                                    .clip(RoundedCornerShape(s(4.dp)))
+                                    .background(
+                                        when {
+                                            on -> colors.brand.colorBrand
+                                            occurred -> colors.surface.colorOutline.copy(alpha = 0.75f)
+                                            else -> colors.surface.colorOutline.copy(alpha = 0.30f)
+                                        },
+                                    )
+                                    .clickable { onToggle(iso) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "${date.monthValue}/${date.dayOfMonth}",
+                                    color = if (on) {
+                                        colors.brand.colorOnBrand
+                                    } else {
+                                        colors.surface.colorTextSecondary
                                     },
+                                    fontSize = (6.5f * uiScale).sp,
+                                    fontWeight = FontWeight.Bold,
                                 )
-                                .clickable { onToggle(iso) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = "${date.monthValue}/${date.dayOfMonth}",
-                                color = if (on) {
-                                    colors.brand.colorOnBrand
-                                } else {
-                                    colors.surface.colorTextSecondary
-                                },
-                                fontSize = (6.5f * uiScale).sp,
-                                fontWeight = FontWeight.Bold,
-                            )
+                            }
                         }
                     }
                 }
