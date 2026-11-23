@@ -38,13 +38,17 @@ fun DetailCardContent(
     uiScale: Float,
     location: String,
     teacher: String,
-    attendance: Map<Int, Boolean>,
+    attendance: Map<String, Boolean>,
     note: String,
     comments: List<String>,
     /** 教师行内修改：调用方负责更新显示值与落盘。 */
     onTeacherChange: (String) -> Unit,
     /** 考勤点击：调用方负责翻转合并态与落盘。 */
-    onAttendanceToggle: (Int) -> Unit,
+    onAttendanceToggle: (String) -> Unit,
+    /** 学期课次统计（总课次 / 已上 / 剩余）。 */
+    attendanceStats: com.nongyu.appplus.timetable.logic.AttendanceStats.Stats?,
+    /** 学期首日，用于把周次换算成日期。 */
+    termStart: java.time.LocalDate,
     /** 备注输入：调用方负责更新本地真源（落盘由防抖 effect 负责）。 */
     onNoteChange: (String) -> Unit,
     /** 评论增删后重新拉取列表。 */
@@ -81,6 +85,8 @@ fun DetailCardContent(
         weekText = weeksLabelOf(course),
         onWeekEdit = onWeekEdit,
         attendance = attendance,
+        attendanceStats = attendanceStats,
+        termStart = termStart,
         onAttendanceToggle = onAttendanceToggle,
         note = note,
         onNoteChange = onNoteChange,

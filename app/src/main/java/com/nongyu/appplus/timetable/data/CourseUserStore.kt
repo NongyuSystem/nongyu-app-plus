@@ -76,15 +76,58 @@ class CourseUserStore(private val context: Context) {
         }
     }
 
-    /** 某节课是否已考勤。null = 无记录，由调用方按「课程是否已结束」给默认值。 */
-    fun attendance(courseId: String, period: Int): Flow<Boolean?> =
+    /**
+     * 某天这次课是否已考勤。`null` = 无记录。
+     *
+     * ## 为什么键里必须带日期（2026-11-23 修正）
+     *
+     * 原键是 `att_<courseId>_<period>` —— **没有日期**。
+     * 一门 1-16 周的课每周都上，但键只有「课程 + 节次」，
+     * 于是第 1 周打过的考勤会让第 2 周自动变成已考勤，一学期实际只能记一次。
+     *
+     * 现在改为 `att_<courseId>_<ISO日期>`，按「哪一次课」独立记录。
+     * 学期统计（总课次 / 已上 / 剩余）由 `AttendanceStats` 按日期推导，不在存储里另存计数。
+     *
+     * ⚠️ 旧键不做迁移：老记录没有日期，无法判断属于哪一周，强行猜会写错数据。
+     *
+     * @param isoDate 形如 `2026-11-23`（`LocalDate.toString()` 的格式）
+     */
+    fun attendance(courseId: String, isoDate: String): Flow<Boolean?> =
         context.courseUserDataStore.data
             .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
-            .map { prefs -> prefs[booleanPreferencesKey("att_${courseId}_$period")] }
+            .map { prefs -> prefs[booleanPreferencesKey("att_${courseId}_${isoDate}")] }
 
-    suspend fun setAttendance(courseId: String, period: Int, attended: Boolean) {
+    suspend fun setAttendance(courseId: String, isoDate: String, attended: Boolean) {
         context.courseUserDataStore.edit { prefs ->
-            prefs[booleanPreferencesKey("att_${courseId}_$period")] = attended
+            prefs[booleanPreferencesKey("att_${courseId}_${isoDate}")] = attended
+        }
+    }
+
+    /**
+     * 一次性读取某课程**所有**考勤记录（日期 → 是否已上）。
+     *
+     * 学期统计要按日期遍历，逐日收集 Flow 太碎，这里给一个整表读取。
+     */
+    suspend fun attendanceAll(courseId: String): Map<String, Boolean> =
+        runCatching {
+            val prefs = context.courseUserDataStore.data.first()
+            val prefix = "att_${courseId}_"
+            prefs.asMap()
+                .filterKeys { it.name.startsWith(prefix) }
+                .mapNotNull { (key, value) ->
+                    val date = key.name.removePrefix(prefix)
+                    val on = value as? Boolean ?: return@mapNotNull null
+                    date to on
+                }
+                .toMap()
+        }.getOrDefault(emptyMap())
+
+    /** 写入某天考勤（供批量勾选）。 */
+    suspend fun setAttendanceBatch(courseId: String, attendance: Map<String, Boolean>) {
+        context.courseUserDataStore.edit { prefs ->
+            attendance.forEach { (date, on) ->
+                prefs[booleanPreferencesKey("att_${courseId}_${date}")] = on
+            }
         }
     }
 

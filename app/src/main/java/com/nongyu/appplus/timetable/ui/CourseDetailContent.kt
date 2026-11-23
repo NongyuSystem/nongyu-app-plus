@@ -81,9 +81,14 @@ fun CourseDetailContent(
     weekText: String,
     /** 打开周次编辑子窗体（日历 + 固定周 + 例外天）。 */
     onWeekEdit: () -> Unit,
-    /** 考勤状态：period -> 是否已考勤。 */
-    attendance: Map<Int, Boolean>,
-    onAttendanceToggle: (Int) -> Unit,
+    /** 考勤记录：ISO 日期 → 是否已上（按「哪一次课」记录，不再按节次）。 */
+    attendance: Map<String, Boolean>,
+    /** 学期课次统计：总课次 / 已上 / 剩余。 */
+    attendanceStats: com.nongyu.appplus.timetable.logic.AttendanceStats.Stats?,
+    /** 学期首日，用于把周次换算成日期。 */
+    termStart: java.time.LocalDate,
+    /** 点击某一次课（传 ISO 日期）切换考勤。 */
+    onAttendanceToggle: (String) -> Unit,
     /** 备注文本与写入回调。 */
     note: String,
     onNoteChange: (String) -> Unit,
@@ -235,7 +240,14 @@ fun CourseDetailContent(
                 SectionDivider(uiScale)
                 Spacer(Modifier.height(s(6.dp)))
                 StagedSlideIn(progress = expandProgress, threshold = 0.30f, density = density) {
-                    AttendanceSection(course, attendance, onAttendanceToggle, uiScale)
+                    AttendanceSection(
+                        course = course,
+                        attendance = attendance,
+                        stats = attendanceStats,
+                        termStart = termStart,
+                        onToggle = onAttendanceToggle,
+                        uiScale = uiScale,
+                    )
                 }
 
                 Spacer(Modifier.height(s(8.dp)))
@@ -457,42 +469,73 @@ private fun SectionDivider(uiScale: Float) {
 @Composable
 private fun AttendanceSection(
     course: CourseEntry,
-    attendance: Map<Int, Boolean>,
-    onToggle: (Int) -> Unit,
+    attendance: Map<String, Boolean>,
+    stats: com.nongyu.appplus.timetable.logic.AttendanceStats.Stats?,
+    termStart: java.time.LocalDate,
+    onToggle: (String) -> Unit,
     uiScale: Float,
 ) {
     val colors = NongyuTheme.colors
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
-    val periods = course.startPeriod..course.endPeriod
-    val attendedCount = periods.count { attendance[it] == true }
+
+    val dates = com.nongyu.appplus.timetable.logic.AttendanceStats
+        .sessionDates(course, termStart)
+    if (dates.isEmpty() || stats == null || !stats.hasData) return
+
+    val today = java.time.LocalDate.now()
+    val attendedCount = dates.count { attendance[it.toString()] == true }
+    val occurredCount = dates.count { !it.isAfter(today) }
+    val absentCount = (occurredCount - attendedCount).coerceAtLeast(0)
+    val canAskLeave = (dates.size - occurredCount - absentCount).coerceAtLeast(0)
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "考勤 · 已考勤 $attendedCount / 应到 ${periods.count()}",
+            text = "考勤 · 已上 $attendedCount / 共 ${dates.size} 次",
             color = colors.surface.colorText,
             fontSize = (9.5f * uiScale).sp,
             fontWeight = FontWeight.Bold,
         )
+        Spacer(Modifier.height(s(2.dp)))
+        Text(
+            text = "缺勤 $absentCount 次 · 还能请假 $canAskLeave 次",
+            color = colors.surface.colorTextSecondary,
+            fontSize = (7.5f * uiScale).sp,
+        )
         Spacer(Modifier.height(s(5.dp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(s(5.dp))) {
-            periods.forEach { p ->
-                val on = attendance[p] == true
-                Box(
-                    modifier = Modifier
-                        .size(s(20.dp))
-                        .clip(RoundedCornerShape(s(5.dp)))
-                        .background(
-                            if (on) colors.brand.colorBrand
-                            else colors.surface.colorOutline.copy(alpha = 0.55f),
-                        )
-                        .clickable { onToggle(p) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "$p",
-                        color = if (on) colors.brand.colorOnBrand else colors.surface.colorTextSecondary,
-                        fontSize = (8f * uiScale).sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+        // 一次课 = 一个小格子；日期就是它的身份
+        Column(verticalArrangement = Arrangement.spacedBy(s(3.dp))) {
+            dates.chunked(8).forEach { rowDates ->
+                Row(horizontalArrangement = Arrangement.spacedBy(s(4.dp))) {
+                    rowDates.forEach { date ->
+                        val iso = date.toString()
+                        val on = attendance[iso] == true
+                        val occurred = !date.isAfter(today)
+                        Box(
+                            modifier = Modifier
+                                .size(s(18.dp))
+                                .clip(RoundedCornerShape(s(4.dp)))
+                                .background(
+                                    when {
+                                        on -> colors.brand.colorBrand
+                                        occurred -> colors.surface.colorOutline.copy(alpha = 0.75f)
+                                        else -> colors.surface.colorOutline.copy(alpha = 0.30f)
+                                    },
+                                )
+                                .clickable { onToggle(iso) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "${date.monthValue}/${date.dayOfMonth}",
+                                color = if (on) {
+                                    colors.brand.colorOnBrand
+                                } else {
+                                    colors.surface.colorTextSecondary
+                                },
+                                fontSize = (6.5f * uiScale).sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                 }
             }
         }

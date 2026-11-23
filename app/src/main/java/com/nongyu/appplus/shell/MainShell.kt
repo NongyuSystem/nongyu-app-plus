@@ -245,15 +245,38 @@ fun MainShell() {
         }
     }
 
-    // 考勤：period -> 是否已考勤。默认按「课程结束时刻 < 现在」判定已考勤；
-    // 持久层里有显式记录时以记录为准（用户点过就听用户的）。
-    // 合并优先级住在 logic/mergeAttendance（有单测：显式记录必须压过时间判定）。
-    var attendanceOverrides by remember(courseId) {
-        mutableStateOf<Map<Int, Boolean>>(emptyMap())
+    // 考勤：**按「哪一次课」记录**（ISO 日期 → 是否已上），不再按节次。
+    //
+    // 2026-11-23 维护者指正：原来用 `period -> Boolean`，一门 1-16 周的课每周都上，
+    // 键却只有「课程 + 节次」，于一学期只能记一次考勤；而详情卡里显示的
+    // 「应到 2」其实是**单次课的节数**，不是学期课次（12/8 次）。
+    //
+    // 现在：存储按日期，展示按「学期课次统计」（AttendanceStats 逐周推导，含单双周）。
+    var attendanceByDate by remember(courseId) {
+        mutableStateOf<Map<String, Boolean>>(emptyMap())
     }
-    val effectiveAttendance: Map<Int, Boolean> = remember(courseId, attendanceOverrides) {
-        mergeAttendance(detailCourse, attendanceOverrides) { p -> isPeriodEnded(p) }
+    // 首次打开时从持久层读出该课程的全部考勤
+    LaunchedEffect(courseId) {
+        attendanceByDate = if (courseId != null) {
+            courseUserStore.attendanceAll(courseId)
+        } else {
+            emptyMap()
+        }
     }
+    // 学期统计：总课次 / 已上课次 / 剩余（可请假）次数
+    val attendanceStats: com.nongyu.appplus.timetable.logic.AttendanceStats.Stats? =
+        remember(courseId, attendanceByDate) {
+            val c = detailCourse
+            if (c == null) {
+                null
+            } else {
+                com.nongyu.appplus.timetable.logic.AttendanceStats.compute(
+                    course = c,
+                    termStart = com.nongyu.appplus.timetable.data.MOCK_TERM_START,
+                    today = java.time.LocalDate.now(),
+                )
+            }
+        }
 
     // 评论（mock 后端，进程内可增删）
     var comments by remember(courseId) {
@@ -788,7 +811,9 @@ fun MainShell() {
                             uiScale = uiScale,
                             location = locDay ?: locGeneral ?: course.room,
                             teacher = teacherOverride ?: course.teacher,
-                            attendance = effectiveAttendance,
+                            attendance = attendanceByDate,
+                            attendanceStats = attendanceStats,
+                            termStart = com.nongyu.appplus.timetable.data.MOCK_TERM_START,
                             note = noteText,
                             comments = comments,
                             onTeacherChange = { v ->
@@ -796,11 +821,11 @@ fun MainShell() {
                                     courseUserStore.setTeacherOverride(course.id, v)
                                 }
                             },
-                            onAttendanceToggle = { p ->
-                                attendanceOverrides = toggledAttendance(effectiveAttendance, p)
-                                val next = attendanceOverrides[p] ?: false
+                            onAttendanceToggle = { isoDate ->
+                                val next = !(attendanceByDate[isoDate] ?: false)
+                                attendanceByDate = attendanceByDate + (isoDate to next)
                                 coroutineScope.launch {
-                                    courseUserStore.setAttendance(course.id, p, next)
+                                    courseUserStore.setAttendance(course.id, isoDate, next)
                                 }
                             },
                             onNoteChange = { text -> noteText = text },
