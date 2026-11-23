@@ -113,4 +113,30 @@ class RoomLineBreakerTest {
         assertFalse(RoomLineBreaker.needsTwoLines("东操场", maxChars = 20))
         assertFalse(RoomLineBreaker.needsTwoLines("", maxChars = 20))
     }
+
+    // ---- displayLines（给 UI 用）----
+
+    @Test
+    fun `displayLines 保留原文的室字`() {
+        // 维护者明确：不去掉「室」字，教室名原样保留
+        assertEquals(listOf("10-", "B201室"), RoomLineBreaker.displayLines("10-B201室", maxChars = 20))
+    }
+
+    @Test
+    fun `displayLines 最多两行`() {
+        val room = "很长很长很长很长很长很长的教室名字"
+        assertTrue(RoomLineBreaker.displayLines(room, maxChars = 3).size <= 2)
+    }
+
+    @Test
+    fun `displayLines 去掉切分后两端的空格`() {
+        // 横杠切断后后半段可能带空格
+        val lines = RoomLineBreaker.displayLines("10- B201室", maxChars = 20)
+        assertEquals(listOf("10-", "B201室"), lines)
+    }
+
+    @Test
+    fun `displayLines 对空教室返回空列表`() {
+        assertTrue(RoomLineBreaker.displayLines("", maxChars = 10).isEmpty())
+    }
 }

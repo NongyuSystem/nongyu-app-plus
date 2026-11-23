@@ -71,4 +71,26 @@ object RoomLineBreaker {
      */
     fun needsTwoLines(room: String, maxChars: Int): Boolean =
         breakLines(room, maxChars).size > 1
+
+    /**
+     * 给 UI 用的行列表：在 [breakLines] 基础上做**展示层**的收尾。
+     *
+     * ## 与 [breakLines] 的区别
+     *
+     * [breakLines] 严格按「横杠优先 / 字数兜底」切分，保留原文（含尾部「室」字）；
+     * 本方法只做两件渲染相关的事：
+     *
+     * 1. 最多返回 2 行 —— 卡片高度有限，第三行会被裁掉
+     * 2. 去掉每行首尾空白（横杠切断后后半段可能带空格）
+     *
+     * **不改动文字内容**：教室名里的「室」「楼」等字一律保留。
+     */
+    fun displayLines(room: String, maxChars: Int): List<String> =
+        breakLines(room, maxChars)
+            .take(MAX_LINES)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    /** 卡片里最多显示两行教室。 */
+    private const val MAX_LINES = 2
 }

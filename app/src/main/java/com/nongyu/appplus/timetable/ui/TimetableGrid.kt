@@ -877,20 +877,39 @@ private fun CourseCard(
                 } else {
                     Int.MAX_VALUE
                 }
-                val lines = RoomLineBreaker.breakLines(block.room, maxChars)
+                val lines = RoomLineBreaker.displayLines(block.room, maxChars)
 
-                Text(
-                    text = lines.joinToString("\n"),
-                    color = fgSecondary,
-                    fontSize = (6.5f * uiScale).sp,
-                    lineHeight = (8f * uiScale).sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    // 单行时仍限 1 行，两行时放宽到 2 —— 不放宽到无限，
-                    // 否则极端窄卡会把课程名挤没
-                    maxLines = lines.size.coerceAtLeast(1),
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // ⚠️ 2026-11-23：不能用单个 Text + 换行符 + TextAlign.Center。
+                // 那样每行**各自居中**：`10-`(3 字) 与 `B201室`(5 字) 长度不同，
+                // 短的行会往中间缩，两行左边缘参差。
+                //
+                // 改为 Column 内每行 start 对齐、整块居中。**但 Column 必须
+                // fillMaxWidth()**：否则它按内容宽度包裹并靠左摆放，
+                // 居中只是「块内各行的相对对齐」，整块仍是贴左的（维护者实测「偏左」）。
+                // 且有没有横杠时行数不同 → 包裹宽度不同 → 靠左的量也不同，
+                // 于是「有横杠和没横杠看起来不一样」。
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    lines.take(2).forEach { line ->
+                        Text(
+                            text = line,
+                            color = fgSecondary,
+                            fontSize = (6.5f * uiScale).sp,
+                            lineHeight = (8f * uiScale).sp,
+                            fontWeight = FontWeight.SemiBold,
+                            // 单行内不再左对齐：Text 自身也占满宽并居中，
+                            // 这样单行/多行两种情况的居中基准完全一致
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
             }
         }
     }
