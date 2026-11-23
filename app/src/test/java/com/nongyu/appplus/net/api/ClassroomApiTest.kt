@@ -20,7 +20,8 @@ import retrofit2.Retrofit
 /**
  * 教室楼栋与导航（后端 `internal/classroom/`，2026-11-23 新增）。
  *
- * 三条查询**匿名可读**；响应形状各不同（lookup 平铺、列表 items、详情 data）。
+ * 三条查询**需要 Bearer**（后端 e934bb2 从公开路径移除）；
+ * 响应形状各不同（lookup 平铺、列表 items、详情 data）。
  */
 class ClassroomApiTest {
 
@@ -82,13 +83,16 @@ class ClassroomApiTest {
     }
 
     @Test
-    fun `lookup 匿名可读，不挂 Bearer`() = runTest {
+    fun `lookup 需要 Bearer（后端已移出公开路径）`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .setBody("""{"input":"x","found":false,"reason":"unrecognized"}"""),
         )
         api.lookup("x")
-        assertNull("公开端点不该带 Authorization", server.takeRequest().getHeader("Authorization"))
+        assertEquals(
+            "Bearer TEST-TOKEN",
+            server.takeRequest().getHeader("Authorization"),
+        )
     }
 
     @Test

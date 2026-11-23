@@ -1,6 +1,5 @@
 package com.nongyu.appplus.net.api
 
-import com.nongyu.appplus.net.api.http.PublicEndpoint
 import com.nongyu.appplus.net.model.AmapKeyDto
 import com.nongyu.appplus.net.model.AmapKeyRequest
 import com.nongyu.appplus.net.model.ClassroomBuildingEnvelopeDto
@@ -16,10 +15,13 @@ import retrofit2.http.Query
 /**
  * 教室楼栋与导航（后端 `internal/classroom/`，2026-11-23 新增）。
  *
- * ## 三条查询都是**匿名可读**
- * 后端走 `RegisterPublic`，无 Bearer 也能查，故标 [PublicEndpoint]。
+ * ## 三条查询都**需要 Bearer**（2026-11-23 后端改）
+ * 后端提交 `e934bb2` 把 `/classrooms/` 下的三条从 `publicReadablePaths` 移除
+ * （注释：「含校内坐标与路线按身份提供」）。虽然注册函数仍叫 `RegisterPublic`
+ * （历史命名没改），但实际走全局会话中间件，无票会被拒。
+ * 所以这里**不再标** `PublicEndpoint`（不挂票的注解）。
  *
- * ## 高德密钥是另一回事
+ * ## 高德密钥
  * `POST /keys/amap/acquire` 从**密钥池**取一个明文 Key，需要 Bearer。
  * 那条不在本接口，见 [ApiKeyApi]——因为它属另一个域（`internal/apikey`）。
  *
@@ -35,17 +37,14 @@ interface ClassroomApi {
      *
      * @param room 教室名（如「一教A201」「A201」）。后端自行做别名匹配与房间号解析。
      */
-    @PublicEndpoint
     @GET("classrooms/lookup")
     suspend fun lookup(@Query("room") room: String): Response<ClassroomLookupDto>
 
     /** `GET /classrooms/buildings` —— 全部已录入楼栋（不含 routes）。 */
-    @PublicEndpoint
     @GET("classrooms/buildings")
     suspend fun buildings(): Response<ClassroomBuildingListDto>
 
     /** `GET /classrooms/buildings/:id` —— 单栋详情，**含 routes**。 */
-    @PublicEndpoint
     @GET("classrooms/buildings/{id}")
     suspend fun building(@Path("id") id: Long): Response<ClassroomBuildingEnvelopeDto>
 }
@@ -58,7 +57,7 @@ interface ClassroomApi {
  * - 一次一用：需要时再取，不要缓存到进程退出之后
  *
  * ## 需要 Bearer
- * 属密钥下发，走后端鉴权，故**没有** [PublicEndpoint]。
+ * 属密钥下发，走后端鉴权，故没有 `PublicEndpoint` 注解。
  */
 interface ApiKeyApi {
 
