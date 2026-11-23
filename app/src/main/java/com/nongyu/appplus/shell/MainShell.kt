@@ -278,13 +278,38 @@ fun MainShell() {
             }
         }
 
-    // 评论（mock 后端，进程内可增删）
-    var comments by remember(courseId) {
-        mutableStateOf(
-            if (courseId != null) {
-                com.nongyu.appplus.timetable.data.MockCourseCommentRepository.list(courseId)
-            } else emptyList(),
-        )
+    // 评论：从后端按「老师 + 课程」查询评价（真实数据，不再是 mock）。
+    // UI 仍只认 List<String>，这里负责把 Review 映射成带评分前缀的文本，
+    // 删除时再按下标把 id 找回来。
+    var comments by remember(courseId) { mutableStateOf<List<String>>(emptyList()) }
+    var reviewIds by remember(courseId) { mutableStateOf<List<Long>>(emptyList()) }
+    val reviewRepo = remember { com.nongyu.appplus.timetable.data.CourseReviewRepository(context) }
+    // 课程上下文：从当前详情卡拿老师与课程名
+    LaunchedEffect(detailCourse?.id) {
+        val c = detailCourse
+        if (c == null) {
+            comments = emptyList()
+            reviewIds = emptyList()
+        } else {
+            reviewRepo.list(teacherName = c.teacher, courseName = c.name)
+                .onSuccess { reviews ->
+                    reviewIds = reviews.map { it.id }
+                    comments = reviews.map { it.text }
+                }
+                .onFailure {
+                    reviewIds = emptyList()
+                    comments = emptyList()
+                }
+        }
+    }
+
+    // 增删评价后重新拉取列表：与上面的首次加载共用同一套映射逻辑。
+    suspend fun reloadReviews(course: com.nongyu.appplus.timetable.model.CourseEntry) {
+        reviewRepo.list(teacherName = course.teacher, courseName = course.name)
+            .onSuccess { reviews ->
+                reviewIds = reviews.map { it.id }
+                comments = reviews.map { it.text }
+            }
     }
 
     // 三个子窗体的开关
@@ -829,9 +854,23 @@ fun MainShell() {
                                 }
                             },
                             onNoteChange = { text -> noteText = text },
-                            onCommentChanged = {
-                                comments = com.nongyu.appplus.timetable.data
-                                    .MockCourseCommentRepository.list(course.id)
+                            onCommentAdd = { text ->
+                                val parsed = com.nongyu.appplus.timetable.logic.ReviewText.parse(text)
+                                coroutineScope.launch {
+                                    reviewRepo.add(
+                                        teacherName = course.teacher,
+                                        courseName = course.name,
+                                        rating = parsed.rating,
+                                        body = parsed.body,
+                                    ).onSuccess { reloadReviews(course) }
+                                }
+                            },
+                            onCommentRemove = { i ->
+                                val id = reviewIds.getOrNull(i) ?: return@DetailCardContent
+                                coroutineScope.launch {
+                                    reviewRepo.remove(id)
+                                        .onSuccess { reloadReviews(course) }
+                                }
                             },
                             onDelete = {
                                 coroutineScope.launch {

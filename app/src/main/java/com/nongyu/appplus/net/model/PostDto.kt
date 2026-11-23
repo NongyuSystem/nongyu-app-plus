@@ -1,6 +1,7 @@
 package com.nongyu.appplus.net.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * 帖子域 DTO（后端 `internal/content/post/handler.go`，2026-11-17 逐 handler 对账）。
@@ -49,6 +50,14 @@ data class PostDto(
     val likedByMe: Boolean? = null,
     /** 仅详情有值。 */
     val favoritedByMe: Boolean? = null,
+    /**
+     * 结构化字段（评价贴的 teacherName / courseName / rating）。
+     *
+     * 后端 `publicView.Detail` 带 `omitempty`：普通帖子没有该字段 → null。
+     * #109 只补了 `CreatePostRequest.detail`，漏了响应侧，这里补上，
+     * 否则评价查询拿不到评分（UI 只能显示纯文本）。
+     */
+    val detail: Map<String, JsonElement>? = null,
 )
 
 /**
@@ -134,6 +143,17 @@ data class CreatePostRequest(
     val title: String? = null,
     val body: String? = null,
     val attachments: List<String>? = null,
+    /**
+     * 结构化字段（评价贴必填）。
+     *
+     * 课程评价 `board = course_review` 需：
+     * - `courseName`（必填，1-128）
+     * - `teacherName`（选填，1-64）
+     * - `rating`（必填，1-5 整数）
+     *
+     * 用 `JsonElement` 而不是 `Map<String, Any>`：kotlinx.serialization 无法序列化 Any。
+     */
+    val detail: Map<String, JsonElement>? = null,
 )
 
 /** `PATCH /posts/:id` 的请求体（部分更新，未传的字段不动）。 */

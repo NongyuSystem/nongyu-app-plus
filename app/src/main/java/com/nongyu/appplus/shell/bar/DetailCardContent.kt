@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.nongyu.appplus.timetable.data.MOCK_COURSES
-import com.nongyu.appplus.timetable.data.MockCourseCommentRepository
 import com.nongyu.appplus.timetable.model.CourseEntry
 import com.nongyu.appplus.timetable.ui.CourseDetailContent
 import com.nongyu.appplus.timetable.ui.weeksLabelOf
@@ -51,8 +50,12 @@ fun DetailCardContent(
     termStart: java.time.LocalDate,
     /** 备注输入：调用方负责更新本地真源（落盘由防抖 effect 负责）。 */
     onNoteChange: (String) -> Unit,
-    /** 评论增删后重新拉取列表。 */
-    onCommentChanged: () -> Unit,
+    /**
+     * 评论回调：由调用方（MainShell）调真实评价 Repository。
+     * 增加时传用户输入的文本（可含 `[n/5]` 评分前缀）；删除时传列表下标。
+     */
+    onCommentAdd: (String) -> Unit,
+    onCommentRemove: (Int) -> Unit,
     /** 删除这天的这节课（落盘由调用方负责）。 */
     onDelete: () -> Unit,
     onCollapse: () -> Unit,
@@ -91,14 +94,8 @@ fun DetailCardContent(
         note = note,
         onNoteChange = onNoteChange,
         comments = comments,
-        onCommentAdd = { text ->
-            MockCourseCommentRepository.add(course.id, text)
-            onCommentChanged()
-        },
-        onCommentRemove = { i ->
-            MockCourseCommentRepository.remove(course.id, i)
-            onCommentChanged()
-        },
+        onCommentAdd = onCommentAdd,
+        onCommentRemove = onCommentRemove,
         onLocationEdit = onLocationEdit,
         onLocationNav = onLocationNav,
         onHandleDrag = { deltaDp ->

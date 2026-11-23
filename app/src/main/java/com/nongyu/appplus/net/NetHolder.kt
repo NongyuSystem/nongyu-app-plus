@@ -138,6 +138,19 @@ object NetHolder {
     }
 
     /**
+     * 帖子/评价域（后端 `internal/content/post/`）。
+     *
+     * 查询评价（`teacher-course`）需要 Bearer；发表评价也需要。
+     * 与 [api] / [cache] 共享同一个 Retrofit 与拦截器。
+     */
+    fun posts(context: Context): com.nongyu.appplus.net.api.PostApi {
+        val r = retrofitRef ?: synchronized(this) {
+            retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
+        }
+        return r.create(com.nongyu.appplus.net.api.PostApi::class.java)
+    }
+
+    /**
      * 教室楼栋与导航（后端 `internal/classroom/`，2026-11-23 新增）。
      *
      * 三条查询都是**匿名可读**（后端 `RegisterPublic`），所以这个入口不要求已登录。
