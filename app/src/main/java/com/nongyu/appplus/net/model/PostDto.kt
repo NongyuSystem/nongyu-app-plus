@@ -101,6 +101,29 @@ data class StatusOkDto(
 )
 
 /**
+ * 评价列表响应（后端 `reviewListResponse`，2026-11-23 新增的两个评价查询专用）。
+ *
+ * 形状与普通帖子列表**不同**：多了 `query` 字段回显本次实际使用的过滤条件
+ * （后端已 trim）。它用来让 UI 显示「按 张老师 筛选」这类说明，并避免
+ * 客户端自己维护一份筛选状态导致回显与后端不一致。
+ *
+ * `items` 复用 [PostDto]：后端 `toPublic` 出的就是同一种 `publicView`。
+ */
+@Serializable
+data class ReviewListDto(
+    val items: List<PostDto>? = null,
+    /** 游标，`omitempty`，为空表示没有下一页。 */
+    val next: String? = null,
+    /**
+     * 本次实际使用的过滤条件（已 trim）。
+     *
+     * 键名由后端决定：按老师查是 `teacherName`，按老师+课程查是 `teacherName` + `courseName`。
+     * 用 `Map` 承接而不是固定字段，是为了后端将来加条件时客户端不改代码。
+     */
+    val query: Map<String, String>? = null,
+)
+
+/**
  * `POST /posts` 的请求体（后端 `createRequest`）。
  *
  * `attachments` 是**先调 `/posts/attachments` 上传拿到的标识列表**，不是文件本身。

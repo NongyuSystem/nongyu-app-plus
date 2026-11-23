@@ -1,10 +1,13 @@
 package com.nongyu.appplus.net
 
 import android.content.Context
+import com.nongyu.appplus.net.api.ApiKeyApi
 import com.nongyu.appplus.net.api.CacheApi
+import com.nongyu.appplus.net.api.ClassroomApi
 import com.nongyu.appplus.net.api.SchoolApi
 import com.nongyu.appplus.net.api.IdentityApi
 import com.nongyu.appplus.net.api.PresenceApi
+import com.nongyu.appplus.net.api.SecondClassApi
 import com.nongyu.appplus.net.api.WebVpnApi
 import com.nongyu.appplus.net.auth.DefaultSessionInvalidListener
 import com.nongyu.appplus.net.auth.MinimalSessionStore
@@ -132,6 +135,42 @@ object NetHolder {
             retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
         }
         return r.create(WebVpnApi::class.java)
+    }
+
+    /**
+     * 教室楼栋与导航（后端 `internal/classroom/`，2026-11-23 新增）。
+     *
+     * 三条查询都是**匿名可读**（后端 `RegisterPublic`），所以这个入口不要求已登录。
+     */
+    fun classroom(context: Context): ClassroomApi {
+        val r = retrofitRef ?: synchronized(this) {
+            retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
+        }
+        return r.create(ClassroomApi::class.java)
+    }
+
+    /**
+     * 高德密钥池（后端 `internal/apikey/`）。**需 Bearer**。
+     *
+     * ⚠️ 返回的是明文 Key，调用方**不要落盘、不要打日志**。
+     */
+    fun apiKeys(context: Context): ApiKeyApi {
+        val r = retrofitRef ?: synchronized(this) {
+            retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
+        }
+        return r.create(ApiKeyApi::class.java)
+    }
+
+    /**
+     * 二课缓存与配方（后端 `internal/school/secondclass/`，2026-11-23 接入）。
+     *
+     * 四条路由都需 Bearer。与 [cache]（jiaowu）**形状不同**，见 [SecondClassApi]。
+     */
+    fun secondClass(context: Context): SecondClassApi {
+        val r = retrofitRef ?: synchronized(this) {
+            retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
+        }
+        return r.create(SecondClassApi::class.java)
     }
 
     /**
