@@ -44,11 +44,17 @@ class CourseReviewRepository(
         val rawBody: String,
     )
 
-    /** 查询某位老师的某门课的评价（按发布时间倒序）。 */
+    /**
+     * 查询某位老师的某门课的评价。
+     *
+     * 只取 [FETCH_LIMIT] 条（= 显示 3 条 + 1 条用于探测 more）。
+     * 后端暂按发布时间倒序；"按热度排"是后续后端的事。
+     */
     suspend fun list(teacherName: String, courseName: String): Result<List<Review>> = runCatching {
         val resp = NetHolder.posts(context).teacherCourseReviews(
             teacherName = teacherName,
             courseName = courseName,
+            limit = com.nongyu.appplus.timetable.logic.ReviewListDisplay.FETCH_LIMIT,
         )
         if (!resp.isSuccessful) error("查询评价失败：HTTP ${resp.code()}")
         val body = resp.body() ?: error("查询评价失败：响应体为空")

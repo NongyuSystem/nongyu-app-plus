@@ -40,6 +40,8 @@ fun DetailCardContent(
     attendance: Map<String, Boolean>,
     note: String,
     comments: List<String>,
+    /** 评价是否超过 3 条（决定是否显示 more）。 */
+    hasMoreReviews: Boolean,
     /** 教师行内修改：调用方负责更新显示值与落盘。 */
     onTeacherChange: (String) -> Unit,
     /** 考勤点击：调用方负责翻转合并态与落盘。 */
@@ -55,7 +57,10 @@ fun DetailCardContent(
      * 增加时传用户输入的文本（可含 `[n/5]` 评分前缀）；删除时传列表下标。
      */
     onCommentAdd: (String) -> Unit,
-    onCommentRemove: (Int) -> Unit,
+    /** 点某条评价看详情（占位跳转）。 */
+    onCommentDetail: () -> Unit,
+    /** 点 more 查看更多（占位跳转）。 */
+    onCommentMore: () -> Unit,
     /** 删除这天的这节课（落盘由调用方负责）。 */
     onDelete: () -> Unit,
     onCollapse: () -> Unit,
@@ -94,8 +99,10 @@ fun DetailCardContent(
         note = note,
         onNoteChange = onNoteChange,
         comments = comments,
+        hasMoreReviews = hasMoreReviews,
         onCommentAdd = onCommentAdd,
-        onCommentRemove = onCommentRemove,
+        onCommentDetail = onCommentDetail,
+        onCommentMore = onCommentMore,
         onLocationEdit = onLocationEdit,
         onLocationNav = onLocationNav,
         onHandleDrag = { deltaDp ->

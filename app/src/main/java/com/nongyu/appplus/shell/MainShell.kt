@@ -282,23 +282,27 @@ fun MainShell() {
     // UI 仍只认 List<String>，这里负责把 Review 映射成带评分前缀的文本，
     // 删除时再按下标把 id 找回来。
     var comments by remember(courseId) { mutableStateOf<List<String>>(emptyList()) }
-    var reviewIds by remember(courseId) { mutableStateOf<List<Long>>(emptyList()) }
+    var hasMoreReviews by remember(courseId) { mutableStateOf(false) }
     val reviewRepo = remember { com.nongyu.appplus.timetable.data.CourseReviewRepository(context) }
     // 课程上下文：从当前详情卡拿老师与课程名
     LaunchedEffect(detailCourse?.id) {
         val c = detailCourse
         if (c == null) {
             comments = emptyList()
-            reviewIds = emptyList()
+            hasMoreReviews = false
         } else {
             reviewRepo.list(teacherName = c.teacher, courseName = c.name)
                 .onSuccess { reviews ->
-                    reviewIds = reviews.map { it.id }
-                    comments = reviews.map { it.text }
+                    // 只显示前 3 条；第 4 条用于判断「还有更多」
+                    val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
+                        reviews.map { it.text },
+                    )
+                    comments = split.visible
+                    hasMoreReviews = split.hasMore
                 }
                 .onFailure {
-                    reviewIds = emptyList()
                     comments = emptyList()
+                    hasMoreReviews = false
                 }
         }
     }
@@ -307,8 +311,11 @@ fun MainShell() {
     suspend fun reloadReviews(course: com.nongyu.appplus.timetable.model.CourseEntry) {
         reviewRepo.list(teacherName = course.teacher, courseName = course.name)
             .onSuccess { reviews ->
-                reviewIds = reviews.map { it.id }
-                comments = reviews.map { it.text }
+                val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
+                    reviews.map { it.text },
+                )
+                comments = split.visible
+                hasMoreReviews = split.hasMore
             }
     }
 
@@ -841,6 +848,13 @@ fun MainShell() {
                             termStart = com.nongyu.appplus.timetable.data.MOCK_TERM_START,
                             note = noteText,
                             comments = comments,
+                            hasMoreReviews = hasMoreReviews,
+                            onCommentDetail = {
+                                showTextToast(context, "查看评价详情：即将开放", uiScale = uiScale)
+                            },
+                            onCommentMore = {
+                                showTextToast(context, "查看更多评价：即将开放", uiScale = uiScale)
+                            },
                             onTeacherChange = { v ->
                                 coroutineScope.launch {
                                     courseUserStore.setTeacherOverride(course.id, v)
@@ -863,13 +877,6 @@ fun MainShell() {
                                         rating = parsed.rating,
                                         body = parsed.body,
                                     ).onSuccess { reloadReviews(course) }
-                                }
-                            },
-                            onCommentRemove = { i ->
-                                val id = reviewIds.getOrNull(i) ?: return@DetailCardContent
-                                coroutineScope.launch {
-                                    reviewRepo.remove(id)
-                                        .onSuccess { reloadReviews(course) }
                                 }
                             },
                             onDelete = {
