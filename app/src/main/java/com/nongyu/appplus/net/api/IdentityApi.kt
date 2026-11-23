@@ -48,12 +48,14 @@ interface IdentityApi {
     suspend fun healthz(): Response<HealthzDto>
 
     /**
-     * `GET /status` —— 运维依赖探针，**免签名**，状态码恒 200。
+     * `GET /status` —— 运维依赖探针。
      *
-     * 与 [healthz] 的分工：`/healthz` 只报进程可达；本端点如实上报 Postgres / Redis /
-     * 熔断器 / 存储实现。监控侧读 body 判断，不要拿状态码判断依赖是否健康。
+     * ⚠️ **2026-11-23 起需要 Bearer**：后端把 `/status` 刻意排除在 publicPaths 外
+     * （它返回 objectStore / 依赖健康 / 埋点计数等内部配置，免认证等于公开测绘面）。
+     * 免认证的存活探针只有 `/healthz`。
+     *
+     * 状态码恒 200，真实依赖情况放在 body 里，监控侧读 body 判断。
      */
-    @PublicEndpoint
     @GET("status")
     suspend fun status(): Response<StatusDto>
 

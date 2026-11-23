@@ -1,6 +1,5 @@
 package com.nongyu.appplus.net.api
 
-import com.nongyu.appplus.net.api.http.PublicEndpoint
 import com.nongyu.appplus.net.model.CreatePostRequest
 import com.nongyu.appplus.net.model.CreateReplyRequest
 import com.nongyu.appplus.net.model.PostDetailDto
@@ -38,10 +37,9 @@ import retrofit2.http.Query
  * | 删除 / 点赞 / 收藏 / 回复点赞 | status |
  * | post-reviews 两条 | items + next + query |
  *
- * ## 鉴权
- * 只有 GET /posts 与 GET /posts/:id 匿名可读（后端 RegisterPublic 的 userIDOf
- * 允许为 nil）；其余全部需 Bearer（RegisterSession）。
- * 匿名请求下 isMine / likedByMe / favoritedByMe 恒 false —— 这是正常的，不是漏数据。
+ * ## ⚠️ 鉴权：全部端点都需要 Bearer（2026-11-23 后端收紧）
+ * 后端提交 481afec 清空 publicReadablePaths，所有业务端点一律要求认证。
+ * 历史上 GET /posts 与 GET /posts/:id 曾匿名可读，现已不再。
  *
  * ## 路径不写前导斜杠
  * 与 IdentityApi 同一规则。
@@ -49,14 +47,12 @@ import retrofit2.http.Query
 interface PostApi {
 
     /**
-     * GET /posts?board=&cursor=&limit=&mine= —— 列表，**匿名可读**。
+     * GET /posts?board=&cursor=&limit=&mine= —— 列表，需 Bearer。
      *
      * @param board 板块过滤（可选）
      * @param cursor 上一页返回的 next 游标（可选）
      * @param mine 为 true 时只看自己发的帖子（后端 2026-11-23 新增）。
-     *   注意：mine=true 需要 Bearer，匿名调用时后端忽略该参数。
      */
-    @PublicEndpoint
     @GET("posts")
     suspend fun list(
         @Query("board") board: String? = null,
@@ -65,8 +61,7 @@ interface PostApi {
         @Query("mine") mine: Boolean? = null,
     ): Response<PostListDto>
 
-    /** GET /posts/:id —— 详情，**匿名可读**。回复在 replies，不在 data 里。 */
-    @PublicEndpoint
+    /** GET /posts/:id —— 详情，需 Bearer。回复在 replies，不在 data 里。 */
     @GET("posts/{id}")
     suspend fun detail(@Path("id") id: Long): Response<PostDetailDto>
 

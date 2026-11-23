@@ -22,7 +22,8 @@ import retrofit2.Retrofit
  *
  * 重点验证三件最容易错的事：
  * 1. **每个端点的信封形状**（帖子域用 `data` / `items` / `status` 三种，不是裸结构体）；
- * 2. **匿名可读 vs 需 Bearer** 的标注是否正确（`GET /posts` 与公告是公开的）；
+ * 2. **鉴权标注**是否正确（2026-11-23 起全部业务端点需 Bearer，
+ *    只有 identity 的登录/探针类仍公开）；
  * 3. **`{"data":null}` 是正常状态**（没有生效公告），不是错误。
  */
 class NewDomainsApiTest {
@@ -59,25 +60,28 @@ class NewDomainsApiTest {
     // ---------- 帖子域：三种信封 ----------
 
     @Test
-    fun `帖子列表是 items 加 next 游标，且匿名可读`() = runTest {
+    fun `帖子列表是 items 加 next 游标，且需要 Bearer`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
                 """{"items":[{"id":1,"board":"general","title":"t","body":"b",
                    "publishedAt":"2026-11-17T10:00:00Z","isMine":false}],"next":"c2"}""",
             ),
         )
-        val api = api<PostApi>(token = null)
+        val api = api<PostApi>()
 
         val r = api.list()
 
-        assertTrue("匿名也应可读", r.isSuccessful)
+        assertTrue(r.isSuccessful)
         assertEquals(1, r.body()!!.items?.size)
         assertEquals("c2", r.body()!!.next)
         assertEquals("t", r.body()!!.items!!.first().title)
 
         val req = server.takeRequest()
         assertEquals("/posts", req.path)
-        assertNull("公开端点不挂 Bearer", req.getHeader("Authorization"))
+        assertEquals(
+            "Bearer TEST-TOKEN",
+            req.getHeader("Authorization"),
+        )
     }
 
     @Test
@@ -160,18 +164,21 @@ class NewDomainsApiTest {
     // ---------- 公告域 ----------
 
     @Test
-    fun `公告列表匿名可读`() = runTest {
+    fun `公告列表需要 Bearer`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .setBody("""{"items":[{"id":1,"title":"公告","pinned":true}]}"""),
         )
-        val api = api<AnnouncementApi>(token = null)
+        val api = api<AnnouncementApi>()
 
         val r = api.list()
 
         assertTrue(r.isSuccessful)
         assertEquals("公告", r.body()?.items?.first()?.title)
-        assertNull(server.takeRequest().getHeader("Authorization"))
+        assertEquals(
+            "Bearer TEST-TOKEN",
+            server.takeRequest().getHeader("Authorization"),
+        )
     }
 
     @Test
