@@ -93,10 +93,15 @@ fun CourseDetailContent(
     /** 备注文本与写入回调。 */
     note: String,
     onNoteChange: (String) -> Unit,
-    /** 评论列表与增删回调。 */
+    /** 评论列表（已裁剪到最多 3 条）。 */
     comments: List<String>,
+    /** 是否还有更多评价（决定是否显示 more）。 */
+    hasMoreReviews: Boolean,
     onCommentAdd: (String) -> Unit,
-    onCommentRemove: (Int) -> Unit,
+    /** 点某条评价看详情（占位跳转）。 */
+    onCommentDetail: () -> Unit,
+    /** 点 more 查看更多（占位跳转）。 */
+    onCommentMore: () -> Unit,
     /** 打开地点修改子窗体。 */
     onLocationEdit: () -> Unit,
     /** 打开导航占位子窗体。 */
@@ -255,7 +260,14 @@ fun CourseDetailContent(
                 SectionDivider(uiScale)
                 Spacer(Modifier.height(s(6.dp)))
                 StagedSlideIn(progress = expandProgress, threshold = 0.52f, density = density) {
-                    CommentSection(comments, onCommentAdd, onCommentRemove, uiScale)
+                    CommentSection(
+                    comments = comments,
+                    hasMore = hasMoreReviews,
+                    onAdd = onCommentAdd,
+                    onDetail = onCommentDetail,
+                    onMore = onCommentMore,
+                    uiScale = uiScale,
+                )
                 }
 
                 Spacer(Modifier.height(s(8.dp)))
@@ -559,12 +571,14 @@ private fun AttendanceSection(
     }
 }
 
-/** 评论：mock 后端列表，可增删，底部一个输入框。 */
+/** 评论：最多 3 条；超过则在底部显示 more；点评论看详情、点 more 看更多（占位跳转）。 */
 @Composable
 private fun CommentSection(
     comments: List<String>,
+    hasMore: Boolean,
     onAdd: (String) -> Unit,
-    onRemove: (Int) -> Unit,
+    onDetail: () -> Unit,
+    onMore: () -> Unit,
     uiScale: Float,
 ) {
     val colors = NongyuTheme.colors
@@ -578,9 +592,9 @@ private fun CommentSection(
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(s(4.dp)))
-        comments.forEachIndexed { i, c ->
+        comments.forEach { c ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().clickable { onDetail() },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -592,12 +606,21 @@ private fun CommentSection(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "删除",
+                    text = "详情",
                     color = colors.brand.colorBrand.copy(alpha = 0.8f),
                     fontSize = (7.5f * uiScale).sp,
-                    modifier = Modifier.clickable { onRemove(i) },
                 )
             }
+            Spacer(Modifier.height(s(2.dp)))
+        }
+        // 超过 3 条时底部显示 more（占位：点击跳帖子详情，即将开放）
+        if (hasMore) {
+            Text(
+                text = "more ›",
+                color = colors.brand.colorBrand.copy(alpha = 0.8f),
+                fontSize = (7.5f * uiScale).sp,
+                modifier = Modifier.clickable { onMore() },
+            )
             Spacer(Modifier.height(s(2.dp)))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
