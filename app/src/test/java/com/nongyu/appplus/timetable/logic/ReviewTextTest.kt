@@ -6,66 +6,86 @@ import org.junit.Test
 /**
  * [ReviewText] 的单测。
  *
- * 评价在 UI 上是纯文本，评分靠 `[n/5]` 前缀传递；这个格式是发评价能否带对评分的关键。
+ * 维护者 2026-11-23：评分为 0 或负 => 没打分，不显示星；有分显示星星图标。
  */
 class ReviewTextTest {
 
     // ---- display ----
 
     @Test
-    fun `有评分时显示前缀`() {
-        assertEquals("[4/5] 老师讲得很清楚", ReviewText.display(4, "老师讲得很清楚"))
+    fun `满星显示五颗实心星`() {
+        assertEquals("★★★★★ 好课", ReviewText.display(5, "好课"))
     }
 
     @Test
-    fun `无评分时原样显示`() {
-        assertEquals("老师讲得很清楚", ReviewText.display(null, "老师讲得很清楚"))
+    fun `三星显示三实两空`() {
+        assertEquals("★★★☆☆ 还行", ReviewText.display(3, "还行"))
+    }
+
+    @Test
+    fun `一星显示一实四空`() {
+        assertEquals("★☆☆☆☆ 差", ReviewText.display(1, "差"))
+    }
+
+    @Test
+    fun `零分不显示星（没打分）`() {
+        assertEquals("随便说说", ReviewText.display(0, "随便说说"))
+    }
+
+    @Test
+    fun `负分不显示星`() {
+        assertEquals("随便说说", ReviewText.display(-1, "随便说说"))
+    }
+
+    @Test
+    fun `无评分不显示星`() {
+        assertEquals("随便说说", ReviewText.display(null, "随便说说"))
+    }
+
+    @Test
+    fun `超出上限夹到五星`() {
+        assertEquals("★★★★★ 好", ReviewText.display(99, "好"))
     }
 
     // ---- parse ----
 
     @Test
-    fun `解析标准评分前缀`() {
-        val p = ReviewText.parse("[4/5] 老师讲得很清楚")
-        assertEquals(4, p.rating)
-        assertEquals("老师讲得很清楚", p.body)
-    }
-
-    @Test
-    fun `不带前缀时默认满分`() {
-        val p = ReviewText.parse("老师讲得很清楚")
-        assertEquals(ReviewText.DEFAULT_RATING, p.rating)
-        assertEquals("老师讲得很清楚", p.body)
-    }
-
-    @Test
-    fun `评分边界 1 和 5 都能解析`() {
-        assertEquals(1, ReviewText.parse("[1/5] 差").rating)
-        assertEquals(5, ReviewText.parse("[5/5] 好").rating)
-    }
-
-    @Test
-    fun `越界评分当普通正文不误解析`() {
-        // [0/5] 和 [6/5] 都不在 1-5，应原样作为正文、评分取默认
-        val p0 = ReviewText.parse("[0/5] 很差")
-        assertEquals(ReviewText.DEFAULT_RATING, p0.rating)
-        assertEquals("[0/5] 很差", p0.body)
-
-        val p6 = ReviewText.parse("[6/5] 超好")
-        assertEquals(ReviewText.DEFAULT_RATING, p6.rating)
-        assertEquals("[6/5] 超好", p6.body)
-    }
-
-    @Test
-    fun `空正文不丢评分`() {
-        val p = ReviewText.parse("[3/5]")
+    fun `解析星号前缀`() {
+        val p = ReviewText.parse("★★★☆ 讲得不错")
         assertEquals(3, p.rating)
-        assertEquals("", p.body)
+        assertEquals("讲得不错", p.body)
+    }
+
+    @Test
+    fun `解析五颗星`() {
+        val p = ReviewText.parse("★★★★★ 好")
+        assertEquals(5, p.rating)
+        assertEquals("好", p.body)
+    }
+
+    @Test
+    fun `兼容旧的中括号格式`() {
+        assertEquals(4, ReviewText.parse("[4/5] 好").rating)
+        assertEquals(4, ReviewText.parse("[4] 好").rating)
+    }
+
+    @Test
+    fun `纯文本视为没打分`() {
+        val p = ReviewText.parse("老师讲得很清楚")
+        assertEquals(ReviewText.NO_RATING, p.rating)
+        assertEquals("老师讲得很清楚", p.body)
+    }
+
+    @Test
+    fun `越界的方括号评分当普通正文`() {
+        val p = ReviewText.parse("[0/5] 很差")
+        assertEquals(ReviewText.NO_RATING, p.rating)
+        assertEquals("[0/5] 很差", p.body)
     }
 
     @Test
     fun `首尾空白被裁掉`() {
-        val p = ReviewText.parse("  [2/5]   还行  ")
+        val p = ReviewText.parse("  ★★  还行  ")
         assertEquals(2, p.rating)
         assertEquals("还行", p.body)
     }
@@ -76,7 +96,13 @@ class ReviewTextTest {
     fun `display 后 parse 能还原评分与正文`() {
         val original = ReviewText.Parsed(rating = 4, body = "讲得不错")
         val text = ReviewText.display(original.rating, original.body)
-        val parsed = ReviewText.parse(text)
-        assertEquals(original, parsed)
+        assertEquals(original, ReviewText.parse(text))
+    }
+
+    @Test
+    fun `没打分时 display 后 parse 仍是没打分`() {
+        val text = ReviewText.display(ReviewText.NO_RATING, "随便说说")
+        assertEquals("随便说说", text)
+        assertEquals(ReviewText.NO_RATING, ReviewText.parse(text).rating)
     }
 }

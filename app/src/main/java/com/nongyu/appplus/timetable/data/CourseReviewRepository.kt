@@ -65,19 +65,23 @@ class CourseReviewRepository(
         }
     }
 
-    /** 发一条评价。评分 1-5，正文为用户输入。 */
+    /**
+     * 发一条评价。
+     *
+     * @param rating 1-5 = 打了星；<=0 = 没打分（不传 rating 字段）
+     */
     suspend fun add(
         teacherName: String,
         courseName: String,
         rating: Int,
         body: String,
     ): Result<Unit> = runCatching {
-        require(rating in 1..5) { "评分必须在 1-5 之间" }
         require(body.isNotBlank()) { "评价内容不能为空" }
         val detail = buildJsonObject {
             put("courseName", courseName)
             put("teacherName", teacherName)
-            put("rating", rating)
+            // 没打分就不带 rating：后端规则须为选填（本次一并改）
+            if (rating in 1..5) put("rating", rating)
         }
         val req = CreatePostRequest(
             board = BOARD_COURSE_REVIEW,
