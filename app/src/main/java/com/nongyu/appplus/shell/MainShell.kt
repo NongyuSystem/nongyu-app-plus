@@ -281,7 +281,7 @@ fun MainShell() {
     // 评论：从后端按「老师 + 课程」查询评价（真实数据，不再是 mock）。
     // UI 仍只认 List<String>，这里负责把 Review 映射成带评分前缀的文本，
     // 删除时再按下标把 id 找回来。
-    var comments by remember(courseId) { mutableStateOf<List<String>>(emptyList()) }
+    var comments by remember(courseId) { mutableStateOf<List<com.nongyu.appplus.timetable.logic.ReviewLine>>(emptyList()) }
     var hasMoreReviews by remember(courseId) { mutableStateOf(false) }
     val reviewRepo = remember { com.nongyu.appplus.timetable.data.CourseReviewRepository(context) }
     // 课程上下文：从当前详情卡拿老师与课程名
@@ -295,7 +295,12 @@ fun MainShell() {
                 .onSuccess { reviews ->
                     // 只显示前 3 条；第 4 条用于判断「还有更多」
                     val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
-                        reviews.map { it.text },
+                        reviews.map {
+                            com.nongyu.appplus.timetable.logic.ReviewLine(
+                                text = it.text,
+                                isMine = it.isMine,
+                            )
+                        },
                     )
                     comments = split.visible
                     hasMoreReviews = split.hasMore
@@ -312,7 +317,12 @@ fun MainShell() {
         reviewRepo.list(teacherName = course.teacher, courseName = course.name)
             .onSuccess { reviews ->
                 val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
-                    reviews.map { it.text },
+                    reviews.map {
+                        com.nongyu.appplus.timetable.logic.ReviewLine(
+                            text = it.text,
+                            isMine = it.isMine,
+                        )
+                    },
                 )
                 comments = split.visible
                 hasMoreReviews = split.hasMore

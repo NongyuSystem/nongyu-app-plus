@@ -42,6 +42,8 @@ class CourseReviewRepository(
         val text: String,
         val rating: Int?,
         val rawBody: String,
+        /** 后端 isMine：本人发的评价（UI 加深颜色）。 */
+        val isMine: Boolean = false,
     )
 
     /**
@@ -67,6 +69,7 @@ class CourseReviewRepository(
                 text = com.nongyu.appplus.timetable.logic.ReviewText.display(r, post.body.orEmpty()),
                 rating = r,
                 rawBody = post.body.orEmpty(),
+                isMine = post.isMine == true,
             )
         }
     }

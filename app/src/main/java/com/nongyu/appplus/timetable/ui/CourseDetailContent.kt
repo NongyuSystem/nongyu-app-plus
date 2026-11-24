@@ -94,7 +94,7 @@ fun CourseDetailContent(
     note: String,
     onNoteChange: (String) -> Unit,
     /** 评论列表（已裁剪到最多 3 条）。 */
-    comments: List<String>,
+    comments: List<com.nongyu.appplus.timetable.logic.ReviewLine>,
     /** 是否还有更多评价（决定是否显示 more）。 */
     hasMoreReviews: Boolean,
     onCommentAdd: (String) -> Unit,
@@ -574,7 +574,7 @@ private fun AttendanceSection(
 /** 评论：最多 3 条；超过则在底部显示 more；点评论看详情、点 more 看更多（占位跳转）。 */
 @Composable
 private fun CommentSection(
-    comments: List<String>,
+    comments: List<com.nongyu.appplus.timetable.logic.ReviewLine>,
     hasMore: Boolean,
     onAdd: (String) -> Unit,
     onDetail: () -> Unit,
@@ -598,9 +598,15 @@ private fun CommentSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "· $c",
-                    color = colors.surface.colorTextSecondary,
+                    text = "· ${c.text}",
+                    // 自己发的评价颜色加深（用主文字色）；别人的用次要色
+                    color = if (c.isMine) {
+                        colors.surface.colorText
+                    } else {
+                        colors.surface.colorTextSecondary
+                    },
                     fontSize = (8f * uiScale).sp,
+                    fontWeight = if (c.isMine) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -619,7 +625,10 @@ private fun CommentSection(
                 text = "more ›",
                 color = colors.brand.colorBrand.copy(alpha = 0.8f),
                 fontSize = (7.5f * uiScale).sp,
-                modifier = Modifier.clickable { onMore() },
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onMore() },
             )
             Spacer(Modifier.height(s(2.dp)))
         }

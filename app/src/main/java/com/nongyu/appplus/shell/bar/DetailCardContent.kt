@@ -39,7 +39,7 @@ fun DetailCardContent(
     teacher: String,
     attendance: Map<String, Boolean>,
     note: String,
-    comments: List<String>,
+    comments: List<com.nongyu.appplus.timetable.logic.ReviewLine>,
     /** 评价是否超过 3 条（决定是否显示 more）。 */
     hasMoreReviews: Boolean,
     /** 教师行内修改：调用方负责更新显示值与落盘。 */
