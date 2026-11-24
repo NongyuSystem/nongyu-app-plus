@@ -34,6 +34,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.nongyu.appplus.design.NongyuTheme
 import java.time.LocalDate
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.width
 
 /**
  * 地点修改子窗体：地点值 + **日历选生效天**（与周次编辑共用 CourseCalendar）。
@@ -251,7 +254,20 @@ fun LocationNavButton(
     }
 }
 
-/** 导航占位子窗体：mock 地点 + 地图示意框，不发请求。 */
+/**
+ * 地点导航子窗体：按教室名向后端查楼栋坐标。
+ *
+ * ## 2026-11-24 接入后端
+ *
+ * 原先是纯占位（注释写着「不发请求」）。现在接 `GET /classrooms/lookup`：
+ * - 查到且**有坐标** → 显示楼栋名/地址/路线数（地图本身等录数据+高德 SDK 再接）
+ * - 楼栋已录但**没坐标** → 明确说「还没录入坐标」，不是用户的错
+ * - 教室名**认不出** → 提示核对地点怎么写
+ * - 网络失败 → 可重试
+ *
+ * 高德 Key 的位置由后端 `POST /keys/amap/acquire` 提供（已有 Repository 封装），
+ * 等真实接入地图 SDK 时再取；空态阶段不请求 Key，避免无谓消耗密钥池配额。
+ */
 @Composable
 fun LocationNavDialog(
     courseName: String,
@@ -261,6 +277,40 @@ fun LocationNavDialog(
 ) {
     val colors = NongyuTheme.colors
     fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { com.nongyu.appplus.timetable.data.ClassroomRepository(context) }
+    // null = 正在加载
+    var state by remember(location) {
+        mutableStateOf<com.nongyu.appplus.timetable.logic.ClassroomNavState.State?>(null)
+    }
+    var reloadKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(location, reloadKey) {
+        state = null
+        val r = repo.lookup(location)
+        state = when (r) {
+            is com.nongyu.appplus.timetable.data.ClassroomRepository.LookupResult.Found -> {
+                val b = r.building
+                com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Ready(
+                    displayName = b.displayName ?: b.no ?: location,
+                    addressText = b.addressText,
+                    latitude = b.lat,
+                    longitude = b.lng,
+                    routesCount = b.routes?.size ?: 0,
+                )
+            }
+            is com.nongyu.appplus.timetable.data.ClassroomRepository.LookupResult.BuildingNotConfigured ->
+                com.nongyu.appplus.timetable.logic.ClassroomNavState.State.NoData(
+                    com.nongyu.appplus.timetable.logic.ClassroomNavState.noDataDetail(r.buildingKey),
+                )
+            is com.nongyu.appplus.timetable.data.ClassroomRepository.LookupResult.Unrecognized ->
+                com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Unrecognized(r.input)
+            is com.nongyu.appplus.timetable.data.ClassroomRepository.LookupResult.Failed ->
+                com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Failed(r.message)
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -285,6 +335,8 @@ fun LocationNavDialog(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(s(12.dp)))
+
+            // 地图区域：现在只画状态区；真实地图等坐标数据与 SDK 到位后替换
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -293,22 +345,79 @@ fun LocationNavDialog(
                     .background(colors.brand.colorBrandMuted.copy(alpha = 0.35f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "地图示意区",
-                    color = colors.brand.colorBrand.copy(alpha = 0.7f),
-                    fontSize = (9f * uiScale).sp,
-                    lineHeight = (12f * uiScale).sp,
-                )
+                val cur = state
+                when {
+                    // 加载中
+                    cur == null -> Text(
+                        text = "正在查询地点…",
+                        color = colors.brand.colorBrand.copy(alpha = 0.8f),
+                        fontSize = (9f * uiScale).sp,
+                    )
+                    // 查到且有坐标
+                    cur is com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Ready -> Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = cur.displayName,
+                            color = colors.brand.colorBrand,
+                            fontSize = (10f * uiScale).sp,
+                            lineHeight = (13f * uiScale).sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(s(3.dp)))
+                        cur.addressText?.takeIf { it.isNotBlank() }?.let { addr ->
+                            Text(
+                                text = addr,
+                                color = colors.surface.colorTextSecondary,
+                                fontSize = (8f * uiScale).sp,
+                                lineHeight = (11f * uiScale).sp,
+                            )
+                        }
+                        Spacer(Modifier.height(s(4.dp)))
+                        Text(
+                            text = if (cur.hasCoordinate) {
+                                "坐标已就绪 · ${cur.routesCount} 条路线"
+                            } else {
+                                "该楼栋还缺坐标"
+                            },
+                            color = colors.surface.colorTextSecondary.copy(alpha = 0.8f),
+                            fontSize = (7.5f * uiScale).sp,
+                        )
+                    }
+                    // 其余都是"没结果"，按原因给不同文案
+                    else -> Text(
+                        text = when (cur) {
+                            is com.nongyu.appplus.timetable.logic.ClassroomNavState.State.NoData -> cur.detail
+                            is com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Unrecognized ->
+                                com.nongyu.appplus.timetable.logic.ClassroomNavState.unrecognizedDetail(cur.input)
+                            is com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Failed -> cur.message
+                            else -> ""
+                        },
+                        color = colors.surface.colorTextSecondary,
+                        fontSize = (8f * uiScale).sp,
+                        lineHeight = (11f * uiScale).sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = s(10.dp)),
+                    )
+                }
             }
+
             Spacer(Modifier.height(s(8.dp)))
             Text(
-                text = "后端地点服务与高德地图待接入（本期占位，不发请求）",
+                text = "地图渲染待接入高德 SDK（坐标数据齐全后启用）",
                 color = colors.surface.colorTextSecondary.copy(alpha = 0.7f),
                 fontSize = (8f * uiScale).sp,
                 lineHeight = (11f * uiScale).sp,
             )
             Spacer(Modifier.height(s(12.dp)))
-            DialogButton("关闭", uiScale, Modifier.fillMaxWidth(), onDismiss, primary = true)
+            Row {
+                // 失败时给「重试」，其余情况只给「关闭」——不需要让用户点无意义的按钮
+                if (state is com.nongyu.appplus.timetable.logic.ClassroomNavState.State.Failed) {
+                    DialogButton("重试", uiScale, Modifier.weight(1f), { reloadKey++ })
+                    Spacer(Modifier.width(s(8.dp)))
+                }
+                DialogButton("关闭", uiScale, Modifier.weight(1f), onDismiss, primary = true)
+            }
         }
     }
 }
