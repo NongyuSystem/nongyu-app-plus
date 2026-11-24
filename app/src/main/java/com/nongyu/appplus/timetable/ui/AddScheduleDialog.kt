@@ -222,12 +222,12 @@ fun ScheduleFormContent(
             // 6 颜色
             FieldLabel("颜色", uiScale)
             Row(horizontalArrangement = Arrangement.spacedBy(s(6.dp))) {
-                SCHEDULE_COLORS.forEachIndexed { idx, c ->
+                com.nongyu.appplus.timetable.logic.SchedulePalette.all().forEachIndexed { idx, c ->
                     Box(
                         modifier = Modifier
                             .size(s(20.dp))
                             .clip(RoundedCornerShape(s(10.dp)))
-                            .background(Color(c))
+                            .background(Color(c.toInt()))
                             .then(
                                 if (colorIndex == idx) {
                                     Modifier.border(s(2.dp), colors.brand.colorBrand, RoundedCornerShape(s(10.dp)))
@@ -273,16 +273,6 @@ fun ScheduleFormContent(
         }
     }
 }
-
-/** 日程可选颜色（6 个，与课程哈希色板区分开：这里是有序固定色）。 */
-private val SCHEDULE_COLORS = listOf(
-    0xFF0A7C59, // 品牌绿
-    0xFF3F7FBF, // 蓝
-    0xFFB06A2C, // 橙
-    0xFF8A6BBE, // 紫
-    0xFFB3455E, // 红
-    0xFF5C7A3F, // 橄榄
-)
 
 @Composable
 private fun FieldLabel(text: String, uiScale: Float) {
