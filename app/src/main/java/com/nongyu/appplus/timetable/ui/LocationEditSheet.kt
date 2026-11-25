@@ -34,6 +34,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.nongyu.appplus.design.NongyuTheme
 import java.time.LocalDate
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import kotlinx.coroutines.launch
 
 /**
  * 地点修改子窗体：地点值 + **日历选生效天**（与周次编辑共用 CourseCalendar）。
@@ -251,7 +256,19 @@ fun LocationNavButton(
     }
 }
 
-/** 导航占位子窗体：mock 地点 + 地图示意框，不发请求。 */
+/**
+ * 地点导航子窗体：承载新的校园矢量地图（[MapEditor]）。
+ *
+ * ## 2026-11-25 接入
+ *
+ * 从「按教室名查后端坐标 + 四种空态」改为直接展示校园地图。
+ * 地图本身由 `map` 顶层能力域提供：底图缓存优先、矢量标注（点/线/文字）
+ * 存在本地 DataStore，无需高德 SDK，也不需要经纬度。
+ *
+ * - campus 固定 `yaan`（川农雅安校区）；将来支持三校区时由调用方传入。
+ * - 教室名仍用于「外部地图」跳转：若后端能查到经纬度就显示跳转按钮，
+ *   查不到也不影响地图本身的浏览与标注。
+ */
 @Composable
 fun LocationNavDialog(
     courseName: String,
@@ -259,57 +276,84 @@ fun LocationNavDialog(
     uiScale: Float,
     onDismiss: () -> Unit,
 ) {
-    val colors = NongyuTheme.colors
-    fun s(dp: Dp): Dp = (dp.value * uiScale).dp
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val annotationStore = remember { com.nongyu.appplus.map.data.MapAnnotationStore(context) }
+    val campus = "yaan"
+
+    // 标注：本地持久化，MapEditor 变化时写回
+    var annotations by remember(campus) {
+        mutableStateOf<List<com.nongyu.appplus.map.model.MapAnnotation>>(emptyList())
+    }
+    LaunchedEffect(campus) {
+        annotations = annotationStore.load(campus)
+    }
+
+    // 尝试查一次后端坐标，仅用于「外部地图」跳转按钮（失败不影响主流程）
+    var externalLat by remember { mutableStateOf<Double?>(null) }
+    var externalLng by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(location) {
+        val r = com.nongyu.appplus.timetable.data.ClassroomRepository(context).lookup(location)
+        if (r is com.nongyu.appplus.timetable.data.ClassroomRepository.LookupResult.Found) {
+            externalLat = r.building.lat
+            externalLng = r.building.lng
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(s(20.dp)))
-                .background(colors.surface.colorCard)
-                .padding(s(18.dp)),
+                .height((430f * uiScale).dp)
+                .clip(RoundedCornerShape((20f * uiScale).dp))
+                .background(NongyuTheme.colors.surface.colorCard),
         ) {
-            Text(
-                text = "地点导航",
-                color = colors.surface.colorText,
-                fontSize = (13f * uiScale).sp,
-                lineHeight = (16f * uiScale).sp,
-                fontWeight = FontWeight.ExtraBold,
+            com.nongyu.appplus.map.ui.MapEditor(
+                campus = campus,
+                modifier = Modifier.fillMaxSize(),
+                initialAnnotations = annotations,
+                onAnnotationsChange = { list ->
+                    annotations = list
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        annotationStore.save(campus, list)
+                    }
+                },
+                labelForExternalMap = "$courseName · $location",
+                externalLat = externalLat,
+                externalLng = externalLng,
             )
-            Spacer(Modifier.height(s(3.dp)))
-            Text(
-                text = "$courseName · $location",
-                color = colors.brand.colorBrand,
-                fontSize = (9.5f * uiScale).sp,
-                lineHeight = (12f * uiScale).sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(s(12.dp)))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(s(120.dp))
-                    .clip(RoundedCornerShape(s(12.dp)))
-                    .background(colors.brand.colorBrandMuted.copy(alpha = 0.35f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "地图示意区",
-                    color = colors.brand.colorBrand.copy(alpha = 0.7f),
-                    fontSize = (9f * uiScale).sp,
-                    lineHeight = (12f * uiScale).sp,
-                )
-            }
-            Spacer(Modifier.height(s(8.dp)))
-            Text(
-                text = "后端地点服务与高德地图待接入（本期占位，不发请求）",
-                color = colors.surface.colorTextSecondary.copy(alpha = 0.7f),
-                fontSize = (8f * uiScale).sp,
-                lineHeight = (11f * uiScale).sp,
-            )
-            Spacer(Modifier.height(s(12.dp)))
-            DialogButton("关闭", uiScale, Modifier.fillMaxWidth(), onDismiss, primary = true)
         }
+    }
+}
+
+/**
+ * 地图不可用时的文字降级：显示楼栋名 + 原因。
+ *
+ * 为什么不直接留黑屏：高德 Key 未配置 / 缺坐标时地图区是空白的，
+ * 用户会以为是 App 坏了。这里至少告诉他"楼栋是哪一栋"以及"为什么没地图"。
+ */
+@Composable
+private fun MapFallbackText(title: String, hint: String, uiScale: Float) {
+    val colors = NongyuTheme.colors
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = (10f * uiScale).dp),
+    ) {
+        Text(
+            text = title,
+            color = colors.brand.colorBrand,
+            fontSize = (10f * uiScale).sp,
+            lineHeight = (13f * uiScale).sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height((3f * uiScale).dp))
+        Text(
+            text = hint,
+            color = colors.surface.colorTextSecondary,
+            fontSize = (7.5f * uiScale).sp,
+            lineHeight = (10f * uiScale).sp,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
