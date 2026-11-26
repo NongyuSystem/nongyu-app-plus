@@ -760,8 +760,10 @@ private fun CourseDayColumn(
 }
 
 /**
- * 用户新增的日程卡片：与课程卡同一套尺寸/圆角/居中排版，
- * 但底色用「品牌淡底 + 描边」以示区别（不是从教务来的课）。
+ * 用户新增的日程卡片：与课程卡同一套尺寸/圆角/居中排版。
+ *
+ * 底色按日程自选的 [ScheduleEntry.colorIndex] 取色；老数据没有 colorIndex 时
+ * 回落到品牌淡底（不是从教务来的课，所以不与课程卡的哈希色混用）。
  */
 @Composable
 private fun ScheduleCard(
@@ -773,7 +775,16 @@ private fun ScheduleCard(
     modifier: Modifier = Modifier,
 ) {
     val colors = NongyuTheme.colors
-    val bg = colors.brand.colorBrandMuted.copy(alpha = 0.75f)
+    // 选了颜色就用选的那个（淡淡的底 + 同色文字）；没选才用品牌淡底。
+    // 2026-11-24 修：此前这里写死品牌色，用户选的颜色存下来了却没人读，
+    // 表现就是「添加日程时选择颜色无用」。
+    val picked = com.nongyu.appplus.timetable.logic.SchedulePalette.argbOrNull(entry.colorIndex)
+    val bg = if (picked != null) {
+        Color(picked.toInt()).copy(alpha = 0.28f)
+    } else {
+        colors.brand.colorBrandMuted.copy(alpha = 0.75f)
+    }
+    val fg = if (picked != null) Color(picked.toInt()) else colors.brand.colorBrand
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(corner))
@@ -791,7 +802,7 @@ private fun ScheduleCard(
             // 杠子只保留在展开态里）。这里点一下即可打开展开态。
             Text(
                 text = entry.title,
-                color = colors.brand.colorBrand,
+                color = fg,
                 fontSize = (8.5f * uiScale).sp,
                 lineHeight = (10f * uiScale).sp,
                 fontWeight = FontWeight.Bold,
@@ -801,7 +812,7 @@ private fun ScheduleCard(
             if (entry.location.isNotBlank()) {
                 Text(
                     text = entry.location,
-                    color = colors.brand.colorBrand.copy(alpha = 0.85f),
+                    color = fg.copy(alpha = 0.85f),
                     fontSize = (6.5f * uiScale).sp,
                     lineHeight = (8f * uiScale).sp,
                     fontWeight = FontWeight.Medium,

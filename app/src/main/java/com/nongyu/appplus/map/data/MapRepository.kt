@@ -31,6 +31,22 @@ class MapRepository(private val context: Context) {
      * @return [MapLoadResult] 四种结果；不抛网络异常，失败封装在 [MapLoadResult.Error]。
      */
     suspend fun load(campus: String): MapLoadResult {
+        // 0) 注入点优先：debug 包可塞 mock 底图（release 恒为 Default，走下面真实逻辑）
+        MapDataSourceHolder.source.basemap(campus)?.let { mock ->
+            return MapLoadResult.Success(
+                meta = ClassroomMapMetaDto(
+                    campus = campus,
+                    width = mock.width,
+                    height = mock.height,
+                    uploaded = true,
+                    calibrated = mock.calibrated,
+                    hint = null,
+                ),
+                imageFile = File(mock.imagePath),
+                fromCache = true,
+            )
+        }
+
         val api = try {
             NetHolder.classroom(context)
         } catch (e: Throwable) {
