@@ -290,7 +290,11 @@ fun LocationNavDialog(
         annotationsJson = annotationStore.documentJson(campus)
     }
 
-    // 查一次后端坐标，仅供底部「跳转并导航」使用；查不到不影响地图浏览
+    // 查一次后端坐标，仅供底部「跳转并导航」使用；查不到不影响地图浏览。
+    //
+    // 后端 classroom_building 尚未录入时这里恒为 null，按钮会显示"暂不可用"，
+    // 而不是点下去才弹 toast——让用户在点之前就知道结果。
+    // debug 变体可通过注入点给一组兜底坐标，让导航链路能完整验证。
     var externalLat by remember { mutableStateOf<Double?>(null) }
     var externalLng by remember { mutableStateOf<Double?>(null) }
     LaunchedEffect(location) {
@@ -299,7 +303,15 @@ fun LocationNavDialog(
             externalLat = r.building.lat
             externalLng = r.building.lng
         }
+        if (externalLat == null || externalLng == null) {
+            com.nongyu.appplus.map.data.MapDataSourceHolder.source
+                .fallbackLatLng(campus)?.let { (lat, lng) ->
+                    externalLat = lat
+                    externalLng = lng
+                }
+        }
     }
+    val hasCoordinate = externalLat != null && externalLng != null
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -352,35 +364,42 @@ fun LocationNavDialog(
             Spacer(Modifier.height(s(10.dp)))
 
             // ③ 底部：跳转并导航
+            //
+            // 没坐标时按钮置灰并写明原因，而不是让用户点了才弹 toast——
+            // 后端楼栋坐标还没录入时这是常态，点一次弹一次太吵。
+            val buttonBg = if (hasCoordinate) {
+                colors.brand.colorBrand
+            } else {
+                colors.brand.colorBrandMuted.copy(alpha = 0.45f)
+            }
+            val buttonFg = if (hasCoordinate) {
+                colors.brand.colorOnBrand
+            } else {
+                colors.surface.colorTextSecondary
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(s(10.dp)))
-                    .background(colors.brand.colorBrand)
-                    .clickable {
-                        val lat = externalLat
-                        val lng = externalLng
-                        if (lat == null || lng == null) {
+                    .background(buttonBg)
+                    .clickable(enabled = hasCoordinate) {
+                        val lat = externalLat ?: return@clickable
+                        val lng = externalLng ?: return@clickable
+                        val ok = com.nongyu.appplus.map.ui.openMapNavigation(
+                            context, lat, lng, "$courseName · $location",
+                        )
+                        if (!ok) {
                             com.nongyu.appplus.design.showTextToast(
-                                context, "该地点暂无坐标，暂无法导航", uiScale,
+                                context, "未找到可用的地图应用", uiScale,
                             )
-                        } else {
-                            val ok = com.nongyu.appplus.map.ui.openMapNavigation(
-                                context, lat, lng, "$courseName · $location",
-                            )
-                            if (!ok) {
-                                com.nongyu.appplus.design.showTextToast(
-                                    context, "未找到可用的地图应用", uiScale,
-                                )
-                            }
                         }
                     }
                     .padding(vertical = s(10.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "跳转并导航",
-                    color = colors.brand.colorOnBrand,
+                    text = if (hasCoordinate) "跳转并导航" else "暂无可导航坐标",
+                    color = buttonFg,
                     fontSize = (10f * uiScale).sp,
                     fontWeight = FontWeight.Bold,
                 )

@@ -67,6 +67,14 @@ class DebugMapDataSource(private val context: Context) : MapDataSource {
         """.trimIndent()
     }
 
+    override suspend fun fallbackLatLng(campus: String): Pair<Double, Double>? {
+        // 四川农业大学雅安校区 10 号教学楼附近的真实坐标（GCJ-02）。
+        // 这里给值只是为了让「跳转并导航」在 debug 下能真的调起地图 App，
+        // 不参与任何生产逻辑（release 不装配本类）。
+        if (campus != CAMPUS) return null
+        return 29.9806 to 102.9994
+    }
+
     /** 首次调用生成底图 PNG，之后复用（每次重画没必要）。 */
     private fun ensureImage(): File {
         val dir = File(context.filesDir, "debug_map").apply { mkdirs() }

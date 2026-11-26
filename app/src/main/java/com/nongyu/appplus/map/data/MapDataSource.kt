@@ -30,6 +30,17 @@ interface MapDataSource {
     suspend fun annotationsJson(campus: String): String
 
     /**
+     * 兜底经纬度（**仅 mock 用**）。
+     *
+     * 后端 `classroom_building` 尚未录入楼栋时，真实链路查不到坐标，
+     * 「跳转并导航」就永远走不通。debug 注入点可在这里给一组坐标，
+     * 让导航链路能被完整验证。
+     *
+     * 生产实现 [DefaultMapDataSource] 返回 null，**不会**覆盖真实查询结果。
+     */
+    suspend fun fallbackLatLng(campus: String): Pair<Double, Double>? = null
+
+    /**
      * 底图数据。
      *
      * @param width / height 图片像素尺寸（标注坐标就落在这个像素系里）
