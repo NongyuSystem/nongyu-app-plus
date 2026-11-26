@@ -3,6 +3,7 @@ package com.nongyu.appplus
 import android.app.Application
 import com.nongyu.appplus.map.data.DebugMapDataSource
 import com.nongyu.appplus.map.data.MapDataSourceHolder
+import com.nongyu.appplus.profile.data.DebugDemoProfile
 
 /**
  * **debug 专用** Application：装载 mock 地图数据。
@@ -22,5 +23,7 @@ class DebugApp : Application() {
     override fun onCreate() {
         super.onCreate()
         MapDataSourceHolder.source = DebugMapDataSource(this)
+        // 票 #113：debug 演示画像。关掉开关即可回到真实数据链路的空白态。
+        DebugDemoProfile.install(enabled = true)
     }
 }

@@ -1,0 +1,239 @@
+package com.nongyu.appplus.profile.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nongyu.appplus.design.NongyuTheme
+import com.nongyu.appplus.design.uiScaleFor
+import com.nongyu.appplus.profile.data.DemoProfileHolder
+import com.nongyu.appplus.profile.logic.ProfileFields
+import com.nongyu.appplus.profile.logic.ProfileLogic
+import com.nongyu.appplus.profile.model.ProfileFieldItem
+import com.nongyu.appplus.profile.model.ProfileSnapshot
+import com.nongyu.appplus.profile.model.ProfileState
+
+/**
+ * 「个人」Tab 的静态画像卡（票 #113 / 规格 #111 v1，零动画）。
+ *
+ * ## 三态与数据来源
+ * 本地优先：只读画像缓存快照，页面**不发 `/me` 请求**。三态由
+ * [ProfileLogic.resolveState] 推导，demo 兜底只在 debug 源集且开关打开时生效。
+ * - 未登录：占位画像 + 登录入口；
+ * - 数据不全：登录响应兜底的字段照常展示，并给明确说明；
+ * - 会话过期：明确提示「登录已过期」，不展示误导性的旧画像；
+ * - 已登录：画像字段 + 登录态剩余期。
+ *
+ * ## 字段详情
+ * 点击字段不在此处弹窗，而是把 [ProfileFieldItem] 上报给 Shell；Shell 复用既有
+ * `BarMode.Detail` 的高度与退出语义，不新增底栏形态枚举值（见 ADR-0015）。
+ *
+ * @param navOccupiedPx 底栏常态占位高度（px，null = 首帧未测完先铺满），与课表同口径
+ * @param hasCredential 是否有 App 会话凭证（真源 LoginSessionHolder / SessionStore）
+ * @param profile 画像缓存快照（可为 null）
+ * @param onFieldClick 画像字段点击 → 由 Shell 打开字段详情卡
+ * @param onLoginClick 未登录 / 过期态的登录入口点击
+ */
+@Composable
+fun ProfileScreen(
+    navOccupiedPx: Float?,
+    hasCredential: Boolean,
+    profile: ProfileSnapshot?,
+    onFieldClick: (ProfileFieldItem) -> Unit,
+    onLoginClick: () -> Unit,
+) {
+    val colors = NongyuTheme.colors
+    val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val navPaddingDp = remember(navOccupiedPx) {
+        if (navOccupiedPx == null) 0.dp else with(density) { navOccupiedPx.toDp() }
+    }
+    val uiScale = uiScaleFor(with(density) { context.resources.displayMetrics.widthPixels / density.density })
+
+    // demo 兜底：只有 debug 源集才会给 DemoProfileHolder.demo 赋值；
+    // release 包里 demo 恒 null，这段分支恒不生效。
+    val demo = DemoProfileHolder.demo
+    val demoActive = demo != null && DemoProfileHolder.enabled && !ProfileLogic.isCacheNonEmpty(profile)
+    val effective = if (demoActive) demo else profile
+    val effectiveCredential = ProfileFields.hasEffectiveCredential(hasCredential, demoActive)
+    val nowSeconds = System.currentTimeMillis() / 1000L
+    val state = ProfileLogic.resolveState(
+        hasCredential = effectiveCredential,
+        profile = effective,
+        // demo 不伪造过期时间；真实 expiresAt 由登录响应透传。
+        expiresAtUnixSeconds = effective?.expiresAtUnixSeconds,
+        nowEpochSeconds = nowSeconds,
+    )
+    val remainingLabel = effective?.expiresAtUnixSeconds?.let {
+        ProfileFields.remainingLabelOf(ProfileLogic.remaining(it, nowSeconds))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.surface.colorBackground)
+            .padding(horizontal = (20f * uiScale).dp)
+            // 底栏占位：与 TimetableScreen 同口径，子页不做坐标换算。
+            .padding(bottom = navPaddingDp + (24f * uiScale).dp)
+            .padding(top = (24f * uiScale).dp),
+        verticalArrangement = Arrangement.spacedBy((12f * uiScale).dp),
+    ) {
+        when (state) {
+            ProfileState.NOT_SIGNED_IN -> StateNotice(
+                title = "占位画像",
+                body = "登录后这里会展示你的姓名、学号、班级与专业。未登录也可以使用「关于农屿」。",
+                actionLabel = "去登录",
+                onAction = onLoginClick,
+                uiScale = uiScale,
+            )
+            ProfileState.SESSION_EXPIRED -> StateNotice(
+                title = "登录已过期",
+                body = "会话已经到期，请重新登录以查看画像。",
+                actionLabel = "重新登录",
+                onAction = onLoginClick,
+                uiScale = uiScale,
+            )
+            ProfileState.INCOMPLETE -> {
+                Text(
+                    text = "登录信息不完整，以下字段来自登录响应；请重新登录补全画像。",
+                    color = colors.surface.colorTextSecondary,
+                    fontSize = (13f * uiScale).sp,
+                )
+                ProfileCard(
+                    fields = ProfileFields.of(effective),
+                    remainingLabel = remainingLabel,
+                    uiScale = uiScale,
+                    onFieldClick = onFieldClick,
+                )
+            }
+            ProfileState.READY -> ProfileCard(
+                fields = ProfileFields.of(effective),
+                remainingLabel = remainingLabel,
+                uiScale = uiScale,
+                onFieldClick = onFieldClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StateNotice(
+    title: String,
+    body: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+    uiScale: Float,
+) {
+    val colors = NongyuTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape((18f * uiScale).dp))
+            .background(colors.surface.colorCard)
+            .padding((20f * uiScale).dp),
+        verticalArrangement = Arrangement.spacedBy((10f * uiScale).dp),
+    ) {
+        Text(text = title, color = colors.surface.colorText, fontSize = (20f * uiScale).sp)
+        Text(text = body, color = colors.surface.colorTextSecondary, fontSize = (14f * uiScale).sp)
+        Text(
+            text = actionLabel,
+            color = colors.brand.colorBrand,
+            fontSize = (15f * uiScale).sp,
+            modifier = Modifier
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onAction,
+                )
+                .padding(vertical = (6f * uiScale).dp),
+        )
+    }
+}
+
+@Composable
+private fun ProfileCard(
+    fields: List<ProfileFieldItem>,
+    remainingLabel: String?,
+    uiScale: Float,
+    onFieldClick: (ProfileFieldItem) -> Unit,
+) {
+    val colors = NongyuTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape((18f * uiScale).dp))
+            .background(colors.surface.colorCard)
+            .padding((20f * uiScale).dp),
+        verticalArrangement = Arrangement.spacedBy((2f * uiScale).dp),
+    ) {
+        Text(
+            text = "我的画像",
+            color = colors.surface.colorText,
+            fontSize = (20f * uiScale).sp,
+            modifier = Modifier.padding(bottom = (8f * uiScale).dp),
+        )
+        fields.forEach { field ->
+            ProfileFieldRow(field = field, uiScale = uiScale, onClick = { onFieldClick(field) })
+        }
+        if (remainingLabel != null) {
+            Text(
+                text = remainingLabel,
+                color = colors.surface.colorTextSecondary,
+                fontSize = (12f * uiScale).sp,
+                textAlign = TextAlign.End,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = (10f * uiScale).dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileFieldRow(
+    field: ProfileFieldItem,
+    uiScale: Float,
+    onClick: () -> Unit,
+) {
+    val colors = NongyuTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onClick,
+            )
+            .padding(vertical = (10f * uiScale).dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Column {
+            Text(
+                text = field.label,
+                color = colors.surface.colorTextSecondary,
+                fontSize = (12f * uiScale).sp,
+            )
+            Text(
+                text = field.value,
+                color = colors.surface.colorText,
+                fontSize = (16f * uiScale).sp,
+            )
+        }
+    }
+}
