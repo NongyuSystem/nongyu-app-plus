@@ -13,6 +13,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application
+        android:name="com.nongyu.appplus.DebugApp"
         android:networkSecurityConfig="@xml/network_security_config"
         tools:replace="android:networkSecurityConfig" />
 

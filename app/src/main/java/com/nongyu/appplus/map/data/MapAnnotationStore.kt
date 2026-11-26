@@ -56,8 +56,12 @@ class MapAnnotationStore(private val context: Context) {
      * 地图组件要的是"直接喂给 [com.nongyu.appplus.map.ui.MapEditor] 的 JSON"，
      * 刻意不在 UI 层做 encode/decode 往返——那既浪费又可能掩盖数据问题。
      */
-    suspend fun documentJson(campus: String): String =
-        context.mapAnnotationStore.data.first()[stringKey(campus)].orEmpty()
+    suspend fun documentJson(campus: String): String {
+        // 注入点优先：debug 包可塞 mock 标注（release 恒为 Default，返回空串）
+        MapDataSourceHolder.source.annotationsJson(campus).takeIf { it.isNotBlank() }
+            ?.let { return it }
+        return context.mapAnnotationStore.data.first()[stringKey(campus)].orEmpty()
+    }
 
     /** 覆盖某个校区的全部标注。 */
     suspend fun save(campus: String, annotations: List<MapAnnotation>) {

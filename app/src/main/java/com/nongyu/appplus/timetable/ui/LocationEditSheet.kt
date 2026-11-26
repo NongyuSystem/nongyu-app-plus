@@ -305,7 +305,10 @@ fun LocationNavDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((520f * uiScale).dp)
+                // 总高随地图一起收：地图由 weight 改为固定 200dp 后，
+                // 对话框若仍留 520dp 会在底部多出一大片空白。
+                // 340dp ≈ 顶部文字 40 + 间距 20 + 地图 200 + 间距 10 + 按钮 40 + padding 32
+                .height((340f * uiScale).dp)
                 .clip(RoundedCornerShape(s(20.dp)))
                 .background(colors.surface.colorCard)
                 .padding(s(16.dp)),
@@ -328,10 +331,15 @@ fun LocationNavDialog(
             )
             Spacer(Modifier.height(s(10.dp)))
 
-            // ② 中间：地图（占满剩余空间）
+            // ② 中间：地图
+            //
+            // 2026-11-26 维护者要求「高度缩小一半」：原来是 weight(1f) 吃掉剩余全部空间
+            // （对话框 520dp 时约 400dp），这里改成固定 200dp。
+            // 不用 weight(0.5f) 是因为 weight 按**剩余空间**分配比例，
+            // 顶部文字一变高度地图就跟着变，固定值更可控。
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .height((200f * uiScale).dp)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(s(12.dp))),
             ) {

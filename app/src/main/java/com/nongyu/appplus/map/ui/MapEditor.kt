@@ -27,6 +27,7 @@ import com.nongyu.appplus.map.logic.MapAnnotationJson
 import com.nongyu.appplus.map.logic.MapGeoUri
 import com.nongyu.appplus.map.logic.MapGeometry
 import com.nongyu.appplus.map.model.MapViewport
+import androidx.compose.foundation.layout.BoxWithConstraints
 
 /**
  * 地图组件（**只读**）。
@@ -79,32 +80,62 @@ fun MapEditor(
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
-        MapCanvasView(
-            image = image,
-            viewport = viewport,
-            annotations = annotations,
-            selectedId = null,
-            modifier = Modifier.fillMaxSize(),
-            onPan = { dx, dy ->
-                val w = image?.width ?: 1
-                val h = image?.height ?: 1
-                viewport = MapGeometry.clampPan(
-                    viewport, dx, dy, w, h,
-                    screenWidth = 1080, screenHeight = 1920,
-                )
-            },
-            onTap = { /* 只读：用户点击标注不触发任何编辑 */ },
-        )
+        // 用 BoxWithConstraints 拿真实可见区域，而不是写死屏幕尺寸。
+        //
+        // 2026-11-26 修 bug：之前 clampPan 传的是写死的 1080×1920。
+        // 但地图组件经常只占屏幕一小块（例如对话框里 1080×400），于是：
+        //   1) clampPan 以为「图比屏幕小」→ 竖直居中到 (1920-图高)/2，整图被推到下方；
+        //   2) 一拖动又按 1920 重新夹取 → 画面突然跳位。
+        // 现在约束来自实际布局，两个问题一起消失。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val viewW = constraints.maxWidth
+            val viewH = constraints.maxHeight
 
-        hint?.let {
-            Text(
-                it,
-                color = Color(0xFF666666),
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(16.dp),
+            // 首次加载后把地图居中。
+            //
+            // 初始 viewport 是 (0,0, scale=1)，即图像左上角贴屏幕左上角。
+            // 若不处理，大图会「只有右下角露出来」，标注点自然不在中心。
+            // 这里用 clampPan(0,0) 求一次居中/夹取结果——图比视口大就贴左上（可拖动看全），
+            // 比视口小就居中，正是 clampPan 已有的语义。
+            LaunchedEffect(image, viewW, viewH) {
+                val img = image ?: return@LaunchedEffect
+                if (viewW > 0 && viewH > 0) {
+                    viewport = MapGeometry.clampPan(
+                        viewport, 0f, 0f, img.width, img.height,
+                        screenWidth = viewW,
+                        screenHeight = viewH,
+                    )
+                }
+            }
+
+            MapCanvasView(
+                image = image,
+                viewport = viewport,
+                annotations = annotations,
+                selectedId = null,
+                modifier = Modifier.fillMaxSize(),
+                onPan = { dx, dy ->
+                    val w = image?.width ?: 1
+                    val h = image?.height ?: 1
+                    viewport = MapGeometry.clampPan(
+                        viewport, dx, dy, w, h,
+                        screenWidth = viewW,
+                        screenHeight = viewH,
+                    )
+                },
+                onTap = { /* 只读：用户点击标注不触发任何编辑 */ },
             )
+
+            hint?.let {
+                Text(
+                    it,
+                    color = Color(0xFF666666),
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                )
+            }
         }
     }
 }
