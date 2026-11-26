@@ -26,7 +26,6 @@ import com.nongyu.appplus.map.data.MapRepository
 import com.nongyu.appplus.map.logic.MapAnnotationJson
 import com.nongyu.appplus.map.logic.MapGeoUri
 import com.nongyu.appplus.map.logic.MapGeometry
-import com.nongyu.appplus.map.model.MapAnnotation
 import com.nongyu.appplus.map.model.MapViewport
 
 /**
@@ -111,40 +110,21 @@ fun MapEditor(
 }
 
 /**
- * 兼容旧签名：调用方若仍传 `initialAnnotations`，转回 JSON 后交给只读实现。
+ * 便捷入口：直接传标注文档对象。
  *
- * 这样别人未提交的 `LocationEditSheet` 调用仍能编译，但用户编辑能力已经移除。
+ * 调用方若已从 [com.nongyu.appplus.map.data.MapAnnotationStore.documentJson] 拿到原始 JSON，
+ * 用那个重载即可免去编码往返；本重载供只有对象、没有 JSON 的场景。
  */
 @Composable
 fun MapEditor(
     campus: String,
+    doc: com.nongyu.appplus.map.model.MapDoc,
     modifier: Modifier = Modifier,
-    initialAnnotations: List<MapAnnotation> = emptyList(),
-    onAnnotationsChange: (List<MapAnnotation>) -> Unit = {},
-    labelForExternalMap: String? = null,
-    externalLat: Double? = null,
-    externalLng: Double? = null,
 ) {
-    val json = remember(initialAnnotations) { encodeAnnotations(initialAnnotations) }
-    MapEditor(campus = campus, annotationsJson = json, modifier = modifier)
-}
-
-/** 把标注列表编码成 [MapAnnotationJson] 契约的 JSON（正向转换，供兼容重载用）。 */
-private fun encodeAnnotations(list: List<MapAnnotation>): String {
-    if (list.isEmpty()) return "[]"
-    return buildString {
-        append('[')
-        list.forEachIndexed { index, a ->
-            if (index > 0) append(',')
-            append("""{"kind":"${a.kind.name}","points":[""")
-            a.points.forEachIndexed { i, p ->
-                if (i > 0) append(',')
-                append("""{"x":${p.x},"y":${p.y}}""")
-            }
-            append("],\"colorArgb\":${a.colorArgb},\"text\":\"${a.text.replace("\"", "\\\"")}\"}")
-        }
-        append(']')
+    val json = remember(doc) {
+        com.nongyu.appplus.map.logic.MapAnnotationJson.encodeDoc(doc)
     }
+    MapEditor(campus = campus, annotationsJson = json, modifier = modifier)
 }
 
 /**
