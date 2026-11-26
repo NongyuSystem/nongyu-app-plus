@@ -61,6 +61,7 @@ import com.nongyu.appplus.timetable.data.weekOfTerm
 import com.nongyu.appplus.timetable.ui.holiday.TimetableTitleBlock
 import com.nongyu.appplus.timetable.model.CourseEntry
 import com.nongyu.appplus.timetable.model.ScheduleEntry
+import androidx.compose.ui.layout.onGloballyPositioned
 
 /**
  * 课表页容器（票 #15 建、#18 补齐交互）。
@@ -126,11 +127,22 @@ fun TimetableScreen(
 ) {
     val colors = NongyuTheme.colors
     val density = LocalDensity.current
+    // 本页 Box 在整窗里的纵向偏移（由下方 onGloballyPositioned 量出）。
+    // 必须声明在 BoxWithConstraints **之外**：它的 modifier 里的 lambda 要用到它。
+    var rootOffsetYPx by remember { mutableFloatStateOf(0f) }
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.surface.colorBackground),
+            .background(colors.surface.colorBackground)
+            // 量出本页 Box 在整窗里的纵向偏移。
+            // TimetableGrid 上报整窗坐标，而本页流水换算要除以 constraints.maxHeight
+            // （相对本页），两者必须同一基准，否则全局 systemBars 避让会让流水线偏一个状态栏高。
+            .onGloballyPositioned { coords ->
+                rootOffsetYPx = coords.localToRoot(
+                    androidx.compose.ui.geometry.Offset.Zero,
+                ).y
+            },
     ) {
         val uiScale = uiScaleFor(maxWidth.value)
         // ⚠️ 2026-11-23：状态栏避让已上移到 `NongyuApp` 根节点统一处理
@@ -398,8 +410,11 @@ fun TimetableScreen(
                     // 卡片揭幕走完整列，两者各管各的。
                     cardAppear = 1f - 1.2f * seg(0.00f, 0.55f),
                     onPeriodColumnBounds = { top, h ->
-                        // 本页自己要留一份用于流水换算；同时照旧上报给 Shell（时间条定位要用）
-                        periodTopPx = top
+                        // 两个消费方，坐标系不同，别混用：
+                        // 1. 本页流水线：top 会除以 constraints.maxHeight，两者都相对本页 Box
+                        // 2. Shell 时间条：也相对它自己的 Box，由 Shell 那边各减各的偏移
+                        // TimetableGrid 给的是整窗坐标，这里减掉本页偏移换成本页相对坐标。
+                        periodTopPx = (top - rootOffsetYPx).coerceAtLeast(0f)
                         periodHeightPx = h
                         onPeriodColumnBounds(top, h)
                     },
