@@ -159,9 +159,25 @@ fun MainShell() {
     // 画像缓存快照：本地优先，只读 ProfileStore；页面自身不发 /me 请求（ADR-0011）。
     var profileSnapshot by remember { mutableStateOf<ProfileSnapshot?>(null) }
     val profileStore = remember { NetHolder.profileStore(context.applicationContext) }
+    // 票 #114：末端刷新果实的加载反馈。刷新只重读本地 ProfileStore，不发网络请求。
+    var profileRefreshing by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val cached = withContext(Dispatchers.IO) { profileStore.read() }
         profileSnapshot = cached
+    }
+    fun refreshProfile() {
+        if (profileRefreshing) return
+        profileRefreshing = true
+        coroutineScope.launch {
+            try {
+                profileSnapshot = withContext(Dispatchers.IO) { profileStore.read() }
+                showTextToast(context, "画像已刷新")
+            } catch (t: RuntimeException) {
+                showTextToast(context, "刷新失败，请重试")
+            } finally {
+                profileRefreshing = false
+            }
+        }
     }
     // 直接读 State.value（不 remember），会话失效切登录中心时页面能立刻重组。
     val hasCredential = LoginSessionHolder.state.value.destination ==
@@ -706,6 +722,8 @@ fun MainShell() {
                     navOccupiedPx = navOccupiedHeight,
                     hasCredential = hasCredential,
                     profile = profileSnapshot,
+                    isRefreshing = profileRefreshing,
+                    onRefresh = { refreshProfile() },
                     onFieldClick = { field ->
                         // 两个详情内容互斥：打开画像字段前先清课程详情。
                         detailCourse = null

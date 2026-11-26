@@ -2,6 +2,7 @@ package com.nongyu.appplus.net
 
 import android.content.Context
 import com.nongyu.appplus.net.api.ApiKeyApi
+import com.nongyu.appplus.net.api.AnnouncementApi
 import com.nongyu.appplus.net.api.CacheApi
 import com.nongyu.appplus.net.api.ClassroomApi
 import com.nongyu.appplus.net.api.SchoolApi
@@ -202,6 +203,20 @@ object NetHolder {
             retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
         }
         return r.create(SecondClassApi::class.java)
+    }
+
+    /**
+     * 校内信息公告（票 #114，后端 `internal/content/announcement/`）。
+     *
+     * 三条路由都需 Bearer，与 [api] / [cache] 共享同一个 Retrofit 与拦截器，
+     * 401 由既有失效分流统一处理。**独立入口，不并入 [NongyuGateWay]** 门面方法清单。
+     * `data:null` 是「当前没有生效公告」的正常空态，由调用方按空态处理，不是错误。
+     */
+    fun announcements(context: Context): AnnouncementApi {
+        val r = retrofitRef ?: synchronized(this) {
+            retrofitRef ?: buildRetrofit(context.applicationContext).also { retrofitRef = it }
+        }
+        return r.create(AnnouncementApi::class.java)
     }
 
     /**
