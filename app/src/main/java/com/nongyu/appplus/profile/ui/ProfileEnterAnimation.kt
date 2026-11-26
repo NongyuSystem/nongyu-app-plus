@@ -13,6 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import coil.compose.SubcomposeAsyncImage
+import coil.ImageLoader
+import coil.request.ImageRequest
+import androidx.compose.ui.layout.ContentScale
+import com.nongyu.appplus.net.NetHolder
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -157,6 +162,7 @@ fun ProfileEnterAnimationOverlay(
     orbCenterPx: Offset?,
     orbSizePx: Float,
     name: String?,
+    avatarUrl: String?,
     uiScale: Float,
     skip: Boolean,
     modifier: Modifier = Modifier,
@@ -251,21 +257,64 @@ fun ProfileEnterAnimationOverlay(
                     },
             ) {
                 // 收尾帧渲染点：票 #120 只替换这一处，前四段与进度驱动不受影响。
-                ProfileAvatarFinale(name = name, uiScale = uiScale)
+                ProfileAvatarFinale(name = name, avatarUrl = avatarUrl, uiScale = uiScale)
             }
         }
     }
 }
 
 /**
- * 字符头像收尾帧的**唯一渲染接缝**（票 #115 → #120）。
+ * 开场动画收尾帧的**唯一渲染接缝**（票 #115 → #120）。
  *
- * 当前实现：品牌色圆形底 + 姓名首字，零网络、零外部依赖。
- * 票 #120 引入 Coil 时只需替换本函数实现（签名可扩展 avatarUrl 等参数），
- * 枝条 → 绕圆 → 果实 → 页面淡入四段与进度逻辑完全不用动。
+ * 票 #120：avatarUrl 非空时用 Coil 显示真实头像；null/空串/加载失败回落字符头像。
+ * Coil 的 ImageLoader 显式复用本仓 [com.nongyu.appplus.net.NetHolder] 的 OkHttpClient，
+ * 让头像请求走同一套 NY1 签名 / 401 统一处理 / 日志脱敏，绝不自建 client。
+ * 枝条 → 绕圆 → 果实 → 页面淡入四段与进度逻辑完全不动本函数即被替换。
  */
 @Composable
 fun ProfileAvatarFinale(
+    name: String?,
+    avatarUrl: String?,
+    uiScale: Float,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val hasUrl = !avatarUrl.isNullOrBlank()
+    if (hasUrl) {
+        val loader = remember {
+            ImageLoader.Builder(context)
+                .okHttpClient(NetHolder.sharedOkHttpClient(context.applicationContext))
+                .build()
+        }
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(avatarUrl)
+                .crossfade(true)
+                .build(),
+            contentDescription = "我的头像",
+            imageLoader = loader,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.fillMaxSize().clip(CircleShape),
+            // 加载中 / 加载失败都回落字符头像（AC：avatarUrl 为空或加载失败回落）。
+            loading = { CharacterAvatar(name = name, uiScale = uiScale, modifier = Modifier.fillMaxSize()) },
+            error = { CharacterAvatar(name = name, uiScale = uiScale, modifier = Modifier.fillMaxSize()) },
+            success = {
+                androidx.compose.foundation.Image(
+                    painter = this.painter,
+                    contentDescription = "我的头像",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            },
+        )
+    } else {
+        CharacterAvatar(name = name, uiScale = uiScale, modifier = modifier)
+    }
+}
+
+/** 字符头像回落（空 URL / 加载失败时使用）：品牌色圆形底 + 姓名首字。 */
+@Composable
+private fun CharacterAvatar(
     name: String?,
     uiScale: Float,
     modifier: Modifier = Modifier,

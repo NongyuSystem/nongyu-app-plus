@@ -1,0 +1,18 @@
+票 #120 Coil 引入 APK 体积记录
+=====================================
+
+构建变体：release（R8 + 资源收缩，versionCode 70 / versionName 0.0.62test）
+
+- 引入前基线：1,836,767 字节（integration-profile ca4b4b5，票 #119 合并后）
+- 引入后实际：2,049,822 字节（ticket-120，Coil 2.7.0 + coil-compose）
+- 增量：+213,055 字节（约 +208 KB，+11.6%）
+
+结论：增量在合理范围（Coil 核心 + Compose 集成 + OkHttp 复用，无自建 client）。
+R8 keep 生效验证：release APK 的 classes.dex 含 328 处 `Lcoil/` 引用；
+mapping.txt 含 3,496 行 coil.* 映射，证明 Coil 类未被 shrink 裁掉。
+
+HTTP 客户端复用验证：
+- profile/ui/ProfileEnterAnimation.kt 的 ImageLoader.Builder.okHttpClient(
+  NetHolder.sharedOkHttpClient(context))
+- profile 包内无 OkHttpClient.Builder / OkHttpFactory.build 调用（grep 为空），
+  头像请求与业务请求共用同一 OkHttp 客户端（NY1 签名 / 401 处理 / 日志脱敏一致）。

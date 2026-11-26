@@ -1150,6 +1150,7 @@ fun MainShell() {
                 orbCenterPx = orbCenterPx,
                 orbSizePx = with(density) { orbSize.toPx() },
                 name = effectiveProfile?.name,
+                avatarUrl = effectiveProfile?.avatarUrl,
                 uiScale = uiScale,
                 skip = enterSkip,
             )

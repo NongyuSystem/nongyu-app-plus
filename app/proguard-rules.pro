@@ -62,3 +62,15 @@
 -keep class com.nongyu.appplus.net.model.** { <init>(...); *; }
 -keep class com.nongyu.appplus.net.model.** { public static ** Companion; }
 -keepclassmembers class com.nongyu.appplus.net.model.** { *** serializer(...); }
+
+# ---------------------------------------------------------------------------
+# Coil 真实头像（票 #120，2026-11-26）
+#
+# Coil 2.x 自带 consumer rules，覆盖常规 ImageLoader/AsyncImage 使用。
+# 这里补的是「解包验证要能看到」的兜底 keep：保留 Coil 的 image 请求与
+# OkHttp 集成入口类，避免 R8 full mode 把只在运行时按接口反射的路径裁掉。
+# 症状若出现：debug 头像正常、release 头像恒为字符回落（kept 类名被混淆）。
+# ---------------------------------------------------------------------------
+-dontwarn coil.**
+-keep class coil.** { *; }
+-keep class androidx.compose.ui.graphics.painter.** { *; }
