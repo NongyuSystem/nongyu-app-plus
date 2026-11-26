@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nongyu.appplus.shell.OrbMode
@@ -53,6 +54,9 @@ import com.nongyu.appplus.shell.OrbMode
  * @param onModeChange 状态变更回调（由 Shell 写回 `mode`）
  * @param onPulse 触发一次雷达波（`pulseExpand` + `pulseKey++`）
  * @param enabled 是否接收手势（= 底栏处于常态）
+ * @param onOrbCenterChange 球心整窗坐标上报 seam（票 #115 开页动画起点）。
+ *   回调只在球 Box 尺寸 / 位置变化时触发，不随动画帧重组；坐标为整窗根坐标，
+ *   消费方需换算成自身坐标系。缺省空实现，对既有调用零影响。
  */
 @Composable
 fun OrbHost(
@@ -67,6 +71,7 @@ fun OrbHost(
     onPulse: (expand: Boolean) -> Unit,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    onOrbCenterChange: (Offset?) -> Unit = {},
 ) {
     // 长按态的全屏 dim：画在底栏之后，把整条导航栏也一起压暗
     if (dimAlpha > 0f) {
@@ -138,6 +143,21 @@ fun OrbHost(
                 .size(orbSize)
                 .scale(scale)
                 .alpha(alpha)
+                // 票 #115：上报球心整窗坐标给开页动画当枝条起点。
+                // 用 MainShell / TimetableGrid 同款 localToRoot 取左上角绝对坐标，
+                // 再加本地尺寸的一半得到球心；scale 动画不改坐标上报（球心不动）。
+                .onGloballyPositioned { coords ->
+                    val topLeft = coords.localToRoot(Offset.Zero)
+                    val w = coords.size.width.toFloat()
+                    val h = coords.size.height.toFloat()
+                    onOrbCenterChange(
+                        if (w > 0f && h > 0f) {
+                            Offset(topLeft.x + w / 2f, topLeft.y + h / 2f)
+                        } else {
+                            null
+                        },
+                    )
+                }
                 // 见类注释第 1 条：不 clip(CircleShape)
                 // 见类注释第 2 条：只在常态接收触摸
                 .then(
