@@ -3,6 +3,7 @@ package com.nongyu.appplus.net
 import com.nongyu.appplus.net.api.IdentityApi
 import com.nongyu.appplus.net.api.PresenceApi
 import com.nongyu.appplus.net.core.ApiCall
+import com.nongyu.appplus.net.core.NongyuLogger
 import com.nongyu.appplus.net.core.UrlBuilder
 import com.nongyu.appplus.net.model.HealthzDto
 import com.nongyu.appplus.net.model.LoginDto
@@ -11,6 +12,8 @@ import com.nongyu.appplus.net.model.NetJson
 import com.nongyu.appplus.net.model.PresenceDecideDto
 import com.nongyu.appplus.net.model.PresenceReportDto
 import com.nongyu.appplus.net.model.ProfileDto
+import com.nongyu.appplus.net.profile.ProfileAdapters
+import com.nongyu.appplus.net.profile.ProfileStore
 import okhttp3.RequestBody
 import retrofit2.Response
 
@@ -46,6 +49,13 @@ class NongyuGateWay internal constructor(
     private val identity: IdentityApi,
     private val presence: PresenceApi,
     private val baseUrl: String,
+    /**
+     * 画像缓存（票 #112 / ADR-0011）。**不进门面方法清单**：它是「顺手落盘」的旁路依赖，
+     * 只在 `me()` / `login()` 成功时写入，失败绝不影响本门面任何方法的返回值。
+     * 默认 `null`（旧装配点 / 纯 JVM 测试不关心画像落盘）。
+     */
+    private val profileStore: ProfileStore? = null,
+    private val logger: NongyuLogger = NongyuLogger.Noop,
 ) {
 
     /**
@@ -76,15 +86,43 @@ class NongyuGateWay internal constructor(
      *
      * 成功响应 [LoginDto]：`expiresAt` 是 **Unix 秒 Long**。
      */
-    suspend fun login(body: RequestBody): ApiCall.Outcome<LoginDto> =
-        call("POST", "/identity/login") { identity.login(body) }
+    suspend fun login(body: RequestBody): ApiCall.Outcome<LoginDto> {
+        val outcome = call("POST", "/identity/login") { identity.login(body) }
+        // 顺手落盘（票 #112）：登录响应里的姓名/学号/班级/专业/年级此前被丢弃。
+        // 只碰画像缓存，**绝不影响本方法的返回值与启动校验判定**。
+        if (outcome is ApiCall.Outcome.Success) {
+            cacheProfileQuietly { profileStore?.write(ProfileAdapters.fromLogin(outcome.value)) }
+        }
+        return outcome
+    }
 
     /**
      * `GET /identity/me` —— 需 Bearer。用于启动校验：首帧之后由后台发起，
      * 结果只做事后纠正（票 #90 / 规格 #89）。失败分类仍由 [ApiCall] 集中处理。
+     *
+     * **全仓唯一打 `/me` 的地方**（票 #112 / ADR-0011）：页面不再重复请求，
+     * 成功时顺手把画像落盘给「个人」页做本地优先展示。
      */
-    suspend fun me(): ApiCall.Outcome<ProfileDto> =
-        call("GET", "/identity/me") { identity.me() }
+    suspend fun me(): ApiCall.Outcome<ProfileDto> {
+        val outcome = call("GET", "/identity/me") { identity.me() }
+        if (outcome is ApiCall.Outcome.Success) {
+            cacheProfileQuietly { profileStore?.write(ProfileAdapters.fromMe(outcome.value)) }
+        }
+        return outcome
+    }
+
+    /**
+     * 画像落盘的隔离层：**任何失败都被吞掉**，不改变门面方法的返回值。
+     * 这是 ADR-0011 / US24 的硬约束——缓存写失败绝不能把正常登录判成会话过期。
+     */
+    private inline fun cacheProfileQuietly(write: () -> Unit) {
+        try {
+            write()
+        } catch (t: Throwable) {
+            // 只记日志、不冒泡；画像缓存是旁路，失败可重取。
+            logger.log(NongyuLogger.Level.WARN, "画像缓存落盘失败（不影响登录判定）", t)
+        }
+    }
 
     /**
      * `POST /school/presence` —— 上报「在校内 / 校外」。
