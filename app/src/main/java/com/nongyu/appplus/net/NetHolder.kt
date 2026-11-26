@@ -13,6 +13,8 @@ import com.nongyu.appplus.net.auth.DefaultSessionInvalidListener
 import com.nongyu.appplus.net.auth.MinimalSessionStore
 import com.nongyu.appplus.net.auth.SessionStore
 import com.nongyu.appplus.net.auth.SessionInvalidListener
+import com.nongyu.appplus.net.profile.MinimalProfileStore
+import com.nongyu.appplus.net.profile.ProfileStore
 import com.nongyu.appplus.net.api.http.AndroidLogger
 import com.nongyu.appplus.BuildConfig
 import com.nongyu.appplus.net.api.http.OkHttpFactory
@@ -69,6 +71,22 @@ object NetHolder {
         sessionStoreRef ?: synchronized(this) {
             sessionStoreRef ?: MinimalSessionStore(context.applicationContext, AndroidLogger)
                 .also { sessionStoreRef = it }
+        }
+
+    /**
+     * 画像存储（票 #112 / ADR-0011）：与 [sessionStore] 同风格的惰性 getter。
+     *
+     * **不进 [NongyuGateWay] 的门面方法清单**：页面/装配点从此处拿缓存，
+     * 门面只在 `me()` / `login()` 成功时顺手写入。
+     * 只存画像，不存凭证 —— 凭证真源仍是 [sessionStore]。
+     */
+    @Volatile
+    private var profileStoreRef: ProfileStore? = null
+
+    fun profileStore(context: Context): ProfileStore =
+        profileStoreRef ?: synchronized(this) {
+            profileStoreRef ?: MinimalProfileStore(context.applicationContext, AndroidLogger)
+                .also { profileStoreRef = it }
         }
 
     /**
@@ -214,6 +232,8 @@ object NetHolder {
             identity = retrofit.create(IdentityApi::class.java),
             presence = retrofit.create(PresenceApi::class.java),
             baseUrl = retrofit.baseUrl().toString(),
+            profileStore = profileStore(context),
+            logger = AndroidLogger,
         )
     }
 
