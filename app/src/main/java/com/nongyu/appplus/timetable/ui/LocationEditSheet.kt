@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
 
 /**
  * 地点修改子窗体：地点值 + **日历选生效天**（与周次编辑共用 CourseCalendar）。
@@ -257,17 +258,18 @@ fun LocationNavButton(
 }
 
 /**
- * 地点导航子窗体：承载新的校园矢量地图（[MapEditor]）。
+ * 地点导航子窗体：上「课程 + 地点」，中「地图」，下「跳转并导航」。
  *
- * ## 2026-11-25 接入
+ * ## 2026-11-26 按维护者要求重排
  *
- * 从「按教室名查后端坐标 + 四种空态」改为直接展示校园地图。
- * 地图本身由 `map` 顶层能力域提供：底图缓存优先、矢量标注（点/线/文字）
- * 存在本地 DataStore，无需高德 SDK，也不需要经纬度。
+ * 地图用 `map` 能力域的只读 [com.nongyu.appplus.map.ui.MapEditor]：
+ * 底图缓存优先、标注由调用方数据决定（本地 DataStore），无高德 SDK。
+ * 底部跳转用独立的 [com.nongyu.appplus.map.ui.openMapNavigation]（geo: URI）。
  *
- * - campus 固定 `yaan`（川农雅安校区）；将来支持三校区时由调用方传入。
- * - 教室名仍用于「外部地图」跳转：若后端能查到经纬度就显示跳转按钮，
- *   查不到也不影响地图本身的浏览与标注。
+ * 布局分三段：
+ * 1. 顶部：课程名 + 教室地点（让用户确认看的是哪一节课）
+ * 2. 中间：地图，占满剩余空间
+ * 3. 底部：「跳转并导航」按钮；无坐标时提示而非崩
  */
 @Composable
 fun LocationNavDialog(
@@ -277,18 +279,18 @@ fun LocationNavDialog(
     onDismiss: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val annotationStore = remember { com.nongyu.appplus.map.data.MapAnnotationStore(context) }
+    val colors = NongyuTheme.colors
+    fun s(dp: Dp): Dp = (dp.value * uiScale).dp
     val campus = "yaan"
 
-    // 标注：本地持久化，MapEditor 变化时写回
-    var annotations by remember(campus) {
-        mutableStateOf<List<com.nongyu.appplus.map.model.MapAnnotation>>(emptyList())
-    }
+    // 标注：直接读原始文档 JSON 喂给只读地图，避免 encode/decode 往返
+    val annotationStore = remember { com.nongyu.appplus.map.data.MapAnnotationStore(context) }
+    var annotationsJson by remember(campus) { mutableStateOf<String?>(null) }
     LaunchedEffect(campus) {
-        annotations = annotationStore.load(campus)
+        annotationsJson = annotationStore.documentJson(campus)
     }
 
-    // 尝试查一次后端坐标，仅用于「外部地图」跳转按钮（失败不影响主流程）
+    // 查一次后端坐标，仅供底部「跳转并导航」使用；查不到不影响地图浏览
     var externalLat by remember { mutableStateOf<Double?>(null) }
     var externalLng by remember { mutableStateOf<Double?>(null) }
     LaunchedEffect(location) {
@@ -300,27 +302,89 @@ fun LocationNavDialog(
     }
 
     Dialog(onDismissRequest = onDismiss) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((430f * uiScale).dp)
-                .clip(RoundedCornerShape((20f * uiScale).dp))
-                .background(NongyuTheme.colors.surface.colorCard),
+                // 总高随地图一起收：地图由 weight 改为固定 200dp 后，
+                // 对话框若仍留 520dp 会在底部多出一大片空白。
+                // 340dp ≈ 顶部文字 40 + 间距 20 + 地图 200 + 间距 10 + 按钮 40 + padding 32
+                .height((340f * uiScale).dp)
+                .clip(RoundedCornerShape(s(20.dp)))
+                .background(colors.surface.colorCard)
+                .padding(s(16.dp)),
         ) {
-            com.nongyu.appplus.map.ui.MapEditor(
-                campus = campus,
-                modifier = Modifier.fillMaxSize(),
-                initialAnnotations = annotations,
-                onAnnotationsChange = { list ->
-                    annotations = list
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        annotationStore.save(campus, list)
-                    }
-                },
-                labelForExternalMap = "$courseName · $location",
-                externalLat = externalLat,
-                externalLng = externalLng,
+            // ① 顶部：课程 + 地点
+            Text(
+                text = courseName,
+                color = colors.surface.colorText,
+                fontSize = (12f * uiScale).sp,
+                lineHeight = (15f * uiScale).sp,
+                fontWeight = FontWeight.ExtraBold,
             )
+            Spacer(Modifier.height(s(2.dp)))
+            Text(
+                text = location,
+                color = colors.brand.colorBrand,
+                fontSize = (9.5f * uiScale).sp,
+                lineHeight = (12f * uiScale).sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(s(10.dp)))
+
+            // ② 中间：地图
+            //
+            // 2026-11-26 维护者要求「高度缩小一半」：原来是 weight(1f) 吃掉剩余全部空间
+            // （对话框 520dp 时约 400dp），这里改成固定 200dp。
+            // 不用 weight(0.5f) 是因为 weight 按**剩余空间**分配比例，
+            // 顶部文字一变高度地图就跟着变，固定值更可控。
+            Box(
+                modifier = Modifier
+                    .height((200f * uiScale).dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(s(12.dp))),
+            ) {
+                com.nongyu.appplus.map.ui.MapEditor(
+                    campus = campus,
+                    annotationsJson = annotationsJson,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.height(s(10.dp)))
+
+            // ③ 底部：跳转并导航
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(s(10.dp)))
+                    .background(colors.brand.colorBrand)
+                    .clickable {
+                        val lat = externalLat
+                        val lng = externalLng
+                        if (lat == null || lng == null) {
+                            com.nongyu.appplus.design.showTextToast(
+                                context, "该地点暂无坐标，暂无法导航", uiScale,
+                            )
+                        } else {
+                            val ok = com.nongyu.appplus.map.ui.openMapNavigation(
+                                context, lat, lng, "$courseName · $location",
+                            )
+                            if (!ok) {
+                                com.nongyu.appplus.design.showTextToast(
+                                    context, "未找到可用的地图应用", uiScale,
+                                )
+                            }
+                        }
+                    }
+                    .padding(vertical = s(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "跳转并导航",
+                    color = colors.brand.colorOnBrand,
+                    fontSize = (10f * uiScale).sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
 }
