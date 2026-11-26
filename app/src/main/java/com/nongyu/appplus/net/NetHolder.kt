@@ -59,6 +59,13 @@ object NetHolder {
     @Volatile
     private var retrofitRef: Retrofit? = null
 
+    /**
+     * 共享的 OkHttpClient（票 #120）：由 [buildRetrofit] 构造时留存，供 Coil 显式复用。
+     * 这样头像请求走同一套签名 / 401 统一处理 / 日志脱敏，不自建 client。
+     */
+    @Volatile
+    private var okHttpClientRef: OkHttpClient? = null
+
     /** 会话存储（票 #90）：同一实例供 token 来源、失效分流、启动校验共用，避免第二套真源。 */
     @Volatile
     private var sessionStoreRef: SessionStore? = null
@@ -250,6 +257,26 @@ object NetHolder {
             profileStore = profileStore(context),
             logger = AndroidLogger,
         )
+    }
+
+    /**
+     * 供图片加载器（Coil）显式复用的 HTTP 客户端（票 #120）。
+     *
+     * 必须与业务请求走同一个 [OkHttpFactory] 客户端 —— 否则头像请求会绕过 NY1 签名、
+     * 401 统一处理与日志脱敏。首次调用会触发网络层装配（惰性，不违反 ADR-0006
+     * 冷启动守卫：本 getter 只在开页动画收尾帧真正要显示头像时才被调用）。
+     */
+    fun sharedOkHttpClient(context: Context): OkHttpClient {
+        okHttpClientRef?.let { return it }
+        synchronized(this) {
+            okHttpClientRef?.let { return it }
+            // 若 Retrofit 已装配，直接从它取 client；否则走一次完整装配（会同时留存 client）。
+            val client = retrofitRef?.callFactory() as? OkHttpClient
+                ?: buildRetrofit(context.applicationContext).callFactory() as? OkHttpClient
+                ?: throw IllegalStateException("OkHttpClient 未装配")
+            okHttpClientRef = client
+            return client
+        }
     }
 
     /** 构造 Retrofit —— 唯一一处装配 OkHttp 客户端与转换器。 */
