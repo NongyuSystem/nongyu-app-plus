@@ -381,6 +381,18 @@ fun MainShell() {
 
     // 票 #60：节次行的真实屏幕范围（由 TimetableGrid 实测上报），
     // 时间条按它定位 —— 不再手算那些容易漏项的 padding 公式。
+    //
+    // ⚠️ 坐标系必须和时间条所在的 Box 一致。
+    //
+    // TimetableGrid 用 localToRoot 取到的是**整窗根坐标**（含状态栏一行）；
+    // 而本函数的根 Box 在 NongyuApp 里已被 windowInsetsPadding(systemBars) 往里收过，
+    // 时间条又是在这个 Box 里用 .padding(top = rulerTop) 定位的。
+    // 两者原点相差一个状态栏高度 —— 2026-11-23 加全局 systemBars 避让后，
+    // 时间尺就整体偏下了那么多。
+    //
+    // 所以记下本根 Box 自身的整窗偏移，收到上报时减掉，
+    // 让 periodTopPx 变成「相对本 Box」的坐标，与时间条同一基准。
+    var rootOffsetYPx by remember { mutableFloatStateOf(0f) }
     var periodTopPx by remember { mutableFloatStateOf(0f) }
     var periodHeightPx by remember { mutableFloatStateOf(0f) }
     // 票 #60：时间条拖动状态（遮罩用）；时间条本身也搬到 Shell 层，
@@ -557,7 +569,16 @@ fun MainShell() {
         )
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // 量出本 Box 在整窗里的纵向偏移（= 全局 systemBars 避让吃掉的顶部高度）。
+                .onGloballyPositioned { coords ->
+                    rootOffsetYPx = coords.localToRoot(
+                        androidx.compose.ui.geometry.Offset.Zero,
+                    ).y
+                },
+        ) {
             // 详见 docs/specs/界面层.md §8.1 B 卡片外退出层：全屏 + 声明在底栏之前
             val dismissAction: (() -> Unit)? = when (dismissTargetOf(barMode)) {
                 DismissTarget.Detail -> ({ collapseDetail() })
@@ -635,7 +656,9 @@ fun MainShell() {
                     },
                     onRulerDragStateChange = { rulerDragging = it },
                     onPeriodColumnBounds = { top, h ->
-                        periodTopPx = top
+                        // TimetableGrid 给的是整窗坐标；减掉本 Box 偏移换成相对坐标，
+                        // 否则时间条会整体多下移一个状态栏高度。
+                        periodTopPx = (top - rootOffsetYPx).coerceAtLeast(0f)
                         periodHeightPx = h
                     },
                     onRulerFocusChange = { rulerFocus = it },
