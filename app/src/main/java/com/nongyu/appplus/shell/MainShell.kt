@@ -165,7 +165,7 @@ fun MainShell() {
     // 画像缓存快照：本地优先，只读 ProfileStore；页面自身不发 /me 请求（ADR-0011）。
     var profileSnapshot by remember { mutableStateOf<ProfileSnapshot?>(null) }
     val profileStore = remember { NetHolder.profileStore(context.applicationContext) }
-    // 票 #114：末端刷新果实的加载反馈。刷新只重读本地 ProfileStore，不发网络请求。
+    // 票 #114：末端刷新果实的加载反馈。刷新经唯一 /me 出口拉取后重读缓存。
     var profileRefreshing by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val cached = withContext(Dispatchers.IO) { profileStore.read() }
@@ -176,8 +176,19 @@ fun MainShell() {
         profileRefreshing = true
         coroutineScope.launch {
             try {
-                profileSnapshot = withContext(Dispatchers.IO) { profileStore.read() }
-                showTextToast(context, "画像已刷新")
+                // 票 #114 / US14「点击刷新果实更新画像数据」：经**唯一的 /me 出口**
+                // （NongyuGateWay.me()，成功时顺手落盘画像）拉取最新数据，再重读缓存，
+                // 让画像卡真正更新。页面自身不新建 /me 调用点、不自行解析响应 ——
+                // 「唯一的 /me 出口 / 页面不发自己的 /me 请求」的架构约束不变。
+                // 刷新是用户显式主动触发，与启动校验的「本地优先、零等待首帧」不冲突。
+                val outcome = withContext(Dispatchers.IO) { NetHolder.api(context.applicationContext).me() }
+                val refreshed = withContext(Dispatchers.IO) { profileStore.read() }
+                profileSnapshot = refreshed
+                when (outcome) {
+                    is com.nongyu.appplus.net.core.ApiCall.Outcome.Success ->
+                        showTextToast(context, "画像已刷新")
+                    else -> showTextToast(context, "画像已更新本地缓存，暂未连上服务器")
+                }
             } catch (t: RuntimeException) {
                 showTextToast(context, "刷新失败，请重试")
             } finally {
