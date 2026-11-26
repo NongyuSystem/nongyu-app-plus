@@ -1,5 +1,6 @@
 package com.nongyu.appplus.profile.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -8,16 +9,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nongyu.appplus.design.NongyuTheme
@@ -30,7 +42,7 @@ import com.nongyu.appplus.profile.model.ProfileSnapshot
 import com.nongyu.appplus.profile.model.ProfileState
 
 /**
- * 「个人」Tab 的静态画像卡（票 #113 / 规格 #111 v1，零动画）。
+ * 「个人」Tab 的静态画像卡 + 入口区（票 #113 画像卡 / 票 #114 入口区，零动画）。
  *
  * ## 三态与数据来源
  * 本地优先：只读画像缓存快照，页面**不发 `/me` 请求**。三态由
@@ -44,9 +56,16 @@ import com.nongyu.appplus.profile.model.ProfileState
  * 点击字段不在此处弹窗，而是把 [ProfileFieldItem] 上报给 Shell；Shell 复用既有
  * `BarMode.Detail` 的高度与退出语义，不新增底栏形态枚举值（见 ADR-0015）。
  *
+ * ## 入口区（票 #114）
+ * 下半部三个入口：关于农屿（原生静态页，零网络、不依赖登录）、校内信息（公告列表）、
+ * 末端刷新果实（重读 ProfileStore + 加载反馈）。此版入口静态可见，**不含上滑展开手势**
+ * ——那是票 #117（05 揭示根系）的语义，两者互不复用（规格 #111 承载结构）。
+ *
  * @param navOccupiedPx 底栏常态占位高度（px，null = 首帧未测完先铺满），与课表同口径
  * @param hasCredential 是否有 App 会话凭证（真源 LoginSessionHolder / SessionStore）
  * @param profile 画像缓存快照（可为 null）
+ * @param isRefreshing 画像是否正在刷新（由 Shell 驱动，果实显示加载反馈）
+ * @param onRefresh 刷新果实点击 → 由 Shell 重读 ProfileStore
  * @param onFieldClick 画像字段点击 → 由 Shell 打开字段详情卡
  * @param onLoginClick 未登录 / 过期态的登录入口点击
  */
@@ -55,16 +74,40 @@ fun ProfileScreen(
     navOccupiedPx: Float?,
     hasCredential: Boolean,
     profile: ProfileSnapshot?,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
     onFieldClick: (ProfileFieldItem) -> Unit,
     onLoginClick: () -> Unit,
 ) {
     val colors = NongyuTheme.colors
     val context = LocalContext.current
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val navPaddingDp = remember(navOccupiedPx) {
+    val density = LocalDensity.current
+    val navPaddingDp: Dp = remember(navOccupiedPx) {
         if (navOccupiedPx == null) 0.dp else with(density) { navOccupiedPx.toDp() }
     }
-    val uiScale = uiScaleFor(with(density) { context.resources.displayMetrics.widthPixels / density.density })
+    val uiScale = uiScaleFor(context.resources.displayMetrics.widthPixels / density.density)
+
+    var subPage by remember { mutableStateOf(ProfileSubPage.NONE) }
+    BackHandler(enabled = subPage != ProfileSubPage.NONE) {
+        subPage = ProfileSubPage.NONE
+    }
+
+    if (subPage != ProfileSubPage.NONE) {
+        when (subPage) {
+            ProfileSubPage.ABOUT -> AboutNongyuScreen(
+                uiScale = uiScale,
+                bottomPadding = navPaddingDp,
+                onBack = { subPage = ProfileSubPage.NONE },
+            )
+            ProfileSubPage.SCHOOL_INFO -> SchoolInfoScreen(
+                uiScale = uiScale,
+                bottomPadding = navPaddingDp,
+                onBack = { subPage = ProfileSubPage.NONE },
+            )
+            ProfileSubPage.NONE -> Unit
+        }
+        return
+    }
 
     // demo 兜底：只有 debug 源集才会给 DemoProfileHolder.demo 赋值；
     // release 包里 demo 恒 null，这段分支恒不生效。
@@ -129,8 +172,19 @@ fun ProfileScreen(
                 onFieldClick = onFieldClick,
             )
         }
+
+        // 票 #114：下半部入口区，与画像卡同页，静态可见、不依赖任何手势。
+        ProfileEntries(
+            uiScale = uiScale,
+            isRefreshing = isRefreshing,
+            onAboutClick = { subPage = ProfileSubPage.ABOUT },
+            onSchoolInfoClick = { subPage = ProfileSubPage.SCHOOL_INFO },
+            onRefreshClick = onRefresh,
+        )
     }
 }
+
+private enum class ProfileSubPage { NONE, ABOUT, SCHOOL_INFO }
 
 @Composable
 private fun StateNotice(
@@ -235,5 +289,93 @@ private fun ProfileFieldRow(
                 fontSize = (16f * uiScale).sp,
             )
         }
+    }
+}
+
+/**
+ * 入口区（票 #114）：关于农屿 / 校内信息两行入口 + 末端刷新果实。
+ * 果实是可点按钮，热区不小于最小可点尺寸并带无障碍描述；刷新中显示加载反馈且不可重复点。
+ */
+@Composable
+private fun ProfileEntries(
+    uiScale: Float,
+    isRefreshing: Boolean,
+    onAboutClick: () -> Unit,
+    onSchoolInfoClick: () -> Unit,
+    onRefreshClick: () -> Unit,
+) {
+    val colors = NongyuTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape((18f * uiScale).dp))
+            .background(colors.surface.colorCard)
+            .padding((20f * uiScale).dp),
+        verticalArrangement = Arrangement.spacedBy((4f * uiScale).dp),
+    ) {
+        Text(
+            text = "入口",
+            color = colors.surface.colorText,
+            fontSize = (16f * uiScale).sp,
+            modifier = Modifier.padding(bottom = (4f * uiScale).dp),
+        )
+        EntryRow(label = "关于农屿", uiScale = uiScale, onClick = onAboutClick)
+        EntryRow(label = "校内信息", uiScale = uiScale, onClick = onSchoolInfoClick)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = (10f * uiScale).dp)
+                .clickable(
+                    enabled = !isRefreshing,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onRefreshClick,
+                )
+                .heightIn(min = (48f * uiScale).dp)
+                .clip(RoundedCornerShape((24f * uiScale).dp))
+                .background(colors.brand.colorBrand)
+                .semantics { contentDescription = "刷新画像" },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isRefreshing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size((16f * uiScale).dp),
+                        color = colors.brand.colorOnBrand,
+                        strokeWidth = (2f * uiScale).dp,
+                    )
+                    Text(
+                        text = "  刷新中…",
+                        color = colors.brand.colorOnBrand,
+                        fontSize = (14f * uiScale).sp,
+                    )
+                }
+            } else {
+                Text(
+                    text = "刷新果实 · 更新画像",
+                    color = colors.brand.colorOnBrand,
+                    fontSize = (15f * uiScale).sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EntryRow(label: String, uiScale: Float, onClick: () -> Unit) {
+    val colors = NongyuTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onClick,
+            )
+            .heightIn(min = (44f * uiScale).dp)
+            .padding(vertical = (10f * uiScale).dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(text = label, color = colors.surface.colorText, fontSize = (15f * uiScale).sp)
     }
 }
