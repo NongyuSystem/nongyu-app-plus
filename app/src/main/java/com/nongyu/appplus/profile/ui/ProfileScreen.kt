@@ -35,6 +35,8 @@ import com.nongyu.appplus.profile.logic.ProfileLogic
 import com.nongyu.appplus.profile.model.ProfileFieldItem
 import com.nongyu.appplus.profile.model.ProfileSnapshot
 import com.nongyu.appplus.profile.model.ProfileState
+import com.nongyu.appplus.webpage.model.WebPageConfig
+import com.nongyu.appplus.webpage.ui.WebPageScreen
 
 /**
  * 「个人」Tab 的画像卡 + 两态揭示入口区（票 #113 画像卡 / #114 入口区 / #117 揭示形态）。
@@ -101,6 +103,17 @@ fun ProfileScreen(
     // 取 300dp 留出余量，保证刷新果实在展开态完整可见、不被揭示容器裁掉。
     val revealHeight = (300f * uiScale).dp
 
+    // 票 #119：学校相关页面配置。校方站点域与 H5 白名单边界见 ADR-0016 / H5 规格 D7 修订。
+    // Cookie 桥当前为 null（学校站点公开可读，WebVPN 登录沙箱不迁入，见票 #119）；
+    // 将来需要带 App 会话 Cookie 访问时由装配点注入 WebPageCookieBridge 实现。
+    val schoolWebPageConfig = remember {
+        WebPageConfig(
+            url = "https://www.sicau.edu.cn/",
+            allowedHosts = setOf("*.sicau.edu.cn", "sicau.edu.cn"),
+            title = "学校相关页面",
+        )
+    }
+
     if (subPage != ProfileSubPage.NONE) {
         when (subPage) {
             ProfileSubPage.ABOUT -> AboutNongyuScreen(
@@ -111,6 +124,11 @@ fun ProfileScreen(
             ProfileSubPage.SCHOOL_INFO -> SchoolInfoScreen(
                 uiScale = uiScale,
                 bottomPadding = navPaddingDp,
+                onBack = { subPage = ProfileSubPage.NONE },
+            )
+            ProfileSubPage.SCHOOL_WEB -> WebPageScreen(
+                config = schoolWebPageConfig,
+                cookieBridge = null,
                 onBack = { subPage = ProfileSubPage.NONE },
             )
             ProfileSubPage.NONE -> Unit
@@ -198,6 +216,7 @@ fun ProfileScreen(
                     isRefreshing = isRefreshing,
                     onAboutClick = { subPage = ProfileSubPage.ABOUT },
                     onSchoolInfoClick = { subPage = ProfileSubPage.SCHOOL_INFO },
+                    onSchoolWebClick = { subPage = ProfileSubPage.SCHOOL_WEB },
                     onRefreshClick = onRefresh,
                 )
             },
@@ -205,7 +224,7 @@ fun ProfileScreen(
     }
 }
 
-private enum class ProfileSubPage { NONE, ABOUT, SCHOOL_INFO }
+private enum class ProfileSubPage { NONE, ABOUT, SCHOOL_INFO, SCHOOL_WEB }
 
 @Composable
 private fun StateNotice(
@@ -328,6 +347,7 @@ private fun ProfileEntries(
     isRefreshing: Boolean,
     onAboutClick: () -> Unit,
     onSchoolInfoClick: () -> Unit,
+    onSchoolWebClick: () -> Unit,
     onRefreshClick: () -> Unit,
 ) {
     val colors = NongyuTheme.colors
@@ -375,11 +395,21 @@ private fun ProfileEntries(
                 busy = false,
                 onClick = onSchoolInfoClick,
             )
+            // 票 #119：学校相关页面（内嵌 WebView，白名单见 ADR-0016）。
+            PotatoFruitButton(
+                label = "学校网页",
+                accessibilityLabel = "学校相关页面",
+                uiScale = uiScale,
+                angleOffset = 2f * Math.PI.toFloat() / 3f,
+                enabled = true,
+                busy = false,
+                onClick = onSchoolWebClick,
+            )
             PotatoFruitButton(
                 label = if (isRefreshing) "刷新中" else "刷新",
                 accessibilityLabel = "刷新画像",
                 uiScale = uiScale,
-                angleOffset = 2f * Math.PI.toFloat() / 3f,
+                angleOffset = Math.PI.toFloat(),
                 enabled = !isRefreshing,
                 busy = isRefreshing,
                 onClick = onRefreshClick,
