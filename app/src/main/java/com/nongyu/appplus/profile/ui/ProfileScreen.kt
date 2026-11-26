@@ -9,12 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,8 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -48,7 +43,7 @@ import com.nongyu.appplus.profile.model.ProfileState
  * 收起态只显示上半画像卡；在页面上滑揭示下方画像入口区，下拉收回。
  * 揭示进度由 [ProfileRootForm] 的显式 Animatable 驱动（拖拽 snapTo / 松手 animateTo），
  * 阈值与吸附目标由 `profile/logic/RootForm` 纯函数判定并单测。刷新果实的点击语义
- * 与上滑手势分流：点击走 clickable，上滑走竖直拖拽，互不抢占。
+ * 与上滑手势分流：果实走 detectTapGestures（点按），容器走竖直拖拽，互不抢占。
  *
  * ## 三态与数据来源
  * 本地优先：只读画像缓存快照，页面**不发 `/me` 请求**。三态由
@@ -319,8 +314,13 @@ private fun ProfileFieldRow(
 }
 
 /**
- * 入口区（票 #114）：关于农屿 / 校内信息两行入口 + 末端刷新果实。
- * 果实是可点按钮，热区不小于最小可点尺寸并带无障碍描述；刷新中显示加载反馈且不可重复点。
+ * 入口区（票 #114 语义 + 票 #118 土豆果实按钮化）。
+ *
+ * 三颗土豆状果实本身就是画像入口按钮（不再是旁边的规整矩形代理）：
+ * - 关于农屿 / 校内信息 / 刷新，各自一枚果实，热区 >= 48dp；
+ * - 凸起朝向各异（angleOffset），文字居中且互不重叠；
+ * - 每颗果实带无障碍标签与 Role.Button，刷新中显示进度环且不可重复点；
+ * - 果实是点按、父容器是竖直拖拽，两者语义分流（见 [PotatoFruitButton]）。
  */
 @Composable
 private fun ProfileEntries(
@@ -345,63 +345,45 @@ private fun ProfileEntries(
             fontSize = (16f * uiScale).sp,
             modifier = Modifier.padding(bottom = (4f * uiScale).dp),
         )
-        EntryRow(label = "关于农屿", uiScale = uiScale, onClick = onAboutClick)
-        EntryRow(label = "校内信息", uiScale = uiScale, onClick = onSchoolInfoClick)
-        Box(
+        Text(
+            text = "点果实进入入口，上滑收起根系。",
+            color = colors.surface.colorTextSecondary,
+            fontSize = (12f * uiScale).sp,
+        )
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = (10f * uiScale).dp)
-                .clickable(
-                    enabled = !isRefreshing,
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = onRefreshClick,
-                )
-                .heightIn(min = (48f * uiScale).dp)
-                .clip(RoundedCornerShape((24f * uiScale).dp))
-                .background(colors.brand.colorBrand)
-                .semantics { contentDescription = "刷新画像" },
-            contentAlignment = Alignment.Center,
+                .padding(top = (10f * uiScale).dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (isRefreshing) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size((16f * uiScale).dp),
-                        color = colors.brand.colorOnBrand,
-                        strokeWidth = (2f * uiScale).dp,
-                    )
-                    Text(
-                        text = "  刷新中…",
-                        color = colors.brand.colorOnBrand,
-                        fontSize = (14f * uiScale).sp,
-                    )
-                }
-            } else {
-                Text(
-                    text = "刷新果实 · 更新画像",
-                    color = colors.brand.colorOnBrand,
-                    fontSize = (15f * uiScale).sp,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EntryRow(label: String, uiScale: Float, onClick: () -> Unit) {
-    val colors = NongyuTheme.colors
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-                onClick = onClick,
+            PotatoFruitButton(
+                label = "关于农屿",
+                accessibilityLabel = "关于农屿",
+                uiScale = uiScale,
+                angleOffset = 0f,
+                enabled = true,
+                busy = false,
+                onClick = onAboutClick,
             )
-            .heightIn(min = (44f * uiScale).dp)
-            .padding(vertical = (10f * uiScale).dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Text(text = label, color = colors.surface.colorText, fontSize = (15f * uiScale).sp)
+            PotatoFruitButton(
+                label = "校内信息",
+                accessibilityLabel = "校内信息",
+                uiScale = uiScale,
+                angleOffset = Math.PI.toFloat() / 3f,
+                enabled = true,
+                busy = false,
+                onClick = onSchoolInfoClick,
+            )
+            PotatoFruitButton(
+                label = if (isRefreshing) "刷新中" else "刷新",
+                accessibilityLabel = "刷新画像",
+                uiScale = uiScale,
+                angleOffset = 2f * Math.PI.toFloat() / 3f,
+                enabled = !isRefreshing,
+                busy = isRefreshing,
+                onClick = onRefreshClick,
+            )
+        }
     }
 }
