@@ -42,7 +42,13 @@ import com.nongyu.appplus.profile.model.ProfileSnapshot
 import com.nongyu.appplus.profile.model.ProfileState
 
 /**
- * 「个人」Tab 的静态画像卡 + 入口区（票 #113 画像卡 / 票 #114 入口区，零动画）。
+ * 「个人」Tab 的画像卡 + 两态揭示入口区（票 #113 画像卡 / #114 入口区 / #117 揭示形态）。
+ *
+ * ## 两态揭示（票 #117）
+ * 收起态只显示上半画像卡；在页面上滑揭示下方画像入口区，下拉收回。
+ * 揭示进度由 [ProfileRootForm] 的显式 Animatable 驱动（拖拽 snapTo / 松手 animateTo），
+ * 阈值与吸附目标由 `profile/logic/RootForm` 纯函数判定并单测。刷新果实的点击语义
+ * 与上滑手势分流：点击走 clickable，上滑走竖直拖拽，互不抢占。
  *
  * ## 三态与数据来源
  * 本地优先：只读画像缓存快照，页面**不发 `/me` 请求**。三态由
@@ -58,8 +64,8 @@ import com.nongyu.appplus.profile.model.ProfileState
  *
  * ## 入口区（票 #114）
  * 下半部三个入口：关于农屿（原生静态页，零网络、不依赖登录）、校内信息（公告列表）、
- * 末端刷新果实（重读 ProfileStore + 加载反馈）。此版入口静态可见，**不含上滑展开手势**
- * ——那是票 #117（05 揭示根系）的语义，两者互不复用（规格 #111 承载结构）。
+ * 末端刷新果实（重读 ProfileStore + 加载反馈）。入口区在收起态隐藏、展开态可见，
+ * 复用 #114 的入口内容，不与上滑展开手势复用语义（规格 #111 承载结构）。
  *
  * @param navOccupiedPx 底栏常态占位高度（px，null = 首帧未测完先铺满），与课表同口径
  * @param hasCredential 是否有 App 会话凭证（真源 LoginSessionHolder / SessionStore）
@@ -91,6 +97,14 @@ fun ProfileScreen(
     BackHandler(enabled = subPage != ProfileSubPage.NONE) {
         subPage = ProfileSubPage.NONE
     }
+
+    // 票 #117：两态揭示。收起态只显示画像卡；上滑揭示画像入口区，下拉收回。
+    // 揭示进度用显式 Animatable（拖拽 snapTo / 松手 animateTo），阈值由 RootForm 纯函数推导。
+    val rootProgress = rememberProfileRootFormProgress()
+    var rootExpanded by remember { mutableStateOf(false) }
+    // 入口区实测约 260dp（两张卡 20dp 内边距 + 两行入口 64dp + 刷新果实 58dp + 间距）。
+    // 取 300dp 留出余量，保证刷新果实在展开态完整可见、不被揭示容器裁掉。
+    val revealHeight = (300f * uiScale).dp
 
     if (subPage != ProfileSubPage.NONE) {
         when (subPage) {
@@ -137,49 +151,61 @@ fun ProfileScreen(
             .padding(top = (24f * uiScale).dp),
         verticalArrangement = Arrangement.spacedBy((12f * uiScale).dp),
     ) {
-        when (state) {
-            ProfileState.NOT_SIGNED_IN -> StateNotice(
-                title = "占位画像",
-                body = "登录后这里会展示你的姓名、学号、班级与专业。未登录也可以使用「关于农屿」。",
-                actionLabel = "去登录",
-                onAction = onLoginClick,
-                uiScale = uiScale,
-            )
-            ProfileState.SESSION_EXPIRED -> StateNotice(
-                title = "登录已过期",
-                body = "会话已经到期，请重新登录以查看画像。",
-                actionLabel = "重新登录",
-                onAction = onLoginClick,
-                uiScale = uiScale,
-            )
-            ProfileState.INCOMPLETE -> {
-                Text(
-                    text = "登录信息不完整，以下字段来自登录响应；请重新登录补全画像。",
-                    color = colors.surface.colorTextSecondary,
-                    fontSize = (13f * uiScale).sp,
-                )
-                ProfileCard(
-                    fields = ProfileFields.of(effective),
-                    remainingLabel = remainingLabel,
-                    uiScale = uiScale,
-                    onFieldClick = onFieldClick,
-                )
-            }
-            ProfileState.READY -> ProfileCard(
-                fields = ProfileFields.of(effective),
-                remainingLabel = remainingLabel,
-                uiScale = uiScale,
-                onFieldClick = onFieldClick,
-            )
-        }
-
-        // 票 #114：下半部入口区，与画像卡同页，静态可见、不依赖任何手势。
-        ProfileEntries(
+        // 票 #117：画像卡（上半）+ 画像入口区（下半）装进两态揭示容器。
+        // 收起态只显示卡片；上滑揭示入口区，下拉收回；卡片高度与位置不随揭示变化。
+        ProfileRootForm(
+            progress = rootProgress,
+            expanded = rootExpanded,
+            onExpandedChange = { rootExpanded = it },
+            revealHeight = revealHeight,
             uiScale = uiScale,
-            isRefreshing = isRefreshing,
-            onAboutClick = { subPage = ProfileSubPage.ABOUT },
-            onSchoolInfoClick = { subPage = ProfileSubPage.SCHOOL_INFO },
-            onRefreshClick = onRefresh,
+            card = {
+                when (state) {
+                    ProfileState.NOT_SIGNED_IN -> StateNotice(
+                        title = "占位画像",
+                        body = "登录后这里会展示你的姓名、学号、班级与专业。未登录也可以使用「关于农屿」。",
+                        actionLabel = "去登录",
+                        onAction = onLoginClick,
+                        uiScale = uiScale,
+                    )
+                    ProfileState.SESSION_EXPIRED -> StateNotice(
+                        title = "登录已过期",
+                        body = "会话已经到期，请重新登录以查看画像。",
+                        actionLabel = "重新登录",
+                        onAction = onLoginClick,
+                        uiScale = uiScale,
+                    )
+                    ProfileState.INCOMPLETE -> {
+                        Text(
+                            text = "登录信息不完整，以下字段来自登录响应；请重新登录补全画像。",
+                            color = colors.surface.colorTextSecondary,
+                            fontSize = (13f * uiScale).sp,
+                        )
+                        ProfileCard(
+                            fields = ProfileFields.of(effective),
+                            remainingLabel = remainingLabel,
+                            uiScale = uiScale,
+                            onFieldClick = onFieldClick,
+                        )
+                    }
+                    ProfileState.READY -> ProfileCard(
+                        fields = ProfileFields.of(effective),
+                        remainingLabel = remainingLabel,
+                        uiScale = uiScale,
+                        onFieldClick = onFieldClick,
+                    )
+                }
+            },
+            entries = {
+                // 票 #114 的入口区原样复用：刷新果实的点击语义不与上滑手势共用。
+                ProfileEntries(
+                    uiScale = uiScale,
+                    isRefreshing = isRefreshing,
+                    onAboutClick = { subPage = ProfileSubPage.ABOUT },
+                    onSchoolInfoClick = { subPage = ProfileSubPage.SCHOOL_INFO },
+                    onRefreshClick = onRefresh,
+                )
+            },
         )
     }
 }
