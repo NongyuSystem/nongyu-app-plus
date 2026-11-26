@@ -115,7 +115,13 @@ import com.nongyu.appplus.timetable.ui.LocationNavDialog
 import com.nongyu.appplus.timetable.ui.TimetableScreen
 import com.nongyu.appplus.profile.ui.ProfileScreen
 import com.nongyu.appplus.profile.ui.ProfileFieldDetailContent
+import com.nongyu.appplus.profile.ui.ProfileEnterFade
+import com.nongyu.appplus.profile.ui.ProfileEnterAnimationOverlay
+import com.nongyu.appplus.profile.ui.rememberProfileEnterProgress
+import com.nongyu.appplus.profile.ui.rememberProfileEnterSkip
+import com.nongyu.appplus.profile.data.DemoProfileHolder
 import com.nongyu.appplus.profile.logic.ProfileFields
+import com.nongyu.appplus.profile.logic.ProfileLogic
 import com.nongyu.appplus.profile.model.ProfileFieldItem
 import com.nongyu.appplus.profile.model.ProfileSnapshot
 import com.nongyu.appplus.net.NetHolder
@@ -389,6 +395,19 @@ fun MainShell() {
     // 更新课表：进行中标记（防连点）+ 重载触发键（成功后让课表页重读缓存）
     var updatingTimetable by remember { mutableStateOf(false) }
     var timetableReloadKey by remember { mutableIntStateOf(0) }
+    // ---- 票 #115：个人主页开页生长动画 ----
+    // 进度用一个 Animatable 在组合生命周期内只推一次；切走再回来不重播。
+    val enterProgress = rememberProfileEnterProgress()
+    val enterSkip = rememberProfileEnterSkip()
+    var orbCenterPx by remember { mutableStateOf<Offset?>(null) }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 3) {
+            // 在 Shell 生命周期的 scope 里播放：动画中途切走 Tab 不会被 LaunchedEffect
+            // 取消而卡在半途；playOnce 内部的 started 闸门保证整个生命周期只播一次。
+            coroutineScope.launch { enterProgress.playOnce(skip = enterSkip) }
+        }
+    }
+
     // ---- 设置面板（全局设置包，当前只有「课程表」分区）----
     var settingsOpen by remember { mutableStateOf(false) }
     var gearCenterPx by remember { mutableStateOf<Offset?>(null) }
@@ -715,35 +734,38 @@ fun MainShell() {
                 )
             }
 
-            // 票 #113：「个人」Tab 的静态画像卡（零动画）。本地优先读画像缓存，
+            // 票 #113：「个人」Tab 的静态画像卡。本地优先读画像缓存，
             // 页面自身不发 /me 请求；字段点击交给本 Shell 复用 BarMode.Detail 展示详情。
+            // 票 #115：外层套开页淡入（graphicsLayer alpha，不重组子树，降级时恒 1f）。
             if (selectedTab == 3) {
-                ProfileScreen(
-                    navOccupiedPx = navOccupiedHeight,
-                    hasCredential = hasCredential,
-                    profile = profileSnapshot,
-                    isRefreshing = profileRefreshing,
-                    onRefresh = { refreshProfile() },
-                    onFieldClick = { field ->
-                        // 两个详情内容互斥：打开画像字段前先清课程详情。
-                        detailCourse = null
-                        isCollapsing = false
-                        detailStage = DetailStage.Brief
-                        detailDragDp = 0f
-                        profileDetailField = field
-                    },
-                    onLoginClick = {
-                        // 会话过期 / 未登录：复用与启动校验同一条失效分流回登录中心
-                        // （清凭证 + UI 切换由 DefaultSessionInvalidListener 统一驱动），
-                        // 不新建第二套凭证真源，也不改登录链路判定（票 #113 / 规格 US10-US11）。
-                        try {
-                            NetHolder.sessionInvalidListener(context).onSessionInvalid()
-                        } catch (t: RuntimeException) {
-                            // 清理失败也要能切回登录中心（与 SessionStartupVerifier 同口径）。
-                        }
-                        LoginSessionHolder.onVerified(VerificationResult.SESSION_ENDED)
-                    },
-                )
+                ProfileEnterFade(progress = enterProgress, skip = enterSkip) {
+                    ProfileScreen(
+                        navOccupiedPx = navOccupiedHeight,
+                        hasCredential = hasCredential,
+                        profile = profileSnapshot,
+                        isRefreshing = profileRefreshing,
+                        onRefresh = { refreshProfile() },
+                        onFieldClick = { field ->
+                            // 两个详情内容互斥：打开画像字段前先清课程详情。
+                            detailCourse = null
+                            isCollapsing = false
+                            detailStage = DetailStage.Brief
+                            detailDragDp = 0f
+                            profileDetailField = field
+                        },
+                        onLoginClick = {
+                            // 会话过期 / 未登录：复用与启动校验同一条失效分流回登录中心
+                            // （清凭证 + UI 切换由 DefaultSessionInvalidListener 统一驱动），
+                            // 不新建第二套凭证真源，也不改登录链路判定（票 #113 / 规格 US10-US11）。
+                            try {
+                                NetHolder.sessionInvalidListener(context).onSessionInvalid()
+                            } catch (t: RuntimeException) {
+                                // 清理失败也要能切回登录中心（与 SessionStartupVerifier 同口径）。
+                            }
+                            LoginSessionHolder.onVerified(VerificationResult.SESSION_ENDED)
+                        },
+                    )
+                }
             }
 
             // 【输入态】维护者定义「除输入框外所有区域都是空白」。
@@ -1112,7 +1134,26 @@ fun MainShell() {
                 pulseKey++
             },
             enabled = barMode == BarMode.Normal,
+            onOrbCenterChange = { center -> orbCenterPx = center },
         )
+
+        // ---- 票 #115：个人主页开页生长动画浮层 ----
+        // 声明在 OrbHost 之后（同层后声明者在上），枝条才能画在球之上、像从球里长出。
+        // 浮层透明且不消费触摸，球的 enabled 判定与页面手势完全不受影响。
+        if (selectedTab == 3) {
+            val demo = DemoProfileHolder.demo
+            val demoActive = demo != null && DemoProfileHolder.enabled &&
+                !ProfileLogic.isCacheNonEmpty(profileSnapshot)
+            val effectiveProfile = if (demoActive) demo else profileSnapshot
+            ProfileEnterAnimationOverlay(
+                progress = enterProgress,
+                orbCenterPx = orbCenterPx,
+                orbSizePx = with(density) { orbSize.toPx() },
+                name = effectiveProfile?.name,
+                uiScale = uiScale,
+                skip = enterSkip,
+            )
+        }
 
         // ---- 票 #60：拖时间条时的遮罩 ----
         // 位置必须在**星云球之后**：维护者要求遮板也要遮住星云球。
