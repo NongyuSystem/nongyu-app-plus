@@ -5,7 +5,6 @@ import com.nongyu.appplus.design.uiScaleFor
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -46,10 +45,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
@@ -70,12 +67,6 @@ import com.nongyu.appplus.design.NongyuAppPlusTheme
 import com.nongyu.appplus.design.NongyuTheme
 import com.nongyu.appplus.design.showTextToast
 import com.nongyu.appplus.timetable.model.CourseEntry
-import com.nongyu.appplus.timetable.logic.isPeriodEnded
-import com.nongyu.appplus.timetable.logic.NOTE_DEBOUNCE_MS
-import com.nongyu.appplus.timetable.logic.mergeAttendance
-import com.nongyu.appplus.timetable.logic.noteChanged
-import com.nongyu.appplus.timetable.logic.shouldPersistNote
-import com.nongyu.appplus.timetable.logic.toggledAttendance
 import com.nongyu.appplus.shell.bar.DetailCardContent
 import com.nongyu.appplus.shell.bar.AddScheduleCardContent
 import com.nongyu.appplus.shell.bar.ScheduleDetailCardContent
@@ -90,7 +81,6 @@ import com.nongyu.appplus.shell.dialogs.CourseLocationEditDialog
 import com.nongyu.appplus.shell.dialogs.CourseLocationNavDialog
 import com.nongyu.appplus.shell.dialogs.CourseWeekEditDialog
 import com.nongyu.appplus.shell.dialogs.currentLocationOf
-import com.nongyu.appplus.timetable.data.LocationScope
 import com.nongyu.appplus.shell.DetailSnap
 import com.nongyu.appplus.shell.ClickIntent
 import com.nongyu.appplus.shell.OpenCard
@@ -104,7 +94,6 @@ import com.nongyu.appplus.shell.OrbMode
 import com.nongyu.appplus.shell.deriveBarMode
 import com.nongyu.appplus.shell.dismissTargetOf
 import com.nongyu.appplus.timetable.logic.TimetableGeometry
-import com.nongyu.appplus.timetable.data.MockCourseCommentRepository
 import com.nongyu.appplus.timetable.data.CourseUserStore
 import com.nongyu.appplus.timetable.data.weekOfTerm
 import com.nongyu.appplus.timetable.ui.classDaysOf
@@ -167,200 +156,25 @@ fun MainShell() {
         if (detailCourse != null && !isCollapsing) isCollapsing = true
     }
 
-    // 点空白格添加的日程（#18 第 6 项）：状态放 Shell，TimetableScreen 只负责渲染。
-    // 本期内存态、不持久化（与 MOCK_COURSES 口径一致）。
-    val addedSchedules = remember {
-        androidx.compose.runtime.mutableStateListOf<com.nongyu.appplus.timetable.model.ScheduleEntry>()
-    }
-
-    // 添加日程表单的横杠下拉累计位移（dp，正=向下）
-    var scheduleDragDp by remember { mutableFloatStateOf(0f) }
-    // 日程卡「展开态」：点日程卡拉杆打开，再点卡外任意位置退出（开/关两态）
-    var scheduleDetailId by remember { mutableStateOf<String?>(null) }
+    // 日程表单 + 明细卡：已搬到 ScheduleFormState（行为未改）。
+    val scheduleForm = rememberScheduleFormState()
 
     // ---- 详情卡的可修改数据 ----
-    val courseId = detailCourse?.id
-
-    // 地点显示值：优先「按天覆盖」（今天），否则「通用覆盖」，否则原始 room。
-    val todayIso = remember { java.time.LocalDate.now().toString() }
-    val locDayFlow = remember(courseId, todayIso) {
-        if (courseId != null) courseUserStore.locationForDay(courseId, todayIso) else null
-    }
-    val locGeneralFlow = remember(courseId) {
-        if (courseId != null) {
-            courseUserStore.locationOverride(
-                courseId,
-                com.nongyu.appplus.timetable.data.LocationScope.Once,
-            )
-        } else null
-    }
-    val locDay by (locDayFlow ?: kotlinx.coroutines.flow.flowOf(null))
-        .collectAsState(initial = null)
-    val locGeneral by (locGeneralFlow ?: kotlinx.coroutines.flow.flowOf(null))
-        .collectAsState(initial = null)
-
-    // 教师覆盖（行内输入）
-    val teacherFlow = remember(courseId) {
-        if (courseId != null) courseUserStore.teacherOverride(courseId) else null
-    }
-    val teacherOverride by (teacherFlow ?: kotlinx.coroutines.flow.flowOf(null))
-        .collectAsState(initial = null)
-
-    // 周次复杂态：例外天（不上）
-    var exceptionIsoDays by remember(courseId) { mutableStateOf<Set<String>>(emptySet()) }
-    LaunchedEffect(courseId) {
-        exceptionIsoDays = if (courseId != null) {
-            courseUserStore.exceptionDays(courseId).first()
-        } else emptySet()
-    }
-
-    // 已删除课程 id：贯穿切周链路过滤，防止切周后「复活」
-    val deletedIds by courseUserStore.deletedIds().collectAsState(initial = emptySet())
-
-    // 详见 docs/specs/界面层.md §8.5 A 备注不能用 collectAsState 直接喂 TextField
-    var noteText by remember(courseId) { mutableStateOf("") }
-    // true = 初始化读取已完成，之后的改动才允许落盘（避免把空串覆盖掉已存的值）。
-    var noteReady by remember(courseId) { mutableStateOf(false) }
-    // 已落盘的备注值，用于跳过无意义写入。
-    var notePersisted by remember(courseId) { mutableStateOf("") }
-    LaunchedEffect(courseId) {
-        if (courseId != null) {
-            val loaded = courseUserStore.noteOnce(courseId)
-            noteText = loaded
-            notePersisted = loaded
-            noteReady = true
-        } else {
-            noteText = ""
-            notePersisted = ""
-            noteReady = false
-        }
-    }
-    // 输入停止 250ms 后统一落盘：既不会每个字符都起一个写协程（竞态），
-    // 也不会因为 Flow 回读把输入框内容拉回去。
-    LaunchedEffect(noteText, courseId, noteReady) {
-        if (shouldPersistNote(noteReady, courseId) && noteChanged(notePersisted, noteText)) {
-            delay(NOTE_DEBOUNCE_MS)
-            courseUserStore.setNote(courseId!!, noteText)
-            notePersisted = noteText
-        }
-    }
-
-    // 考勤：**按「哪一次课」记录**（ISO 日期 → 是否已上），不再按节次。
-    //
-    // 2026-11-23 维护者指正：原来用 `period -> Boolean`，一门 1-16 周的课每周都上，
-    // 键却只有「课程 + 节次」，于一学期只能记一次考勤；而详情卡里显示的
-    // 「应到 2」其实是**单次课的节数**，不是学期课次（12/8 次）。
-    //
-    // 现在：存储按日期，展示按「学期课次统计」（AttendanceStats 逐周推导，含单双周）。
-    var attendanceByDate by remember(courseId) {
-        mutableStateOf<Map<String, Boolean>>(emptyMap())
-    }
-    // 首次打开时从持久层读出该课程的全部考勤
-    LaunchedEffect(courseId) {
-        attendanceByDate = if (courseId != null) {
-            courseUserStore.attendanceAll(courseId)
-        } else {
-            emptyMap()
-        }
-    }
-    // 学期统计：总课次 / 已上课次 / 剩余（可请假）次数
-    val attendanceStats: com.nongyu.appplus.timetable.logic.AttendanceStats.Stats? =
-        remember(courseId, attendanceByDate) {
-            val c = detailCourse
-            if (c == null) {
-                null
-            } else {
-                com.nongyu.appplus.timetable.logic.AttendanceStats.compute(
-                    course = c,
-                    termStart = com.nongyu.appplus.timetable.data.MOCK_TERM_START,
-                    today = java.time.LocalDate.now(),
-                )
-            }
-        }
-
-    // 评论：从后端按「老师 + 课程」查询评价（真实数据，不再是 mock）。
-    // UI 仍只认 List<String>，这里负责把 Review 映射成带评分前缀的文本，
-    // 删除时再按下标把 id 找回来。
-    var comments by remember(courseId) { mutableStateOf<List<com.nongyu.appplus.timetable.logic.ReviewLine>>(emptyList()) }
-    var hasMoreReviews by remember(courseId) { mutableStateOf(false) }
-    val reviewRepo = remember { com.nongyu.appplus.timetable.data.CourseReviewRepository(context) }
-    // 课程上下文：从当前详情卡拿老师与课程名
-    LaunchedEffect(detailCourse?.id) {
-        val c = detailCourse
-        if (c == null) {
-            comments = emptyList()
-            hasMoreReviews = false
-        } else {
-            reviewRepo.list(teacherName = c.teacher, courseName = c.name)
-                .onSuccess { reviews ->
-                    // 只显示前 3 条；第 4 条用于判断「还有更多」
-                    val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
-                        reviews.map {
-                            com.nongyu.appplus.timetable.logic.ReviewLine(
-                                text = it.text,
-                                isMine = it.isMine,
-                            )
-                        },
-                    )
-                    comments = split.visible
-                    hasMoreReviews = split.hasMore
-                }
-                .onFailure {
-                    comments = emptyList()
-                    hasMoreReviews = false
-                }
-        }
-    }
-
-    // 增删评价后重新拉取列表：与上面的首次加载共用同一套映射逻辑。
-    suspend fun reloadReviews(course: com.nongyu.appplus.timetable.model.CourseEntry) {
-        reviewRepo.list(teacherName = course.teacher, courseName = course.name)
-            .onSuccess { reviews ->
-                val split = com.nongyu.appplus.timetable.logic.ReviewListDisplay.split(
-                    reviews.map {
-                        com.nongyu.appplus.timetable.logic.ReviewLine(
-                            text = it.text,
-                            isMine = it.isMine,
-                        )
-                    },
-                )
-                comments = split.visible
-                hasMoreReviews = split.hasMore
-            }
-    }
+    // 已搬到 CourseDetailState（行为未改）。壳里只读字段、调方法。
+    val detailState = rememberCourseDetailState(courseUserStore, coroutineScope, detailCourse)
 
     // 三个子窗体的开关
     var showLocationEdit by remember { mutableStateOf(false) }
     var showLocationNav by remember { mutableStateOf(false) }
     var showWeekEdit by remember { mutableStateOf(false) }
-    // 添加日程表单（#14）：非 null 即导航栏原地变形为表单卡。
-    // (day, startPeriod, week) —— 工具条入口用「今天 + 第 1 节」，空白格入口用被点的那格。
-    var addingSchedule by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     // 占位按钮的轻提示（不接任何真实逻辑）
     var placeholderHint by remember { mutableStateOf<String?>(null) }
     // 更新课表：进行中标记（防连点）+ 重载触发键（成功后让课表页重读缓存）
     var updatingTimetable by remember { mutableStateOf(false) }
     var timetableReloadKey by remember { mutableIntStateOf(0) }
-    // ---- 设置面板（全局设置包，当前只有「课程表」分区）----
-    var settingsOpen by remember { mutableStateOf(false) }
-    var gearCenterPx by remember { mutableStateOf<Offset?>(null) }
-    // 齿轮是否已被设置面板接管：由面板回报，工具条据此隐藏原图标（两者严格互斥）
-    var gearTakenOver by remember { mutableStateOf(false) }
-    // 面板滑入进度 + 齿轮旋转：用一个 Animatable 驱动，保证两者严格同步
-    val settingsProgress = remember { Animatable(0f) }
-    // 课程表设置项的值（本期只做界面，先放内存，持久化留给后续票）
-    var settingsDayMode by remember { mutableStateOf(false) }
-    var settingsShowWeekends by remember { mutableStateOf(true) }
-    var settingsQuietRefresh by remember { mutableStateOf(false) }
+    // ---- 设置面板：已搬到 SettingsPanelState（行为未改）----
+    val settingsState = rememberSettingsPanelState()
 
-    // 打开/关闭统一走同一个动画：progress 0→1 滑入，1→0 滑出（反向动画由对称 tween 保证）
-    LaunchedEffect(settingsOpen) {
-        if (settingsOpen) {
-            settingsProgress.animateTo(1f, settingsTween())
-        } else {
-            settingsProgress.animateTo(0f, settingsTween())
-        }
-    }
     // 票 #60 需求 4.1：切到课表 Tab 时，课表图标从底部往上变绿（800ms）。
     // 切走直接归零，不做离场动画（需求 5）。
     val iconFill = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -392,33 +206,9 @@ fun MainShell() {
     //
     // 所以记下本根 Box 自身的整窗偏移，收到上报时减掉，
     // 让 periodTopPx 变成「相对本 Box」的坐标，与时间条同一基准。
-    var rootOffsetYPx by remember { mutableFloatStateOf(0f) }
-    var periodTopPx by remember { mutableFloatStateOf(0f) }
-    var periodHeightPx by remember { mutableFloatStateOf(0f) }
-    // 票 #60：时间条拖动状态（遮罩用）；时间条本身也搬到 Shell 层，
-    // 这样遮罩才能盖住底部导航栏和右上角工具条，同时时间条浮在遮罩之上。
-    var rulerDragging by remember { mutableStateOf(false) }
-    // 当前时间在时间轴上的比例（每分钟刷新够了）
-    var nowMinute by remember { mutableStateOf(java.time.LocalTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            nowMinute = java.time.LocalTime.now()
-            delay(30_000L)
-        }
-    }
-    var rulerFocus by remember { mutableStateOf<Float?>(null) }
-    var rulerFocusHeld by remember { mutableStateOf<Float?>(null) }
-    // 详见 docs/specs/界面层.md §8.5 B 时间文字清除 effect 的 key 只盯 rulerDragging
-    LaunchedEffect(rulerDragging) {
-        if (!rulerDragging && rulerFocusHeld != null) {
-            delay(1600)
-            rulerFocusHeld = null
-        }
-    }
-    // 拖动中实时跟随手指
-    LaunchedEffect(rulerFocus) {
-        if (rulerFocus != null) rulerFocusHeld = rulerFocus
-    }
+    // 时间条定位/拖动/计时都已搬进 RulerState（行为未改）。
+    val rulerState = rememberRulerState()
+
     // 占位按钮的轻提示（设置 / 更新课表）：不接任何真实逻辑，只显示一句话。
     LaunchedEffect(placeholderHint) {
         // 提示出现 2.2s 后自动消失；用独立 effect 盯 placeholderHint，
@@ -442,63 +232,23 @@ fun MainShell() {
     // 缺项 = 该项走几何绘制，逐图标回落。
     val iconImages = remember(resolution) { resolution.resourcePayload().iconImages }
 
-    // 详见 docs/specs/界面层.md §8.3 C 雷达波方向语义
-    var pulseKey by remember { mutableIntStateOf(0) }
-    var pulseExpand by remember { mutableStateOf(true) }
-    val pulse = remember { Animatable(0f) }
-
     val active = mode != OrbMode.Idle
 
     // 退出激活态：返回键优先，其次再次点按。
     BackHandler(enabled = active) { mode = OrbMode.Idle }
 
-    LaunchedEffect(pulseKey) {
-        if (pulseKey > 0) {
-            pulse.snapTo(0f)
-            pulse.animateTo(1f, animationSpec = tween(if (pulseExpand) 520 else 460))
-        }
-    }
-
-    // 详见 docs/specs/界面层.md §8.3 E dim 只在长按态出现，且只保留一层
-    val dimAlpha by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Listening) 0.55f else 0f,
-        animationSpec = tween(300),
-        label = "dim",
+    // 三形态判定提前到 BoxWithConstraints 之前：内容区「空白点击」分层需要它，
+    // 星云球溶解/汇聚也依赖它。优先级规则住在 shell/ShellState.kt（deriveBarMode，有单测）。
+    val barMode = deriveBarMode(
+        addingSchedule = scheduleForm.adding,
+        scheduleDetailId = scheduleForm.detailId,
+        hasDetailCourse = detailCourse != null,
+        orbMode = mode,
     )
 
-    // 输入态：只把**底栏以外**压暗（让输入栏保持明亮、成为视觉焦点）。
-    val inputScrimAlpha by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Input) 0.35f else 0f,
-        animationSpec = tween(300),
-        label = "inputScrim",
-    )
-
-    // 点按态：圆球缩没、输入框展开
-    val orbScale by animateFloatAsState(
-        targetValue = when (mode) {
-            OrbMode.Idle -> 1f
-            OrbMode.Listening -> 1.08f
-            OrbMode.Input -> 0.4f
-        },
-        animationSpec = tween(420),
-        label = "orbScale",
-    )
-    val orbAlpha by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Input) 0f else 1f,
-        animationSpec = tween(300),
-        label = "orbAlpha",
-    )
-    val navAlpha by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Input) 0f else 1f,
-        animationSpec = tween(280),
-        label = "navAlpha",
-    )
-    // 输入框展开：宽度交给父布局（与导航栏同宽），只用 scaleX 做展开动画。
-    val inputScale by animateFloatAsState(
-        targetValue = if (mode == OrbMode.Input) 1f else 0.18f,
-        animationSpec = tween(420),
-        label = "inputScale",
-    )
+    // 星云球动画团（雷达波 / 溶解 / 各淡入淡出）：收进 OrbShellState（行为未改）。
+    // inputScale 原为未被读取的死代码，随本次抽离一并删除（对渲染无可观察影响）。
+    val orbState = rememberOrbShellState(mode, barMode)
 
     BoxWithConstraints(
         modifier = Modifier
@@ -517,7 +267,7 @@ fun MainShell() {
                     val repo = CourseRepository(context)
                     repo.refreshFromJiaowu()
                         .onSuccess { count ->
-                            if (!settingsQuietRefresh) {
+                            if (!settingsState.quietRefresh) {
                                 showTextToast(context, "课表已更新：$count 个时段", uiScale = uiScale)
                             }
                             timetableReloadKey++
@@ -558,15 +308,7 @@ fun MainShell() {
         // 详见 docs/specs/界面层.md §8.4 B 占位上报的是底栏自身高度，不是顶边坐标
         var navOccupiedHeight by remember { mutableStateOf<Float?>(null) }
 
-        // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
-        // （原先定义在底栏段落里，那里太晚，内容区拿不到。）
-        // 优先级规则住在 shell/ShellState.kt（deriveBarMode），那里有单测钉顺序。
-        val barMode = deriveBarMode(
-            addingSchedule = addingSchedule,
-            scheduleDetailId = scheduleDetailId,
-            hasDetailCourse = detailCourse != null,
-            orbMode = mode,
-        )
+        // barMode 已在 BoxWithConstraints 之前定义（内容区分层与星云球溶解都要它）。
 
         // 四个页面：目前只有「课表」有实体内容（地图 #11），其余仍为占位。
         Box(
@@ -574,16 +316,16 @@ fun MainShell() {
                 .fillMaxSize()
                 // 量出本 Box 在整窗里的纵向偏移（= 全局 systemBars 避让吃掉的顶部高度）。
                 .onGloballyPositioned { coords ->
-                    rootOffsetYPx = coords.localToRoot(
-                        androidx.compose.ui.geometry.Offset.Zero,
-                    ).y
+                    rulerState.onRootOffset(
+                        coords.localToRoot(androidx.compose.ui.geometry.Offset.Zero).y,
+                    )
                 },
         ) {
             // 详见 docs/specs/界面层.md §8.1 B 卡片外退出层：全屏 + 声明在底栏之前
             val dismissAction: (() -> Unit)? = when (dismissTargetOf(barMode)) {
                 DismissTarget.Detail -> ({ collapseDetail() })
-                DismissTarget.ScheduleDetail -> ({ scheduleDetailId = null })
-                DismissTarget.AddSchedule -> ({ addingSchedule = null })
+                DismissTarget.ScheduleDetail -> ({ scheduleForm.closeDetail() })
+                DismissTarget.AddSchedule -> ({ scheduleForm.cancelAdd() })
                 DismissTarget.None -> null
             }
             if (dismissAction != null) {
@@ -602,15 +344,15 @@ fun MainShell() {
                 // - 点课程盒子：课程卡开着 → 直接切卡（不要求点两下）
                 // - 点空白格：课程卡开着 → 直接清空（立即，不走收拢动画）
                 val openCard = currentOpenCard(
-                    addingSchedule = addingSchedule,
-                    scheduleDetailId = scheduleDetailId,
+                    addingSchedule = scheduleForm.adding,
+                    scheduleDetailId = scheduleForm.detailId,
                     hasDetailCourse = detailCourse != null,
                 )
                 fun applyIntent(intent: ClickIntent) {
                     when (intent) {
                         ClickIntent.Dismiss -> when (openCard) {
-                            OpenCard.AddSchedule -> addingSchedule = null
-                            OpenCard.ScheduleDetail -> scheduleDetailId = null
+                            OpenCard.AddSchedule -> scheduleForm.cancelAdd()
+                            OpenCard.ScheduleDetail -> scheduleForm.closeDetail()
                             // 点课程盒子时退出走收拢动画（高度动画跑完再切内容）
                             OpenCard.DetailCourse -> collapseDetail()
                             OpenCard.None -> Unit
@@ -624,7 +366,7 @@ fun MainShell() {
                             isCollapsing = false
                         }
                         is ClickIntent.OpenAddSchedule -> {
-                            addingSchedule = Triple(intent.day, intent.period, intent.week)
+                            scheduleForm.openAt(intent.day, intent.period, intent.week)
                         }
                     }
                 }
@@ -632,36 +374,35 @@ fun MainShell() {
                 TimetableScreen(
                     navOccupiedPx = navOccupiedHeight,
                         reloadSignal = timetableReloadKey,
-                    deletedIds = deletedIds,
-                    schedules = addedSchedules,
+                    deletedIds = detailState.deletedIds,
+                    schedules = scheduleForm.addedSchedules,
                     onCourseClick = { course ->
                         applyIntent(resolveCourseClick(openCard, course))
                     },
                     onBlankSlotAdd = { day, period, week ->
                         applyIntent(resolveBlankSlotClick(openCard, day, period, week))
                     },
-                    onSettings = { settingsOpen = true },
-                    gearRotation = settingsProgress.value * SETTINGS_GEAR_DEGREES,
-                    gearTakenOver = gearTakenOver,
-                    onGearCenterChange = { gearCenterPx = it },
+                    onSettings = { settingsState.open = true },
+                    gearRotation = settingsState.progress.value * SETTINGS_GEAR_DEGREES,
+                    gearTakenOver = settingsState.takenOver,
+                    onGearCenterChange = { settingsState.gearCenterPx = it },
                     onUpdateSchedule = { updateTimetableOnce() },
                     onAddScheduleFromToolbar = { week, day ->
                         // 工具条入口：预填今天、第 1 节
-                        addingSchedule = Triple(day, 1, week)
+                        scheduleForm.openFromToolbar(week, day)
                     },
                     // 日程卡只有开/关两态（维护者：「只有开关两态，拉下去就是关了这个卡片」）：
                     // 点卡或下拉横杠都是 toggle。
                     onScheduleClick = { sc ->
-                        scheduleDetailId = if (scheduleDetailId == sc.id) null else sc.id
+                        scheduleForm.toggleDetail(sc.id)
                     },
-                    onRulerDragStateChange = { rulerDragging = it },
+                    onRulerDragStateChange = { rulerState.dragging = it },
                     onPeriodColumnBounds = { top, h ->
                         // TimetableGrid 给的是整窗坐标；减掉本 Box 偏移换成相对坐标，
                         // 否则时间条会整体多下移一个状态栏高度。
-                        periodTopPx = (top - rootOffsetYPx).coerceAtLeast(0f)
-                        periodHeightPx = h
+                        rulerState.onPeriodColumnBounds(top, h)
                     },
-                    onRulerFocusChange = { rulerFocus = it },
+                    onRulerFocusChange = { rulerState.focus = it },
                 )
             }
 
@@ -684,11 +425,11 @@ fun MainShell() {
         }
 
         // 详见 docs/specs/界面层.md §8.1 A dim 必须画在底栏之前
-        if (inputScrimAlpha > 0f) {
+        if (orbState.inputScrimAlpha > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .alpha(inputScrimAlpha)
+                    .alpha(orbState.inputScrimAlpha)
                     .background(Color(0xFF0A140F)),
             )
         }
@@ -820,7 +561,7 @@ fun MainShell() {
             ) { showing ->
                 when (showing) {
                 BarMode.AddSchedule -> {
-                    val slot = addingSchedule
+                    val slot = scheduleForm.adding
                     if (slot != null) {
                         // 表单布线已搬到 shell/bar/ScheduleCards.kt（行为未改）。
                         AddScheduleCardContent(
@@ -832,34 +573,31 @@ fun MainShell() {
                             // 之前写在同一个回调里时，AnimatedContent 的 targetState
                             // 没有及时重算，导致表单保存后不关闭（实测）。
                             onSave = { entry ->
-                                addingSchedule = null
-                                addedSchedules.add(entry)
+                                scheduleForm.save(entry)
                             },
-                            onCancel = { addingSchedule = null },
+                            onCancel = { scheduleForm.cancelAdd() },
                             // 横杠下拉：跟手记录位移。
-                            onDrag = { deltaDp -> scheduleDragDp += deltaDp },
+                            onDrag = { deltaDp -> scheduleForm.onAddDrag(deltaDp) },
                             // 松手时超过阈值（72 * uiScale）就关闭表单。
                             onDragEnd = { threshold ->
-                                if (scheduleDragDp > threshold) addingSchedule = null
-                                scheduleDragDp = 0f
+                                scheduleForm.onAddDragEnd(threshold)
                             },
                         )
                     }
                 }
                 BarMode.ScheduleDetail -> {
-                    val sc = addedSchedules.firstOrNull { it.id == scheduleDetailId }
+                    val sc = scheduleForm.addedSchedules.firstOrNull { it.id == scheduleForm.detailId }
                     if (sc != null) {
                         // 明细卡布线已搬到 shell/bar/ScheduleCards.kt（行为未改）。
                         ScheduleDetailCardContent(
                             entry = sc,
                             uiScale = uiScale,
                             // 行内编辑即时落库：直接替换列表里同 id 的那条。
-                            // scheduleDetailId 不变，卡片保持打开状态不闪。
+                            // detailId 不变，卡片保持打开状态不闪。
                             onUpdate = { updated ->
-                                val idx = addedSchedules.indexOfFirst { it.id == updated.id }
-                                if (idx >= 0) addedSchedules[idx] = updated
+                                scheduleForm.updateEntry(updated)
                             },
-                            onClose = { scheduleDetailId = null },
+                            onClose = { scheduleForm.closeDetail() },
                         )
                     }
                 }
@@ -874,49 +612,25 @@ fun MainShell() {
                             expandProgress = expandProgress,
                             isCollapsing = isCollapsing,
                             uiScale = uiScale,
-                            location = locDay ?: locGeneral ?: course.room,
-                            teacher = teacherOverride ?: course.teacher,
-                            attendance = attendanceByDate,
-                            attendanceStats = attendanceStats,
+                            location = detailState.locDay ?: detailState.locGeneral ?: course.room,
+                            teacher = detailState.teacherOverride ?: course.teacher,
+                            attendance = detailState.attendanceByDate,
+                            attendanceStats = detailState.attendanceStats,
                             termStart = com.nongyu.appplus.timetable.data.MOCK_TERM_START,
-                            note = noteText,
-                            comments = comments,
-                            hasMoreReviews = hasMoreReviews,
+                            note = detailState.noteText,
+                            comments = detailState.comments,
+                            hasMoreReviews = detailState.hasMoreReviews,
                             onCommentDetail = {
                                 showTextToast(context, "查看评价详情：即将开放", uiScale = uiScale)
                             },
                             onCommentMore = {
                                 showTextToast(context, "查看更多评价：即将开放", uiScale = uiScale)
                             },
-                            onTeacherChange = { v ->
-                                coroutineScope.launch {
-                                    courseUserStore.setTeacherOverride(course.id, v)
-                                }
-                            },
-                            onAttendanceToggle = { isoDate ->
-                                val next = !(attendanceByDate[isoDate] ?: false)
-                                attendanceByDate = attendanceByDate + (isoDate to next)
-                                coroutineScope.launch {
-                                    courseUserStore.setAttendance(course.id, isoDate, next)
-                                }
-                            },
-                            onNoteChange = { text -> noteText = text },
-                            onCommentAdd = { text ->
-                                val parsed = com.nongyu.appplus.timetable.logic.ReviewText.parse(text)
-                                coroutineScope.launch {
-                                    reviewRepo.add(
-                                        teacherName = course.teacher,
-                                        courseName = course.name,
-                                        rating = parsed.rating,
-                                        body = parsed.body,
-                                    ).onSuccess { reloadReviews(course) }
-                                }
-                            },
-                            onDelete = {
-                                coroutineScope.launch {
-                                    courseUserStore.setDeletedIds(deletedIds + course.id)
-                                }
-                            },
+                            onTeacherChange = { v -> detailState.onTeacherChange(v) },
+                            onAttendanceToggle = { isoDate -> detailState.onAttendanceToggle(isoDate) },
+                            onNoteChange = { text -> detailState.onNoteChange(text) },
+                            onCommentAdd = { text -> detailState.onCommentAdd(text) },
+                            onDelete = { detailState.onDelete() },
                             onCollapse = ::collapseDetail,
                             onDismiss = { detailCourse = null },
                             onWeekEdit = { showWeekEdit = true },
@@ -954,7 +668,7 @@ fun MainShell() {
                     NavRowContent(
                         selectedTab = selectedTab,
                         onTabSelected = { selectedTab = it },
-                        navAlpha = navAlpha,
+                        navAlpha = orbState.navAlpha,
                         iconFillProgress = iconFill.value,
                         itemColor = colors.navBar.colorItem,
                         indicatorColor = colors.navBar.colorIndicator,
@@ -992,24 +706,21 @@ fun MainShell() {
         // 层级顺序 dim -> 雷达波 -> 球体 由 OrbHost 内部保证，不能调换。
         OrbHost(
             orbSize = orbSize,
-            scale = orbScale * orbDissolveScale,
-            alpha = orbAlpha * orbDissolveAlpha,
-            dimAlpha = dimAlpha,
-            pulse = pulse.value,
-            pulseExpand = pulseExpand,
+            scale = orbState.orbScale * orbState.orbDissolveScale,
+            alpha = orbState.orbAlpha * orbState.orbDissolveAlpha,
+            dimAlpha = orbState.dimAlpha,
+            pulse = orbState.pulseValue,
+            pulseExpand = orbState.pulseExpand,
             mode = mode,
             onModeChange = { mode = it },
-            onPulse = { expand ->
-                pulseExpand = expand
-                pulseKey++
-            },
+            onPulse = { expand -> orbState.onPulse(expand) },
             enabled = barMode == BarMode.Normal,
         )
 
         // ---- 票 #60：拖时间条时的遮罩 ----
         // 位置必须在**星云球之后**：维护者要求遮板也要遮住星云球。
         // 时间条仍然声明在它之后 → 时间条与时间文字浮在遮罩之上，不被压暗。
-        ModalScrim(visible = rulerDragging)
+        ModalScrim(visible = rulerState.dragging)
 
         // ---- 全局设置面板（**层级最高**：盖住星云球、时间条与一切页面元素）----
         //
@@ -1019,25 +730,25 @@ fun MainShell() {
         // 打开：齿轮旋转 + 面板贴右边缘滑入，左侧留 10% 空白；
         // 面板滑到包含齿轮后，齿轮克隆体随面板飞到标题行；
         // 点遮板或右上角 X 都走反向动画退回。
-        if (settingsOpen || settingsProgress.value > 0f) {
+        if (settingsState.open || settingsState.progress.value > 0f) {
             SettingsPanel(
                 content = SettingsBuilders.buildContent(
-                    dayMode = settingsDayMode,
-                    showWeekends = settingsShowWeekends,
-                    quietRefresh = settingsQuietRefresh,
+                    dayMode = settingsState.dayMode,
+                    showWeekends = settingsState.showWeekends,
+                    quietRefresh = settingsState.quietRefresh,
                 ),
                 uiScale = uiScale,
                 gearSize = s(16.dp),
-                gearCenterPx = gearCenterPx,
-                gearRotation = settingsProgress.value * SETTINGS_GEAR_DEGREES,
-                progress = settingsProgress.value,
-                onGearTakenOverChange = { gearTakenOver = it },
-                onDismiss = { settingsOpen = false },
+                gearCenterPx = settingsState.gearCenterPx,
+                gearRotation = settingsState.progress.value * SETTINGS_GEAR_DEGREES,
+                progress = settingsState.progress.value,
+                onGearTakenOverChange = { settingsState.takenOver = it },
+                onDismiss = { settingsState.open = false },
                 onEntryClick = { key ->
                     when (key) {
                         TimetableSettings.Keys.UpdateSchedule -> {
                             // 复用工具条「更新课表」的同一套逻辑：先关面板再刷新
-                            settingsOpen = false
+                            settingsState.open = false
                             updateTimetableOnce()
                         }
 
@@ -1045,7 +756,7 @@ fun MainShell() {
                             // 手动调度 WebVPN 登录弹窗：先收起设置面板（弹窗在根节点最顶层，
                             // 面板动画期间同时显示会打架），再投递 MANUAL 触发源。
                             // MANUAL 是显式操作，绕过「不同意」的抑制。
-                            settingsOpen = false
+                            settingsState.open = false
                             com.nongyu.appplus.webvpn.data.WebVpnDialogScheduler
                                 .request(
                                     com.nongyu.appplus.webvpn.model.WebVpnTrigger.MANUAL,
@@ -1057,7 +768,7 @@ fun MainShell() {
                 },
                 onChoiceSelected = { key, index ->
                     if (key == TimetableSettings.Keys.DayWeekView) {
-                        settingsDayMode = index == 1
+                        settingsState.dayMode = index == 1
                     }
                 },
             )
@@ -1066,8 +777,8 @@ fun MainShell() {
         // ---- 时间条（页面级 overlay）----
         if (selectedTab == 1) {
             // 详见 docs/specs/界面层.md §8.5 D 位置必须用 TimetableGrid 上报的实测值
-            val rulerTop = with(density) { periodTopPx.toDp() }
-            val rulerHeight = with(density) { periodHeightPx.toDp() }
+            val rulerTop = with(density) { rulerState.periodTopPx.toDp() }
+            val rulerHeight = with(density) { rulerState.periodHeightPx.toDp() }
             // 课表几何映射：滑动时间 / 松手节次 / 流水位置全部走它，
             // 于是与右侧课程行严格对齐（密度不均匀：45 分钟一节课 vs 150 分钟午休）。
             val geometry = remember(rulerHeight) {
@@ -1077,18 +788,18 @@ fun MainShell() {
             TimetableRuler(
                 uiScale = uiScale,
                 boxWidthRatio = 1f,
-                waterFraction = geometry.fractionAtTime(nowMinute),
+                waterFraction = geometry.fractionAtTime(rulerState.nowMinute),
                 tiltDegrees = rememberWaterTilt(),
                 onRelease = { fraction ->
                     val period = geometry.periodAtFraction(fraction)
                     val today = java.time.LocalDate.now()
-                    addingSchedule = Triple(
+                    scheduleForm.openAt(
                         today.dayOfWeek.value - 1,
                         period,
                         com.nongyu.appplus.timetable.data.weekOfTerm(today),
                     )
                 },
-                onDragStateChange = { rulerDragging = it },
+                onDragStateChange = { rulerState.dragging = it },
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(top = rulerTop)
@@ -1104,7 +815,7 @@ fun MainShell() {
             if (dlgCourse != null) classDaysOf(dlgCourse) else emptySet()
         }
         if (dlgCourse != null) {
-            val dlgLocation = currentLocationOf(locDay, locGeneral, dlgCourse)
+            val dlgLocation = currentLocationOf(detailState.locDay, detailState.locGeneral, dlgCourse)
             if (showLocationEdit) {
                 CourseLocationEditDialog(
                     course = dlgCourse,
@@ -1112,17 +823,7 @@ fun MainShell() {
                     uiScale = uiScale,
                     classDays = dlgClassDays,
                     onConfirm = { newLocation, days ->
-                        coroutineScope.launch {
-                            courseUserStore.setLocationForDays(dlgCourse.id, days, newLocation)
-                            // 未选天时退回通用覆盖，保证至少有值生效
-                            if (days.isEmpty()) {
-                                courseUserStore.setLocationOverride(
-                                    dlgCourse.id,
-                                    LocationScope.Once,
-                                    newLocation,
-                                )
-                            }
-                        }
+                        detailState.onLocationConfirm(newLocation, days)
                     },
                     onDismiss = { showLocationEdit = false },
                 )
@@ -1132,15 +833,10 @@ fun MainShell() {
                     course = dlgCourse,
                     uiScale = uiScale,
                     classDays = dlgClassDays,
-                    initialExceptions = exceptionIsoDays.mapNotNull {
+                    initialExceptions = detailState.exceptionIsoDays.mapNotNull {
                         runCatching { java.time.LocalDate.parse(it) }.getOrNull()
                     }.toSet(),
-                    onConfirm = { days ->
-                        exceptionIsoDays = days
-                        coroutineScope.launch {
-                            courseUserStore.setExceptionDays(dlgCourse.id, days)
-                        }
-                    },
+                    onConfirm = { days -> detailState.onWeekConfirm(days) },
                     onDismiss = { showWeekEdit = false },
                 )
             }
