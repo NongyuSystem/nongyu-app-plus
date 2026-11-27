@@ -20,6 +20,8 @@ data class NongyuColors(
         val colorBrand: Color,
         val colorBrandMuted: Color,
         val colorOnBrand: Color,
+        /** 品牌绿的嫩绿变体：同色相提亮，用于「生长中」的装饰元素（票 #111 开页茎）。 */
+        val colorBrandFresh: Color,
     )
 
     @Immutable
@@ -59,6 +61,9 @@ data class NongyuColors(
                 colorBrand = Color(0xFF0A7C59),
                 colorBrandMuted = Color(0xFFD4E9DF),
                 colorOnBrand = Color(0xFFFFFFFF),
+                // 品牌绿的黄绿变体：草绿偏黄，用于「生长中的枝条」这类需要有生命感的装饰元素
+                // （票 #111 个人主页开页茎）。与深绿 #0A7C59 同一家族，不跳出色系。
+                colorBrandFresh = Color(0xFF8BC34A),
             ),
             surface = SurfaceColors(
                 colorBackground = Color(0xFFF7FAF8),

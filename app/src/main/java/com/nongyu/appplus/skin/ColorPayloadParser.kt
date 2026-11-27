@@ -154,6 +154,8 @@ object ColorPayloadParser {
                 colorBrand = pick("colorBrand", builtIn.brand.colorBrand),
                 colorBrandMuted = pick("colorBrandMuted", builtIn.brand.colorBrandMuted),
                 colorOnBrand = pick("colorOnBrand", builtIn.brand.colorOnBrand),
+                // 皮肤可覆盖嫩绿；未下发时回落内置。
+                colorBrandFresh = pick("colorBrandFresh", builtIn.brand.colorBrandFresh),
             ),
             surface = NongyuColors.SurfaceColors(
                 colorBackground = pick("colorBackground", builtIn.surface.colorBackground),
