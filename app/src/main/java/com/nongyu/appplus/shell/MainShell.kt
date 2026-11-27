@@ -113,6 +113,7 @@ import com.nongyu.appplus.timetable.ui.LocationEditDialog
 import com.nongyu.appplus.timetable.ui.WeekEditDialog
 import com.nongyu.appplus.timetable.ui.LocationNavDialog
 import com.nongyu.appplus.timetable.ui.TimetableScreen
+import com.nongyu.appplus.profile.ui.ProfileStem
 
 /**
  * 主框架与导航壳。
@@ -663,6 +664,13 @@ fun MainShell() {
                     },
                     onRulerFocusChange = { rulerFocus = it },
                 )
+            }
+
+            // 个人主页（规格 #111）：当前只做第 1 步 —— 开页「茎」从底部长出。
+            // 后续步骤（中段圆形 → 圆变头像 → 右上角小果实、左上角二维码、右下拉按钮）
+            // 逐个装机确认后再加，见 AGENTS.md 的「UI 实施纪律」。
+            if (selectedTab == 3) {
+                ProfileStem(modifier = Modifier.fillMaxSize(), orbSize = orbSize)
             }
 
             // 【输入态】维护者定义「除输入框外所有区域都是空白」。
