@@ -177,4 +177,28 @@ class StemGrowthTest {
         val p = StemGrowth.progressOfAngle(0f, 270f, false, 90f)
         assertEquals(1f / 3f, p, 0.001f)
     }
+
+    @Test
+    fun `果实绑定的四条字段顺序与空值回落正确`() {
+        assertEquals(
+            listOf(
+                StemGrowth.FruitField.NAME,
+                StemGrowth.FruitField.CLASS_NAME,
+                StemGrowth.FruitField.STUDENT_NO,
+                StemGrowth.FruitField.MAJOR,
+            ),
+            StemGrowth.FRUIT_FIELDS,
+        )
+        assertEquals("—", StemGrowth.valueOf(StemGrowth.FruitField.NAME, null))
+        val snap = com.nongyu.appplus.profile.model.ProfileSnapshot(
+            studentNo = "20260001",
+            name = "演示同学",
+            major = "计算机科学与技术",
+            className = "计科 2026-1 班",
+        )
+        assertEquals("演示同学", StemGrowth.valueOf(StemGrowth.FruitField.NAME, snap))
+        assertEquals("计科 2026-1 班", StemGrowth.valueOf(StemGrowth.FruitField.CLASS_NAME, snap))
+        assertEquals("20260001", StemGrowth.valueOf(StemGrowth.FruitField.STUDENT_NO, snap))
+        assertEquals("计算机科学与技术", StemGrowth.valueOf(StemGrowth.FruitField.MAJOR, snap))
+    }
 }

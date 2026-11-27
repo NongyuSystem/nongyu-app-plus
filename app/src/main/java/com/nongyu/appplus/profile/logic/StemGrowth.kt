@@ -45,10 +45,15 @@ object StemGrowth {
     const val RIGHT_GAP_PX: Float = 10f
 
     /**
-     * 求最右目标点的 y：让「过起点、过该点、过终点」的圆，其最右处正落目标 gap。
+     * 求最右目标点的 y：让「过起点、过该点 (targetRight, rightY)、过终点」的圆，
+     * 其最右极值点恰好就是 (targetRight, rightY)。
      *
-     * 用二分：二点定圆后，圆心 + 半径 的最小 x 即圆最右处；gap 随 rightY 单调变化。
-     * 纯函数、确定性，可单测。
+     * 解析解：圆的最右极值点是 (cx + r, cy)，令其等于 (targetRight, rightY)，
+     * 则 rightY = cy 且 r = targetRight - cx。
+     * 代入起点與终点在圆上的方程 (x - cx)^2 + (y - cy)^2 = (targetRight - cx)^2：
+     *   2(targetRight - x) * cx = targetRight^2 - x^2 - (y - cy)^2
+     * 两式消去 cx 后得到关于 cy 的二次方程（当 dx1 == dx2 时退化为一次），
+     * 取落在 [min(startY, endY), max(startY, endY)] 内的根，误差严格为 0。
      *
      * @return 最右目标点 y（像素），解不出时返回起终点 y 的中值。
      */
@@ -61,29 +66,36 @@ object StemGrowth {
         gapPx: Float = RIGHT_GAP_PX,
     ): Float {
         val targetRight = screenWidth - gapPx
-        var lo = minOf(startY, endY)
-        var hi = maxOf(startY, endY)
-        var best = (lo + hi) / 2f
-        var bestErr = Float.MAX_VALUE
-        repeat(60) {
-            val mid = (lo + hi) / 2f
-            val circle = circle3(startX, startY, targetRight, mid, endX, endY)
-            if (circle == null) {
-                // 三点共线：缩小搜索到 mid 下方
-                hi = mid
-                return@repeat
+        val lo = minOf(startY, endY)
+        val hi = maxOf(startY, endY)
+        val fallback = (lo + hi) / 2f
+
+        val dx1 = targetRight - startX
+        val dx2 = targetRight - endX
+        if (dx1 <= 0f || dx2 <= 0f) return fallback
+
+        val k = dx2 / dx1
+        // 整理 (targetRight^2 - x2^2 - (y2 - cy)^2) = k * (targetRight^2 - x1^2 - (y1 - cy)^2)
+        // 即 (k - 1)*cy^2 + 2*(y2 - k*y1)*cy + (targetRight^2 - x2^2 - y2^2 - k*(targetRight^2 - x1^2 - y1^2)) = 0
+        val a = k - 1f
+        val b = 2f * (endY - k * startY)
+        val c1 = targetRight * targetRight - startX * startX - startY * startY
+        val c2 = targetRight * targetRight - endX * endX - endY * endY
+        val c = c2 - k * c1
+
+        val roots = if (kotlin.math.abs(a) < 1e-6f) {
+            if (kotlin.math.abs(b) < 1e-6f) emptyList() else listOf(-c / b)
+        } else {
+            val disc = b * b - 4f * a * c
+            if (disc < 0f) emptyList()
+            else {
+                val s = sqrt(disc)
+                listOf((-b - s) / (2f * a), (-b + s) / (2f * a))
             }
-            val (cx, _, r) = circle
-            val rightPoint = cx + r
-            val err = rightPoint - targetRight
-            if (kotlin.math.abs(err) < bestErr) {
-                bestErr = kotlin.math.abs(err)
-                best = mid
-            }
-            // rightPoint 偏右 -> err>0 -> 需要 rightY 更靠近起终点连线中部
-            if (err > 0f) hi = mid else lo = mid
         }
-        return best
+        return roots.firstOrNull { it in lo..hi }
+            ?: roots.minByOrNull { kotlin.math.abs(it - fallback) }
+            ?: fallback
     }
 
     /**
@@ -228,4 +240,37 @@ object StemGrowth {
         if (p <= fruitProgress) return 0f
         return ((p - fruitProgress) / FRUIT_GROW_SPAN).coerceIn(0f, 1f)
     }
+
+    // ---------- 果实绑定的用户信息文字 ----------
+
+    /**
+     * 每颗果实对应的用户信息字段（按果实从上到下）。
+     *
+     * 维护者口径「果实出现，对应条目出现在果实左侧」——文字与果实绑定，
+     * 不独立计时：果实长到哪，它绑定的那条信息就在其左侧显现。
+     *
+     * 草图里是 4 行：姓名 / 班级 / 学号 / 专业，与 4 颗果实一一对应。
+     */
+    val FRUIT_FIELDS: List<FruitField> = listOf(
+        FruitField.NAME,
+        FruitField.CLASS_NAME,
+        FruitField.STUDENT_NO,
+        FruitField.MAJOR,
+    )
+
+    /** 果实绑定的字段种类。 */
+    enum class FruitField {
+        NAME, CLASS_NAME, STUDENT_NO, MAJOR,
+    }
+
+    /**
+     * 字段在画像快照里的内容。空值回落为「—」，避免文字空缺。
+     */
+    fun valueOf(field: FruitField, profile: com.nongyu.appplus.profile.model.ProfileSnapshot?): String =
+        when (field) {
+            FruitField.NAME -> profile?.name
+            FruitField.CLASS_NAME -> profile?.className
+            FruitField.STUDENT_NO -> profile?.studentNo
+            FruitField.MAJOR -> profile?.major
+        }?.takeIf { it.isNotBlank() } ?: "—"
 }
