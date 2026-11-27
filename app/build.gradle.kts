@@ -109,8 +109,6 @@ dependencies {
     // 见 docs/specs/网络层.md §10.4；会拖 tink-android:1.8.0。
     // DataStore：令牌密文的落盘层（票 #43/#44 后续；EncryptedSharedPreferences 已弃用）
     implementation(libs.androidx.datastore.preferences)
-    // 真实头像（票 #120）：Coil 显式复用 OkHttpFactory 产出的 client，不自建。
-    implementation(libs.coil.compose)
 
     testImplementation(libs.junit)
     // MockWebServer：假服务端，纯 JVM 可跑（不编译 Android 运行时）。

@@ -33,11 +33,6 @@ coroutines = "1.9.0"
 # 注意：它会拖 tink-android:1.8.0。
 datastore = "1.1.7"
 
-# Coil 图片加载（票 #120）：真实头像。锁定 2.7.0（该版本最后发布 2024-07，
-# 与 Compose BOM 2025.12.00 / Kotlin 2.3.0 实测兼容）；OkHttp 集成在 coil 核心 artifact 内，
-# 通过 ImageLoader.Builder.okHttpClient() 显式复用本仓客户端工厂，不自建 client。
-coil = "2.7.0"
-
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -67,9 +62,6 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 # 最小会话存储（Keystore + AES）。引入已由维护者拍板，见 docs/specs/网络层.md §10.4
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
-
-# 真实头像（票 #120）：coil-compose 传递依赖 coil 核心（含 OkHttp 集成）。
-coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 # --- 仅测试 ---
 # testImplementation 不进 runtime classpath，R8 看不到它，不会污染 release

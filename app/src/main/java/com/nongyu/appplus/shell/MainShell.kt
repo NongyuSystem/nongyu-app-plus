@@ -113,22 +113,6 @@ import com.nongyu.appplus.timetable.ui.LocationEditDialog
 import com.nongyu.appplus.timetable.ui.WeekEditDialog
 import com.nongyu.appplus.timetable.ui.LocationNavDialog
 import com.nongyu.appplus.timetable.ui.TimetableScreen
-import com.nongyu.appplus.profile.ui.ProfileScreen
-import com.nongyu.appplus.profile.ui.ProfileFieldDetailContent
-import com.nongyu.appplus.profile.ui.ProfileEnterFade
-import com.nongyu.appplus.profile.ui.ProfileEnterAnimationOverlay
-import com.nongyu.appplus.profile.ui.rememberProfileEnterProgress
-import com.nongyu.appplus.profile.ui.rememberProfileEnterSkip
-import com.nongyu.appplus.profile.data.DemoProfileHolder
-import com.nongyu.appplus.profile.logic.ProfileFields
-import com.nongyu.appplus.profile.logic.ProfileLogic
-import com.nongyu.appplus.profile.model.ProfileFieldItem
-import com.nongyu.appplus.profile.model.ProfileSnapshot
-import com.nongyu.appplus.net.NetHolder
-import com.nongyu.appplus.login.session.LoginSessionHolder
-import com.nongyu.appplus.login.model.VerificationResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * 主框架与导航壳。
@@ -158,48 +142,6 @@ fun MainShell() {
     // 详见 docs/specs/界面层.md §8.5 状态与副作用 / 为何课程详情状态必须提升到 Shell
     var detailCourse by remember { mutableStateOf<CourseEntry?>(null) }
 
-    // 票 #113：画像字段详情卡复用 BarMode.Detail 形态。两者互斥：打开画像字段
-    // 详情时必先关课程详情，反之亦然——不新增底栏形态枚举值（见 ADR-0015）。
-    var profileDetailField by remember { mutableStateOf<ProfileFieldItem?>(null) }
-
-    // 画像缓存快照：本地优先，只读 ProfileStore；页面自身不发 /me 请求（ADR-0011）。
-    var profileSnapshot by remember { mutableStateOf<ProfileSnapshot?>(null) }
-    val profileStore = remember { NetHolder.profileStore(context.applicationContext) }
-    // 票 #114：末端刷新果实的加载反馈。刷新经唯一 /me 出口拉取后重读缓存。
-    var profileRefreshing by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        val cached = withContext(Dispatchers.IO) { profileStore.read() }
-        profileSnapshot = cached
-    }
-    fun refreshProfile() {
-        if (profileRefreshing) return
-        profileRefreshing = true
-        coroutineScope.launch {
-            try {
-                // 票 #114 / US14「点击刷新果实更新画像数据」：经**唯一的 /me 出口**
-                // （NongyuGateWay.me()，成功时顺手落盘画像）拉取最新数据，再重读缓存，
-                // 让画像卡真正更新。页面自身不新建 /me 调用点、不自行解析响应 ——
-                // 「唯一的 /me 出口 / 页面不发自己的 /me 请求」的架构约束不变。
-                // 刷新是用户显式主动触发，与启动校验的「本地优先、零等待首帧」不冲突。
-                val outcome = withContext(Dispatchers.IO) { NetHolder.api(context.applicationContext).me() }
-                val refreshed = withContext(Dispatchers.IO) { profileStore.read() }
-                profileSnapshot = refreshed
-                when (outcome) {
-                    is com.nongyu.appplus.net.core.ApiCall.Outcome.Success ->
-                        showTextToast(context, "画像已刷新")
-                    else -> showTextToast(context, "画像已更新本地缓存，暂未连上服务器")
-                }
-            } catch (t: RuntimeException) {
-                showTextToast(context, "刷新失败，请重试")
-            } finally {
-                profileRefreshing = false
-            }
-        }
-    }
-    // 直接读 State.value（不 remember），会话失效切登录中心时页面能立刻重组。
-    val hasCredential = LoginSessionHolder.state.value.destination ==
-        com.nongyu.appplus.login.model.LoginDestination.MAIN
-
     // 详情卡形态（简介 / 详情），拖横杠在两者间吸附。每次打开卡片回到简介态。
     var detailStage by remember { mutableStateOf(DetailStage.Brief) }
     // 拖拽中的实时高度偏移（dp，正值=往上拉高）。松手后清零，由动画接管。
@@ -220,16 +162,9 @@ fun MainShell() {
         }
     }
 
-    /**
-     * 统一的退出：先收拢高度，动画走完再切内容。点空白、拖到底、返回都走它。
-     *
-     * 票 #113：画像字段详情卡复用本形态，不新增枚举值。这里用两个可空状态表达
-     * 「详情卡里展示的是课程还是画像字段」——两者互斥，打开一个必先关另一个。
-     */
+    /** 统一的退出：先收拢高度，动画走完再切内容。点空白、拖到底、返回都走它。 */
     fun collapseDetail() {
-        if ((detailCourse != null || profileDetailField != null) && !isCollapsing) {
-            isCollapsing = true
-        }
+        if (detailCourse != null && !isCollapsing) isCollapsing = true
     }
 
     // 点空白格添加的日程（#18 第 6 项）：状态放 Shell，TimetableScreen 只负责渲染。
@@ -406,19 +341,6 @@ fun MainShell() {
     // 更新课表：进行中标记（防连点）+ 重载触发键（成功后让课表页重读缓存）
     var updatingTimetable by remember { mutableStateOf(false) }
     var timetableReloadKey by remember { mutableIntStateOf(0) }
-    // ---- 票 #115：个人主页开页生长动画 ----
-    // 进度用一个 Animatable 在组合生命周期内只推一次；切走再回来不重播。
-    val enterProgress = rememberProfileEnterProgress()
-    val enterSkip = rememberProfileEnterSkip()
-    var orbCenterPx by remember { mutableStateOf<Offset?>(null) }
-    LaunchedEffect(selectedTab) {
-        if (selectedTab == 3) {
-            // 在 Shell 生命周期的 scope 里播放：动画中途切走 Tab 不会被 LaunchedEffect
-            // 取消而卡在半途；playOnce 内部的 started 闸门保证整个生命周期只播一次。
-            coroutineScope.launch { enterProgress.playOnce(skip = enterSkip) }
-        }
-    }
-
     // ---- 设置面板（全局设置包，当前只有「课程表」分区）----
     var settingsOpen by remember { mutableStateOf(false) }
     var gearCenterPx by remember { mutableStateOf<Offset?>(null) }
@@ -639,12 +561,10 @@ fun MainShell() {
         // 三形态判定提前到这里：内容区的「空白点击」分层需要它。
         // （原先定义在底栏段落里，那里太晚，内容区拿不到。）
         // 优先级规则住在 shell/ShellState.kt（deriveBarMode），那里有单测钉顺序。
-        // 票 #113：画像字段详情与课程详情共用 BarMode.Detail，
-        // 由 profileDetailField 是否为 null 决定分支内容，不新增枚举值。
         val barMode = deriveBarMode(
             addingSchedule = addingSchedule,
             scheduleDetailId = scheduleDetailId,
-            hasDetailCourse = detailCourse != null || profileDetailField != null,
+            hasDetailCourse = detailCourse != null,
             orbMode = mode,
         )
 
@@ -745,40 +665,6 @@ fun MainShell() {
                 )
             }
 
-            // 票 #113：「个人」Tab 的静态画像卡。本地优先读画像缓存，
-            // 页面自身不发 /me 请求；字段点击交给本 Shell 复用 BarMode.Detail 展示详情。
-            // 票 #115：外层套开页淡入（graphicsLayer alpha，不重组子树，降级时恒 1f）。
-            if (selectedTab == 3) {
-                ProfileEnterFade(progress = enterProgress, skip = enterSkip) {
-                    ProfileScreen(
-                        navOccupiedPx = navOccupiedHeight,
-                        hasCredential = hasCredential,
-                        profile = profileSnapshot,
-                        isRefreshing = profileRefreshing,
-                        onRefresh = { refreshProfile() },
-                        onFieldClick = { field ->
-                            // 两个详情内容互斥：打开画像字段前先清课程详情。
-                            detailCourse = null
-                            isCollapsing = false
-                            detailStage = DetailStage.Brief
-                            detailDragDp = 0f
-                            profileDetailField = field
-                        },
-                        onLoginClick = {
-                            // 会话过期 / 未登录：复用与启动校验同一条失效分流回登录中心
-                            // （清凭证 + UI 切换由 DefaultSessionInvalidListener 统一驱动），
-                            // 不新建第二套凭证真源，也不改登录链路判定（票 #113 / 规格 US10-US11）。
-                            try {
-                                NetHolder.sessionInvalidListener(context).onSessionInvalid()
-                            } catch (t: RuntimeException) {
-                                // 清理失败也要能切回登录中心（与 SessionStartupVerifier 同口径）。
-                            }
-                            LoginSessionHolder.onVerified(VerificationResult.SESSION_ENDED)
-                        },
-                    )
-                }
-            }
-
             // 【输入态】维护者定义「除输入框外所有区域都是空白」。
             // 所以这层必须盖在课表**之上**，连课程盒子一起覆盖 —— 点哪都退出。
             // 输入框在底栏里、声明更靠后，它自己的 BasicTextField 会消费点击，不受影响。
@@ -857,10 +743,8 @@ fun MainShell() {
                     ),
                 )
                 if (isCollapsing) {
-                    // 收拢动画走完才真正切回常态内容。
-                    // 票 #113：画像字段详情复用本形态，两个内容状态都要清。
+                    // 收拢动画走完才真正切回常态内容
                     detailCourse = null
-                    profileDetailField = null
                     isCollapsing = false
                 }
             }
@@ -980,33 +864,8 @@ fun MainShell() {
                     }
                 }
                 BarMode.Detail -> {
-                    // 用局部 val 承接可变状态，分支内才能对 course 做智能转换（lambda 里也要用）。
                     val course = detailCourse
-                    val profileField = profileDetailField
-                    if (profileField != null && course == null) {
-                        // 票 #113：画像字段详情复用既有 Detail 形态的高度与
-                        // 退出语义，不新增底栏形态枚举值（见 ADR-0015）。
-                        ProfileFieldDetailContent(
-                            field = profileField,
-                            uiScale = uiScale,
-                            onDragDelta = { deltaDp ->
-                                isDragging = true
-                                detailDragDp += deltaDp
-                            },
-                            onDragEnd = {
-                                // 纯函数判定阈值：越过即按既有收拢动画退回画像卡。
-                                if (ProfileFields.dismissByDrag(
-                                        dragDp = detailDragDp,
-                                        thresholdDp = 36f * uiScale,
-                                    )
-                                ) {
-                                    collapseDetail()
-                                }
-                                detailDragDp = 0f
-                                isDragging = false
-                            },
-                        )
-                    } else if (course != null) {
+                    if (course != null) {
                         // 详情卡的参数布线已搬到 shell/bar/DetailCardContent.kt（行为未改）。
                         // 规则（删除落盘 / 考勤翻转 / 三档吸附）仍留在本函数里。
                         DetailCardContent(
@@ -1145,27 +1004,7 @@ fun MainShell() {
                 pulseKey++
             },
             enabled = barMode == BarMode.Normal,
-            onOrbCenterChange = { center -> orbCenterPx = center },
         )
-
-        // ---- 票 #115：个人主页开页生长动画浮层 ----
-        // 声明在 OrbHost 之后（同层后声明者在上），枝条才能画在球之上、像从球里长出。
-        // 浮层透明且不消费触摸，球的 enabled 判定与页面手势完全不受影响。
-        if (selectedTab == 3) {
-            val demo = DemoProfileHolder.demo
-            val demoActive = demo != null && DemoProfileHolder.enabled &&
-                !ProfileLogic.isCacheNonEmpty(profileSnapshot)
-            val effectiveProfile = if (demoActive) demo else profileSnapshot
-            ProfileEnterAnimationOverlay(
-                progress = enterProgress,
-                orbCenterPx = orbCenterPx,
-                orbSizePx = with(density) { orbSize.toPx() },
-                name = effectiveProfile?.name,
-                avatarUrl = effectiveProfile?.avatarUrl,
-                uiScale = uiScale,
-                skip = enterSkip,
-            )
-        }
 
         // ---- 票 #60：拖时间条时的遮罩 ----
         // 位置必须在**星云球之后**：维护者要求遮板也要遮住星云球。
