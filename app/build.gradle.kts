@@ -18,8 +18,13 @@ android {
         // v45：表头周次两行微调（第一行缩小到 8.5sp、两行间距 3dp）。
         // 底部避让改为让 Shell 直接上报底栏占位高度（不再做坐标换算）。
         // versionCode 必须大于已发布的 46，否则手机无法覆盖安装。
-        versionCode = 70
-        versionName = "0.0.62test"
+        //
+        // v70 → v71：地点导航接入校园矢量地图（MapEditor，无高德 SDK）；
+        // 标注 JSON 收敛为带版本号的 MapDoc 文档；导航窗改上/中/下三段；
+        // 修地图 viewport 用写死屏幕尺寸导致的不居中与拖动跳位；
+        // 修时间尺因全局 systemBars 避让而整体偏下（改用同一坐标系）。
+        versionCode = 71
+        versionName = "0.0.63test"
 
         // 调试期兜底 token（票 #43 Q5=A / 规格 §2.3）。
         // 默认空串：设了才有值，避免把真实 token 写进仓库。
